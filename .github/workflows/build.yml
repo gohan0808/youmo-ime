@@ -69,8 +69,19 @@ jobs:
             .gradle/engine-downloads/onnxruntime-android-*.zip
           key: handwriting-downloads-${{ hashFiles('build-logic/convention/src/main/kotlin/HandwritingDataPlugin.kt', 'lib/handwriting/build.gradle.kts') }}
 
-      - name: Build Release APK and the text pack
-        run: ./gradlew --build-cache :app:assembleRelease :app:packTextPack
+      - name: Setup Pack Signing Key
+        env:
+          KEY_CONTENT: ${{ secrets.YOUMO_PACK_KEY_PEM }}
+        run: |
+          # 将 Secret 中的私钥内容写入运行机的临时文件
+          echo "$KEY_CONTENT" > "$RUNNER_TEMP/my-pack-key.pem"
+          chmod 600 "$RUNNER_TEMP/my-pack-key.pem"
+          # 将文件路径写入 GitHub Actions 环境变量 YOUMO_PACK_KEY
+          echo "YOUMO_PACK_KEY=$RUNNER_TEMP/my-pack-key.pem" >> "$GITHUB_ENV"
+
+      - name: Build Release APK and Signed Text Pack
+        run: |
+          ./gradlew :app:assembleRelease :app:packTextPack -PbuildABI=arm64-v8a
 
       - name: 使用正式证书重新签名并对齐 APK
         env:
