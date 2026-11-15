@@ -69,15 +69,6 @@ jobs:
             .gradle/engine-downloads/onnxruntime-android-*.zip
           key: handwriting-downloads-${{ hashFiles('build-logic/convention/src/main/kotlin/HandwritingDataPlugin.kt', 'lib/handwriting/build.gradle.kts') }}
 
-      # [可选] 如果你在 GitHub Secrets 配置了正式签名密钥，可在此还原 keystore；
-      # 若未配置 Secret，该步骤会自动跳过，继续使用仓库自带的默认测试签名构建。
-      - name: Restore release keystore
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-        if: env.KEYSTORE_BASE64 != ''
-        run: |
-          echo "$KEYSTORE_BASE64" | base64 -d > release.keystore
-
       - name: Build Release APK and the text pack
         run: ./gradlew --build-cache :app:assembleRelease :app:packTextPack
 
@@ -88,43 +79,51 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          # 查找编译生成的 APK
-          APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
-          echo "Found APK: $APK_PATH"
+          set -e
+          mkdir -p release-assets
 
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "检测到签名配置，开始正式签名..."
-            echo "$KEYSTORE_BASE64" | base64 --decode > release.keystore
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::未读取到 KEYSTORE_BASE64！请检查 GitHub Repository Secrets 配置。"
+            exit 1
+          fi
 
-            BUILD_TOOLS_DIR=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -n 1)
-            ALIGNED_APK="${APK_PATH%.apk}-aligned.apk"
-            SIGNED_APK="${APK_PATH%.apk}-signed.apk"
+          echo "检测到签名配置，开始还原证书..."
+          echo "$KEYSTORE_BASE64" | tr -d '\n\r ' | base64 --decode > release.keystore
+          BUILD_TOOLS_DIR=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -n 1)
 
+          for APK_PATH in app/build/outputs/apk/release/*.apk; do
+            [ -e "$APK_PATH" ] || continue
+            FILENAME=$(basename "$APK_PATH")
+            # 去掉文件名中可能自带的 -unsigned 后缀
+            CLEAN_NAME="${FILENAME/-unsigned/}"
+            ALIGNED_APK="aligned-${CLEAN_NAME}"
+            FINAL_APK="release-assets/${CLEAN_NAME}"
+
+            echo "正在对齐并签名: $FILENAME -> $FINAL_APK"
             "$BUILD_TOOLS_DIR/zipalign" -v -p 4 "$APK_PATH" "$ALIGNED_APK"
             "$BUILD_TOOLS_DIR/apksigner" sign \
               --ks release.keystore \
               --ks-pass pass:"$KEYSTORE_PASSWORD" \
               --ks-key-alias "$KEY_ALIAS" \
               --key-pass pass:"$KEY_PASSWORD" \
-              --out "$SIGNED_APK" \
+              --out "$FINAL_APK" \
               "$ALIGNED_APK"
 
-            mv "$SIGNED_APK" "$APK_PATH"
-            rm -f "$ALIGNED_APK" release.keystore
-          else
-            echo "未配置 KEYSTORE_BASE64，保留项目默认的 debug 签名产物。"
-          fi
-          echo "FINAL_APK=$APK_PATH" >> $GITHUB_ENV
+            # 验证签名是否真正成功
+            "$BUILD_TOOLS_DIR/apksigner" verify --verbose "$FINAL_APK"
+            rm -f "$ALIGNED_APK"
+          done
+
+          rm -f release.keystore
 
       - name: Generate SHA-256 checksums
         run: |
-          mkdir -p release-assets
-          find app/build/outputs/apk/release/ -type f -name "*.apk" -exec cp {} release-assets/ \;
           if [ -d "app/build/packs/" ]; then
             find app/build/packs/ -type f -exec cp {} release-assets/ \;
           fi
           cd release-assets
           sha256sum * > SHA256SUMS.txt
+
 
       - name: Publish to GitHub Release
         uses: softprops/action-gh-release@v2
