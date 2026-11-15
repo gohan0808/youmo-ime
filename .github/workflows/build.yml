@@ -79,13 +79,42 @@ jobs:
           echo "$KEYSTORE_BASE64" | base64 -d > release.keystore
 
       - name: Build Release APK and the text pack
+        run: ./gradlew --build-cache :app:assembleRelease :app:packTextPack
+
+      - name: 使用正式证书重新签名并对齐 APK
         env:
-          # 如果构建脚本支持通过环境变量读取正式签名，可传入以下 Secrets
-          KEYSTORE_FILE: ${{ secrets.KEYSTORE_BASE64 != '' && format('{0}/release.keystore', github.workspace) || '' }}
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: ./gradlew --build-cache :app:assembleRelease :app:packTextPack
+        run: |
+          # 查找编译生成的 APK
+          APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          echo "Found APK: $APK_PATH"
+
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "检测到签名配置，开始正式签名..."
+            echo "$KEYSTORE_BASE64" | base64 --decode > release.keystore
+
+            BUILD_TOOLS_DIR=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -n 1)
+            ALIGNED_APK="${APK_PATH%.apk}-aligned.apk"
+            SIGNED_APK="${APK_PATH%.apk}-signed.apk"
+
+            "$BUILD_TOOLS_DIR/zipalign" -v -p 4 "$APK_PATH" "$ALIGNED_APK"
+            "$BUILD_TOOLS_DIR/apksigner" sign \
+              --ks release.keystore \
+              --ks-pass pass:"$KEYSTORE_PASSWORD" \
+              --ks-key-alias "$KEY_ALIAS" \
+              --key-pass pass:"$KEY_PASSWORD" \
+              --out "$SIGNED_APK" \
+              "$ALIGNED_APK"
+
+            mv "$SIGNED_APK" "$APK_PATH"
+            rm -f "$ALIGNED_APK" release.keystore
+          else
+            echo "未配置 KEYSTORE_BASE64，保留项目默认的 debug 签名产物。"
+          fi
+          echo "FINAL_APK=$APK_PATH" >> $GITHUB_ENV
 
       - name: Generate SHA-256 checksums
         run: |
