@@ -115,15 +115,15 @@ the panel again through `updatePanel`.
   the host activates an input method it calls `setInputMethodActions(ic, …)`: `chttrans, punctuation,
   fullwidth` for a Chinese one, none otherwise (`instance.cpp:2491` clears, `androidengine.cpp:500-509`
   adds). A module acts on a context only while its action is in that list. `entries(ic)` is what the
-  panel shows (`StatusEntry`: id, name, icon, shortText; the app labels the three by `name`), `activate(ic, id)` a tap.
+  panel shows (`StatusEntry`: id, name, icon, shortText, active (each `StatusAction.active`, whether the toggle is on); the app labels the three by `name`), `activate(ic, id)` a tap.
 - **Tips** (`Tip`): Ctrl+. gives `PunctuationEnabled/Disabled` ("标点: 已启用全角标点。" / "标点: 全角标点已禁用。"),
   Ctrl+Shift+F `TraditionalEnabled` / `SimplifiedEnabled` ("切换到繁体中文: 已启用繁体中文。" / "切换到简体中文: 已启用简体中文。"):
   the app makes the text, "summary: body" as `androidnotification.cpp:84`. A tap in the status area tips nothing.
 - **`Punctuation`**: `PunctuationProfile.load(system, user)`: a user file replaces the built-in table
   wholesale; `parse` keeps fcitx's line rules, `fromEntries` the edit page's, `format` its save format.
-  Per-context state (`lastIsEngOrDigit`, `notConverted`, the pair stack) clears on reset; the key router
-  calls `pushPunctuationV2`, `cancelLast`, `getPunctuation(Candidates)` as `androidengine` calls
-  `IPunctuation`. `PunctuationConfig` is `punctuation.conf`; `save` is told of every change.
+  Per-context state (`lastIsEngOrDigit`, the pair stack) clears on reset; the key router
+  calls `pushPunctuationV2`, `getPunctuation`, `getPunctuationCandidates` as `androidengine` calls
+  `IPunctuation` (fcitx's V1 `pushPunctuation` and `cancelLast` have no caller here and are not ported). `PunctuationConfig` is `punctuation.conf`; `save` is told of every change.
   Rebuilding the state from surrounding text is not ported (unreachable today).
 - **`FullWidth`**: off at start, not saved, no hotkey; a press with no modifier of U+0020–U+007E commits
   its full-width form and is accepted, not filtered; the commit filter converts above space only.
@@ -162,8 +162,8 @@ the candidates once at the end of the event, for the active context only.
 |---|---|---|
 | `KeyRouter` | `androidengine.cpp` `keyEvent`/`send`/`show`/`activate`/`deactivate`/`reset`/`invokeActionImpl` | the pipeline's `KeyEngine`; a session that throws: panel cleared, session reset unless it never answered, one whose reset fails not reset again (`native-lib.cpp:722-745`) |
 | `KeyRouter.EngineCandidateList` | `EngineCandidateList` (`:75-239`) | page from the snapshot, the rest a chunk of 32 at a time, those before the page once; long press asked, then checked again on the same candidate |
-| `CommonCandidateList` | fcitx's | punctuation's marks; temp modes may use it |
-| `Panel` | `InputPanel` | per context (`InputContext.panel`); `reset` clears the overlay too; `empty` ignores it |
+| `TempCandidateList` (`TempModeCandidates` on the panel) | fcitx's `CommonCandidateList` | the temp modes' lists and punctuation's marks |
+| `Panel` | `InputPanel` | per context (`InputContext.panel`); `reset` clears the overlay too; `empty` ignores it; `code`: the preedit shown is the session's code (`KeyRouter.show`), not a temp mode's nor punctuation's marks, sent as `InputPanel.code` (what 编码行 输入框里 may write into the field) |
 | `Refiner` | `refine_` (`:26-28,706-721`) | 30 ms after a key, a slice at once after a slice; any event cancels it, a long-press menu holds it |
 | `Profile` | `InputMethodManager` load/save | fcitx's INI rules, through `IniFile`; defaults written as `# Key=`; other groups kept |
 | `HostClock` | the event loop's timers | `VirtualHostClock` (testFixtures) is also the `LearnClock`, so a replay learns the same |
@@ -189,12 +189,12 @@ in a table) are filled in at `learnClock.calendar()`, so nothing in a replay rea
 
 ## Temp modes: quick input and Unicode
 
-Both are `PanelTempMode`s registered in this order in `TempModeManager` (fcitx loads quickphrase
+Both are `TempMode`s registered in this order in `TempModeManager` (fcitx loads quickphrase
 before unicode). They talk to the host through `TempModeHost`: `commit` goes through the pipeline's
 commit filters, `showPanel(ic, TempPanel)` hands over the mode's whole panel (preedit or client
 preedit, aux, `TempCandidateList`), `TempPanel.EMPTY` when the mode leaves — fcitx resets the input
 panel then, and the engine's panel only comes back with the engine's next event. A tapped candidate
-is `selectCandidate(ic, globalIndex)`. Paging constants (5 a page, Up/Down, Tab/Shift+Tab) are
+goes through the host's panel list (`HostCore`'s `TempModeCandidates`), which runs the candidate's `select`. Paging constants (5 a page, Up/Down, Tab/Shift+Tab) are
 `TempKeys`' (design §1.4); the lists' labels are fcitx's `keyToLabel` ("1. ", "A-1. ").
 
 - `QuickPhrase` (`modules/quickphrase/quickphrasetempmode.cpp`): Super+grave / Super+semicolon or
@@ -208,7 +208,7 @@ is `selectCandidate(ic, globalIndex)`. Paging constants (5 a page, Up/Down, Tab/
   with a space and digits are typed; the user's entries commit through `commitAsIs` (no chttrans or
   full width) and their use goes to `QuickPhraseHooks.used` except in a `PASSWORD_OR_SENSITIVE`
   field; `withMine` false (借手机) hides them. `Panel.quickPhrase` tells the app the panel is quick
-  input's (the handwriting pad swaps for the full keyboard); `HostCore.quickPhraseAt` gives the
+  input's (the letters typed then, not written on: `HandwritingMode.writes`); `HostCore.quickPhraseAt` gives the
   entry under a long press.
 - `QuickPhraseBook`: the user's entries (`data/quickphrase.d/mine.mb`) in order of use (`mine.used`), then the built-in
   `QuickPhraseTable`; the user's match by key prefix case aside, the built-in ones case kept. An entry
@@ -340,9 +340,11 @@ backup read as they are, and v0.3.x reads what the host writes.
   failed `mkdirs`) is told as `config_not_settled`; data not settled, a punctuation table, the custom
   phrases, the quick phrases or a theme that does not read, as `user_data_unreadable`
   (`EngineNotices.failedOnce`: once a process). An unreadable punctuation table gives the built-in one
-  and is never saved over (`PunctuationMaps.save` throws); unreadable custom phrases are not saved.
+  and is never saved over (since 0.6.1 the app has no write path for punctuation tables at all); unreadable custom
+  phrases are not saved.
 - `PunctuationTable` / app `PunctuationMaps`: `punc.mb.<lang>` as `ca/punctuation/punctuation.cpp:75-173`
-  reads and writes it; the user's file replaces the built-in table whole.
+  reads and writes it; the user's file replaces the built-in table whole. Since 0.6.1 no page writes one
+  and an edited one is deleted at the upgrade and after a restore (architecture.md, fcitx data).
 
 The golden files under `lib/ime-core/src/test/resources/host/ini` come from fcitx's own config code built
 on the host from upstream fcitx5 at 442edbc9 (`tools/upstream.sh`) with the former native engine's option
@@ -375,8 +377,8 @@ the gettext translations are gone, the host's own texts are app resources (`AppH
 - **Settings pages.** `imOptions(im)` is the page's options by path (`Fuzzy/L_N`) to value, the
   leaves of `EngineOptions.page`, null for an input method with no page. `setImOptions` takes those
   a page shows (`InputMethodSettings.only`) into `EngineOptions.setPage`, a partial load that keeps
-  the rest. `punctuationMap(lang)`/`setPunctuationMap` are zh_CN's map as entries, another
-  language's empty.
+  the rest. `punctuationMap(lang)` is zh_CN's map as entries, another language's empty; the map is
+  read-only (0.6.1 dropped the punctuation page, and with it `setPunctuationMap`).
 - **Reloading config.** `reloadConfig` reads the module files again. It calls
   `Chttrans.reload(enabled)` (chttrans.cpp:218), then sends the status area out again.
 - **Focus out.** Pinyin's typing is dropped when the field loses focus, as on the native host:

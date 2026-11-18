@@ -31,6 +31,7 @@
   <button id="dark" aria-pressed="false">浅色</button>
   <button id="env">环境</button>
   <button id="help-button">帮助</button>
+  <a class="link" href="layout/">键盘布局</a>
   <a class="link" href="classic/">旧版</a>
 </header>
 <main id="main" inert>
@@ -64,7 +65,7 @@
     <label>形态 <select id="env-form-kind"></select></label>
     <label>Shift <select id="env-shift"><option value="none">关</option><option value="once">一次</option><option value="lock">锁定</option></select></label>
     <label>输入框 <select id="env-field"><option value="text">文本</option><option value="password">密码</option><option value="url">网址</option><option value="number">数字</option><option value="email">邮箱</option></select></label>
-    <label>输入法 <select id="env-ime"><option value="pinyin">拼音</option><option value="shuangpin">双拼</option><option value="english">英文</option><option value="wubi">五笔</option><option value="cangjie">仓颉</option><option value="handwriting">手写</option></select></label>
+    <label>输入法 <select id="env-ime"><option value="pinyin">拼音</option><option value="shuangpin">双拼</option><option value="english">英文</option><option value="wubi">五笔</option><option value="cangjie">仓颉</option></select></label>
     <label>显示 <select id="env-show"><option value="">只有键盘</option><option value="preview">按键气泡</option><option value="keys">长按弹出</option><option value="menu">菜单</option></select></label>
     <label>候选栏样例 <select id="env-bar"><option value="">不显示</option><option value="idle">空闲（工具栏）</option><option value="typing">输入中（候选词）</option></select></label>
     <label>面板样例 <select id="env-sheet"><option value="">不显示</option><option value="clipboard">剪贴板</option><option value="picker">符号、表情</option><option value="editing">编辑</option><option value="voice">语音</option></select></label>
@@ -99,7 +100,7 @@
     <h2>怎么做一个主题</h2>
     <ol>
       <li>「文件 › 新建」：从示例、内置主题或一张图片开始，或者打开一个 .theme 文件（4.0、3.0、2.1 都行）。</li>
-      <li>上面是预览，点一个键就选中它；「环境」换设备、横竖屏、键盘、深浅色。</li>
+      <li>上面是预览，点一个键就选中它；「环境」换设备、横竖屏、键盘、深浅色；「键盘」里还能打开一个 .layout 布局文件，看主题画在它上面的样子。</li>
       <li>下面的标签页逐项改：配色、背景、按键、字和图标、栏、弹出、面板和窗口、尺寸、动效、信息；「源码」是 theme.xml 全文。</li>
       <li>「问题」里有错误时不能保存（App 会拒收），警告可以不管。点一条跳到那一行。</li>
       <li>「文件 › 保存 .theme」，再在手机上：幽默输入法 → 主题 → 新增主题 → 导入主题文件。</li>
@@ -117,6 +118,7 @@
   </form>
 </dialog>
 <input id="open-input" type="file" accept=".theme,.zip,.xml,application/zip" hidden>
+<input id="layout-input" type="file" accept=".layout,.xml,application/xml,text/xml" hidden>
 <input id="any-input" type="file" hidden>
 <input id="image-input" type="file" accept="image/png,image/jpeg,image/webp" hidden>
 <div id="toast" role="status" aria-live="polite"></div>
@@ -126,6 +128,9 @@
 </script>
 <script type="application/json" id="youmo-engine-icons">
 {{youmo-engine-icons}}
+</script>
+<script type="application/json" id="youmo-bar-icons">
+{{youmo-bar-icons}}
 </script>
 <!-- the examples (060-render-p3 M4): web/theme-maker/examples/, put in by tools/assemble.mjs -->
 <script type="application/json" id="youmo-examples">
@@ -138,11 +143,11 @@
 <script id="youmo-lib">
 {{lib}}
 </script>
-<script id="youmo-maker">
-{{maker}}
-</script>
 <script id="youmo-form">
 {{form}}
+</script>
+<script id="youmo-maker">
+{{maker}}
 </script>
 <script id="youmo-panels">
 {{panels}}

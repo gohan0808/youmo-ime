@@ -1,10 +1,20 @@
 #!/usr/bin/env bash
 # Runs an evaluation set through the engine the debug APK ships (the own engine, since libime
-# left the app) on a connected device or emulator, via EngineEvalRunner, and pulls the result, ready for
+# left the app) on a connected emulator, via EngineEvalRunner, and pulls the result, ready for
 #   ./gradlew :lib:ime-eval:run --args="score data/<set>.tsv <result.tsv> [baseline/<...>.tsv]"
-# Needs an APK build with the NDK (it installs the debug APK); INSTALL=0 runs on the APKs installed by a
-# run before, for several sets in a row.
+# Needs an emulator (uat.py up; uat.py packs installs the debug APK and imports the text pack); INSTALL=0 runs
+# on the APKs installed by a run before, for several sets in a row.
 #   lib/ime-eval/run-on-device.sh [set=pinyin] [ime=engine-pinyin] [out-dir=build/eval]
+# A set tapped with a place (ime-eval's pinyin --touch … --touched lib/ime-eval/data/<name>.tsv, not committed) types
+# each key with its touch, as a finger's tap carries it (061-neighbour-correction), and with GROUPED=14 or 18 each key's
+# place across it where the set has one (a sixth column), as those keys send it (061-neighbour-18key). NINE=1 types a set of digits (ime-eval's
+# nine-key sets) as pinyin's nine keys send them, codes of their own, with ime=engine-pinyin (with ime=keyboard-us, as
+# English's nine keys send them); GROUPED=14 or 18 a set of
+# pinyin's 14 or 18 keys' codes (--scheme g14/g18) as those keys send them; sp18, sp14 or sp9 双拼's 18, 14 or nine
+# keys' (shuangpin --keys 18|14|nine, ime=engine-shuangpin), zy9 or zy 注音九键's or 大千's (zhuyin --keys nine|full,
+# ime=engine-pinyin, which hands them on), each as its keyboard sends them. HISTORY=<words.txt> types on that history,
+# words typed before the run as ime-eval's --history reads them (`ime-eval history <pinyin.data> <n> <words.txt>` makes
+# one of the dictionary's likeliest n): pushed to the app's eval dir, it replaces the app's learning record (EngineEvalRunner).
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
@@ -13,43 +23,39 @@ IME=${2:-engine-pinyin}
 PKG=${FCITX_PKG:-io.github.sraw.youmo.debug}
 OUT=${3:-$HERE/build/eval}
 
-cd "$REPO"
-if [ "${INSTALL:-1}" != 0 ]; then
-    ./gradlew :app:installDebug :app:installDebugAndroidTest :app:packTextPack --offline -q
-    # the engine's data is the text pack's, imported as uat.py's `packs` does (debug builds trust its test key)
-    uri=content://$PKG.uat.packs
-    state=$(adb shell content call --uri "$uri" --method state | tr -d '\r')
-    for f in "$REPO"/app/build/packs/youmo-text-v*.youmopack; do
-        n=$(basename "$f")
-        v=${n#youmo-text-v}; v=${v%.youmopack}
-        # the same pack already there: not written again (hundreds of MB). The same version is not enough:
-        # a rebuild keeps text.version, so the file's SHA-256 last pushed to this device is kept on the host.
-        # It assumes this script is the device's only importer: a serial used again by another AVD, or a pack
-        # of the same version imported otherwise (uat.py packs from another worktree), wants the mark deleted
-        sha=$(shasum -a 256 "$f" | cut -d' ' -f1)
-        mark="$HERE/build/eval/pushed-$(adb get-serialno | tr -d '\r')-$n.sha256"
-        case "$state" in
-            *"text=v$v"[!0-9]*|*"text=v$v") [ "$(cat "$mark" 2>/dev/null)" != "$sha" ] || continue ;;
-        esac
-        adb shell content write --uri "$uri/$n" < "$f"
-        adb shell content call --uri "$uri" --method import --arg "$n" | grep -Eq 'result=(imported|already)' || { echo "the text pack was not imported: $n" >&2; exit 1; }
-        mkdir -p "$(dirname "$mark")" && echo "$sha" > "$mark"
-    done
+# a history named from where the script was called, before it moves to the repo
+if [ -n "${HISTORY:-}" ]; then
+    [ -f "$HISTORY" ] || { echo "HISTORY=$HISTORY: no such file" >&2; exit 1; }
+    HISTORY="$(cd "$(dirname "$HISTORY")" && pwd)/$(basename "$HISTORY")"
 fi
+cd "$REPO"
 # the runner starts its own engine in the app's process; if fcitx were the active keyboard, its
 # service would hold a second engine there, on the same data files. So another enabled keyboard
-# takes over for the run, and the user's is put back after it
+# takes over for the run, and the user's is put back after it: the one before the install, which
+# makes this one the keyboard (uat.py packs: ime set)
 keyboard() { adb shell settings get secure default_input_method | tr -d '\r'; }
 KEYBOARD=$(keyboard)
-if [[ $KEYBOARD == "$PKG/"* ]]; then
-    restore() {
-        local status=$?
+restore() {
+    local status=$?
+    # none chosen before (a new emulator answers "null"): nothing to put back. Else set before the install,
+    # which makes this one the keyboard first: an install or an import that fails after it put back too
+    if [[ -n $KEYBOARD && $KEYBOARD != null && $(keyboard) != "$KEYBOARD" ]]; then
         adb shell ime set "$KEYBOARD" >/dev/null 2>&1 || true
         # by what is set, not by adb's status: adb shell passes on no exit status before Android 7.0
         [[ $(keyboard) == "$KEYBOARD" ]] || echo "the keyboard was not put back: adb shell ime set $KEYBOARD" >&2
-        exit "$status"
-    }
-    trap restore EXIT
+    fi
+    exit "$status"
+}
+trap restore EXIT
+if [ "${INSTALL:-1}" != 0 ]; then
+    ./gradlew :app:assembleDebug :app:installDebugAndroidTest :app:packTextPack --offline -q
+    # the APK and the text pack as a UAT run has them: uat.py installs the debug APK and imports the pack,
+    # skipping one already there (the same version and the same file); one importer, one rule for "there"
+    serial=$(adb get-serialno | tr -d '\r')
+    [[ $serial == emulator-* ]] || { echo "$serial: uat.py packs takes an emulator; on a phone import the text pack in Settings" >&2; exit 1; }
+    python3 "$REPO/uat/tools/uat.py" packs --port "${serial#emulator-}" --no-voice
+fi
+if [[ $(keyboard) == "$PKG/"* ]]; then
     OTHER=$(adb shell ime list -s | tr -d '\r' | grep -v -m 1 "^$PKG/" || true)
     [ -z "$OTHER" ] || adb shell ime set "$OTHER" >/dev/null 2>&1 || true
     if [[ $(keyboard) == "$PKG/"* ]]; then
@@ -57,12 +63,25 @@ if [[ $KEYBOARD == "$PKG/"* ]]; then
         exit 1
     fi
 fi
-REMOTE="/sdcard/Android/data/$PKG/files/eval/$SET-$IME.tsv"
+EVAL_DIR="/sdcard/Android/data/$PKG/files/eval"
+REMOTE="$EVAL_DIR/$SET-$IME.tsv"
 # a failed run must not leave the previous result behind to be pulled as this one
 adb shell rm -f "$REMOTE"
+HISTORY_NAME=
+if [ -n "${HISTORY:-}" ]; then
+    # the runner reads <name>.txt from its eval dir before its test assets (R27 F8530)
+    HISTORY_NAME=$(basename "$HISTORY" .txt)
+    adb shell mkdir -p "$EVAL_DIR"
+    adb push "$HISTORY" "$EVAL_DIR/$HISTORY_NAME.txt" >/dev/null
+fi
+# NINE=1 alone types the nine keys: NINE=0 is off, as INSTALL=0 is (review F8208)
+[ "${NINE:-0}" = 1 ] || NINE=
 # am instrument exits 0 even when the run fails; its report is what tells
 REPORT=$(adb shell am instrument -w -e class org.fcitx.fcitx5.android.EngineEvalRunner \
-    -e evalSet "$SET" -e evalIme "$IME" "$PKG.test/androidx.test.runner.AndroidJUnitRunner")
+    -e evalSet "$SET" -e evalIme "$IME" ${NINE:+-e evalNine true} ${GROUPED:+-e evalGrouped "$GROUPED"} \
+    ${HISTORY_NAME:+-e evalHistory "$HISTORY_NAME"} "$PKG.test/androidx.test.runner.AndroidJUnitRunner")
+# not left to be read by a later run that names the same history in the assets
+[ -z "$HISTORY_NAME" ] || adb shell rm -f "$EVAL_DIR/$HISTORY_NAME.txt"
 if ! grep -q "^OK (1 test)" <<<"$REPORT"; then
     echo "$REPORT" >&2
     exit 1

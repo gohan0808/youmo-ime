@@ -6,8 +6,8 @@ package org.fcitx.fcitx5.android.input.candidates.expanded
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.content.res.Configuration
 import android.view.Gravity
+import android.view.LayoutInflater
 import androidx.constraintlayout.widget.ConstraintLayout
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.data.theme.Theme
@@ -18,6 +18,7 @@ import org.fcitx.fcitx5.android.input.keyboard.BaseKeyboard
 import org.fcitx.fcitx5.android.input.keyboard.ImageLayoutSwitchKey
 import org.fcitx.fcitx5.android.input.keyboard.KeyAction
 import org.fcitx.fcitx5.android.input.keyboard.KeyDef
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardArea
 import org.fcitx.fcitx5.android.input.keyboard.ReturnKey
 import org.fcitx.fcitx5.android.input.keyboard.SceneKeyDef
 import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneEnvs
@@ -42,7 +43,6 @@ import splitties.views.dsl.constraintlayout.rightOfParent
 import splitties.views.dsl.constraintlayout.rightToLeftOf
 import splitties.views.dsl.constraintlayout.topOfParent
 import splitties.views.dsl.core.add
-import splitties.views.dsl.recyclerview.recyclerView
 
 @SuppressLint("ViewConstructor")
 class ExpandedCandidateLayout(context: Context, theme: Theme, bar: BarLook = SceneBar.of(context, theme)) : ConstraintLayout(context) {
@@ -133,7 +133,10 @@ class ExpandedCandidateLayout(context: Context, theme: Theme, bar: BarLook = Sce
     }
 
 
-    val recyclerView = recyclerView {
+    // inflated as splitties' recyclerView {} is, its scrollbars' style and all; the strokes drawn on it in GlideInput's
+    // trail colour (笔画筛选)
+    val recyclerView = (LayoutInflater.from(context).inflate(R.layout.stroke_page_list, null, false) as StrokePageRecyclerView).apply {
+        trailColor = theme.accentKeyBackgroundColor
         // disable item cross-fade animation
         itemAnimator = null
         isVerticalScrollBarEnabled = false
@@ -144,7 +147,7 @@ class ExpandedCandidateLayout(context: Context, theme: Theme, bar: BarLook = Sce
     init {
         id = R.id.expanded_candidate_view
 
-        val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val landscape = KeyboardArea.landscape(context)
         val keys = ThemeManager.shownLook(theme).keys
         val inset = dp(if (landscape) keys.gap.vLand else keys.gap.v)
         // the theme's `candidates-panel` (T6a), else its panels' (the flat keys': the bar's colour, ThemeColors.panel);

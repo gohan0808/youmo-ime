@@ -42,8 +42,8 @@ import org.fcitx.fcitx5.android.scene.theme.Theme
  * keyboard (one-handed or split at a side: rules D §2), expanded ([Expand]), placed ([Place]), each
  * key's look cascaded from the theme for its states and pressed, its face's layers placed ([Faces]),
  * its text and marks placed ([Content]) and kept apart ([KeyMarkYield]: the letters together, the
- * rest each on its own), all drawn as ops ([Paint]); a slot's or a blank place's face under it. The
- * same values give the same scene, on the phone, in a browser, in a test.
+ * rest each on its own), all drawn as ops ([Paint]); a slot's face under it, a gap nothing (the keyboard's
+ * fill shows). The same values give the same scene, on the phone, in a browser, in a test.
  */
 class SceneBuilder(
     private val theme: Theme,
@@ -186,19 +186,12 @@ class SceneBuilder(
         }
         val slots = placed.mapNotNull { p ->
             val s = (p.item as? ExpandedSlot)?.slot ?: return@mapNotNull null
-            val face = surface(layout.id, s.id, s.look, s.classes, s.face, p.cell, slot = true)
+            val face = surface(layout.id, s.id, s.look, s.classes, s.face, p.cell)
             if (s.kind == Pads.KIND) pad(layout.id, s, p.cell, face) else SlotNode(s.kind, s.id, p.cell, face)
-        }
-        // a key's place the board has no key for (the number pads'): a key that takes no press, `:disabled`
-        // and faded as theme 3.0's disabled blank view was (its whole view at android:disabledAlpha)
-        val blanks = placed.flatMap { p ->
-            val g = (p.item as? ExpandedGap)?.gap ?: return@flatMap emptyList()
-            surface(layout.id, g.id, g.look, g.classes, Face.Default, p.cell, slot = false, states = setOf(KeyState.Disabled.xml))
-                .map { popups.faded(it, Popups.DISABLED_ALPHA) }
         }
         val whole = Box(0.0, 0.0, env.width, env.height)
         val side = sideRoom(board, whole)?.let { SlotNode(SIDE_BUTTONS, null, it) }
-        return Parsed.Ok(Scene(env.width, env.height, base(whole) + gaps(placed) + blanks, nodes, slots + listOfNotNull(side), board, layout.preview, layout.popups, warnings.all))
+        return Parsed.Ok(Scene(env.width, env.height, base(whole) + gaps(placed), nodes, slots + listOfNotNull(side), board, layout.preview, layout.popups, warnings.all))
     }
 
     // the room between a split row's halves (`split-gap`, 060-render-p3 T7a): its fill and corners, each row's; none set, the keyboard's under it
@@ -238,28 +231,20 @@ class SceneBuilder(
         return listOfNotNull(paint.fill(Shape.Rect(box, Faces.radii(look.radius, box, env.density)), look.fill))
     }
 
-    // a key's face where a slot or a blank place is given a look: never pressed, `keep` block on flat keys too;
-    // a slot is not one of its board's every key (`handwriting/*`), but by its own name and look, as theme 3.0 drew the pad
-    private fun surface(
-        board: String,
-        id: String?,
-        look: String?,
-        classes: List<String>,
-        face: Face,
-        cell: Box,
-        slot: Boolean,
-        states: Set<String> = emptySet(),
-    ): List<Op> {
+    // a key's face where a slot is given a look: never pressed, `keep` block on flat keys too; a slot is not
+    // one of its board's every key (`handwriting/*`), but by its own name and look, as theme 3.0 drew the pad
+    private fun surface(board: String, id: String?, look: String?, classes: List<String>, face: Face, cell: Box): List<Op> {
         if (look == null || face == Face.None) return emptyList()
-        // a slot's or a blank place's face: the theme's alone, the key style is for the keys (the owner's settings name keys)
+        // a slot's face: the theme's alone, the key style is for the keys (the owner's settings name keys)
         val c = cascadeFor(face)
-        val l = KeyLook(c.of(Selector.Target("key", board, id, null, setOf(look) + classes, states, slot = slot)), theme)
+        val l = KeyLook(c.of(Selector.Target("key", board, id, null, setOf(look) + classes, emptySet(), slot = true, base = env.base)), theme)
         return paint.face(Faces.of(cell, l, face, true, env.flat && face != Face.Keep, env.density), l, false)
     }
 
-    // the handwriting pad: its face, the grid over it the theme shows, the ink its strokes are drawn in (060-render-p3 T7b)
+    // the handwriting pad: its face, the grid over it the theme shows, the ink its strokes are drawn in (060-render-p3 T7b);
+    // no board of the app's has one since its keyboard went (Pads.KIND), a user's or a pack's layout may
     private fun pad(board: String, s: Slot, cell: Box, face: List<Op>): SlotNode {
-        val target = Selector.Target("key", board, s.id, null, setOfNotNull(s.look) + s.classes, emptySet(), slot = true)
+        val target = Selector.Target("key", board, s.id, null, setOfNotNull(s.look) + s.classes, emptySet(), slot = true, base = env.base)
         // the grid and the ink are the scene's, flat or not; only the face keeps 3.0's
         val v = cascade.of(target)
         val c = cascadeFor(s.face)
@@ -294,6 +279,7 @@ class SceneBuilder(
     // unbounded: the key styles and forms are a few fixed choices, so its keys are too (a free slider would need a bound)
     private data class StyledFor(
         val board: String,
+        val base: String?,
         val id: String,
         val role: String?,
         val classes: Set<String>,
@@ -308,7 +294,7 @@ class SceneBuilder(
         val c = cascadeFor(key.attrs.face)
         val states = statesOf(key)
         val classes = setOf(key.kind) + key.attrs.classes.orEmpty()
-        return c.kept(StyledFor(board, key.key.id, key.attrs.role, classes, states, over?.let { OverIn(it, env.landscape, env.compact) })) { styled(c, board, key, classes, states) }
+        return c.kept(StyledFor(board, env.base, key.key.id, key.attrs.role, classes, states, over?.let { OverIn(it, env.landscape, env.compact) })) { styled(c, board, key, classes, states) }
     }
 
     private fun styled(c: Cascade, board: String, key: ExpandedKey, classes: Set<String>, states: Set<KeyState>): Styled {
@@ -316,7 +302,7 @@ class SceneBuilder(
         val parts = HashMap<Set<KeyState>, (Part) -> TextLook>()
         for (s in listOf(states, states + KeyState.Pressed)) {
             // the key's target once a state, its parts the same but the part's name
-            val whole = Selector.Target("key", board, key.key.id, key.attrs.role, classes, s.mapTo(HashSet()) { it.xml })
+            val whole = Selector.Target("key", board, key.key.id, key.attrs.role, classes, s.mapTo(HashSet()) { it.xml }, base = env.base)
             looks[s] = KeyLook(over(c.of(whole)), theme)
             // a part's look only when a text or an icon of it is placed or drawn
             val byPart = HashMap<Part, TextLook>()
@@ -348,7 +334,7 @@ class SceneBuilder(
             val classes = setOf(key.kind) + key.attrs.classes.orEmpty()
             val own = statesOf(key)
             for (states in stateSets.map { own + it }.distinct().flatMap { listOf(it, it + KeyState.Pressed) }) {
-                val whole = Selector.Target("key", layout.id, key.key.id, key.attrs.role, classes, states.mapTo(HashSet()) { it.xml })
+                val whole = Selector.Target("key", layout.id, key.key.id, key.attrs.role, classes, states.mapTo(HashSet()) { it.xml }, base = env.base)
                 // what the key shows (its words, its icon) all hidden by the theme; one that shows neither is the layout's
                 fun hides(part: Part) = TextLook(c.of(whole.copy(part = part.xml)), theme).hidden
                 val shown = (key.label != null && !hides(Part.Label)) || (key.icon != null && !hides(Part.Icon))
@@ -387,7 +373,7 @@ class SceneBuilder(
         val c = cascadeFor(key.attrs.face)
         val classes = setOf(key.kind) + key.attrs.classes.orEmpty()
         val all = statesOf(key).mapTo(HashSet()) { it.xml } + states
-        return c.sources(Selector.Target("key", layout.id, key.key.id, key.attrs.role, classes, all, part))
+        return c.sources(Selector.Target("key", layout.id, key.key.id, key.attrs.role, classes, all, part, base = env.base))
     }
 
     // the key's face's layers in each state
@@ -587,6 +573,7 @@ class SceneBuilder(
             motion = motion(k.looks.getValue(k.states), k.looks.getValue(k.states + KeyState.Pressed), (normal.face ?: normal.pressed).bounds),
             // a way left out (no room even at its ladder's foot) said so, else how it was drawn
             fates = k.content.marks.zip(s.marks).mapNotNull { (m, d) -> m.way?.let { w -> w.up to (if (d == null) MarkFate.Dropped else w.fate) } }.toMap(),
+            head = k.placed.head,
         )
     }
 

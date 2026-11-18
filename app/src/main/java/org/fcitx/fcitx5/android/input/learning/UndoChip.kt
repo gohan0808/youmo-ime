@@ -23,6 +23,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.PopupWindow
+import androidx.annotation.StringRes
 import androidx.core.view.ViewCompat
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.data.theme.Theme
@@ -62,9 +63,9 @@ class UndoChip(
     /**
      * What 撤销 takes back, and [lapsed] what follows when the chip goes without it: timed out,
      * tapped away, another notice in its place, the keyboard gone. One of the two is called, once,
-     * on the main thread.
+     * on the main thread. [action], the button's words: 撤销, or what [undo] does (语音先问再记's 记住).
      */
-    class Undo(val undo: () -> Unit, val lapsed: () -> Unit = {})
+    class Undo(val undo: () -> Unit, val lapsed: () -> Unit = {}, @StringRes val action: Int = R.string.learning_undo)
 
     private var window: PopupWindow? = null
 
@@ -97,14 +98,18 @@ class UndoChip(
     /** Whether one is up, coming or going. */
     val showing: Boolean get() = window?.isShowing == true
 
+    /** Whether the one up holds an act 撤销 still takes back: one said in its place would lapse it. */
+    val holdsUndo: Boolean get() = state.holdsUndo
+
     /**
      * [message] said, with 撤销 doing [undo] if there is one. [aboveKeys]: docked, above the keyboard
      * whether or not the bar shows candidates (what the keyboard says, BaseInputView.say), not over the bar.
      * [steady]: kept as keys are typed ([typed]), what the engine says as a key fails: the key it
      * failed on comes to the keyboard after it, and would put it away unseen. False if not shown
      * (the keyboard not on the screen): [undo] lapsed, the words for the caller to say otherwise.
+     * [ms]: its own time, null its kind's (NoticeState.show).
      */
-    fun show(message: String, undo: Undo? = null, aboveKeys: Boolean = false, steady: Boolean = false): Boolean {
+    fun show(message: String, undo: Undo? = null, aboveKeys: Boolean = false, steady: Boolean = false, ms: Long? = null): Boolean {
         anchor.removeCallbacks(timeout)
         // a keyboard hidden is still attached: a result coming after it went is not shown on it
         if (!anchor.isAttachedToWindow || !anchor.isShown) {
@@ -119,7 +124,7 @@ class UndoChip(
         val to = place(row.layoutParams.width, row.layoutParams.height, aboveKeys)
         // the edit menu up where this goes ([covered]): said under it, shown as it goes, not over it
         val hide = menu?.let { Rect.intersects(it, Rect(to.left, to.top, to.left + row.layoutParams.width, to.top + row.layoutParams.height)) } == true
-        val (replaced, shownMs) = state.show(undo, steady, hide)
+        val (replaced, shownMs) = state.show(undo, steady, hide, ms)
         // the one shown goes now, untaken: its act stands
         replaced?.lapsed?.invoke()
         val shown = window
@@ -134,8 +139,10 @@ class UndoChip(
             ViewCompat.setAccessibilityPaneTitle(it, message)
         }
         val shownFor = anchor.context.getSystemService(AccessibilityManager::class.java)?.let { a ->
-            // as long as its user needs
-            a.getRecommendedTimeoutMillis(shownMs.toInt(), AccessibilityManager.FLAG_CONTENT_TEXT or AccessibilityManager.FLAG_CONTENT_CONTROLS).toLong()
+            // as long as its user needs: to read it, and to reach its button if it has one
+            val content = if (undo != null) AccessibilityManager.FLAG_CONTENT_TEXT or AccessibilityManager.FLAG_CONTENT_CONTROLS
+            else AccessibilityManager.FLAG_CONTENT_TEXT
+            a.getRecommendedTimeoutMillis(shownMs.toInt(), content).toLong()
         } ?: shownMs
         this.shownFor = shownFor
         // hidden: timed from when the menu goes ([uncovered])
@@ -374,9 +381,11 @@ class UndoChip(
             val line = View(ctx).apply { setBackgroundColor(theme.dividerColor) }
             val button = undoButton(undo)
             row.add(line, row.lParams(ctx.dp(1), ctx.dp(DIVIDER_DP)))
-            // to the chip's end: a thumb a little off 撤销 still takes back, it does not tap the chip
-            // away (which lapses the act, and purges the clipboard's deletes for good)
-            row.add(button, row.lParams(row.wrapContent, row.wrapContent))
+            // the words' height, as tall as a notice that only says: every notice one size, its
+            // 撤销 under 48 dp (the user, 2026-11-17). To the chip's end: a thumb a little off 撤销
+            // still takes back, it does not tap the chip away (which lapses the act, and purges the
+            // clipboard's deletes for good)
+            row.add(button, row.lParams(row.wrapContent, ViewGroup.LayoutParams.MATCH_PARENT))
             row.tag = button
             row.addOnLayoutChangeListener { v, left, top, right, bottom, _, _, _, _ ->
                 // none once replaced: its 撤销 is let go of
@@ -393,7 +402,7 @@ class UndoChip(
             button.measure(UNSPECIFIED, UNSPECIFIED)
             room -= button.measuredWidth + ctx.dp(1)
         }
-        text.maxWidth = room.coerceAtLeast(ctx.dp(MIN_TOUCH_DP))
+        text.maxWidth = room.coerceAtLeast(ctx.dp(MIN_WORDS_DP))
         row.measure(UNSPECIFIED, UNSPECIFIED)
         // its own size whatever the box's: as the box eases from one to another, neither row re-wraps
         row.layoutParams = FrameLayout.LayoutParams(row.measuredWidth, row.measuredHeight, Gravity.CENTER)
@@ -402,21 +411,20 @@ class UndoChip(
 
     // a text button in the accent colour, a rounded ripple as it is pressed: no block of colour (§4)
     private fun undoButton(undo: Undo) = anchor.context.textView {
-        setText(R.string.learning_undo)
+        setText(undo.action)
         setTextColor(undoColour(theme))
         typeface = Typeface.DEFAULT_BOLD
         textSize = 14f
-        setPaddingDp(12, 0, 16, 0)
-        // a button to a screen reader, and one a finger finds (review-E-ui S7)
+        // a button to a screen reader; its words in the middle of the row's height it takes
         gravity = gravityCenter
-        minHeight = dp(MIN_TOUCH_DP)
-        minWidth = dp(MIN_TOUCH_DP)
         accessibilityDelegate = ButtonRole
         val mask = GradientDrawable().apply {
             setColor(Color.WHITE)
             cornerRadius = dp(CORNER_DP - RIPPLE_INSET_DP).toFloat()
         }
         background = RippleDrawable(ColorStateList.valueOf(theme.keyPressHighlightColor), null, InsetDrawable(mask, dp(RIPPLE_INSET_DP)))
+        // after the background: the inset's own padding (4 dp) would replace it
+        setPaddingDp(12, 0, 16, 0)
         setOnClickListener {
             // one replaced, fading, has lapsed: its act stands, and the notice now shown stays
             if (!state.undo(undo)) return@setOnClickListener
@@ -435,8 +443,8 @@ class UndoChip(
     }
 
     internal companion object {
-        // the smallest a target is to be touched surely (Material's accessibility guidance)
-        const val MIN_TOUCH_DP = 48
+        // the words' narrowest, on a screen too narrow for them and 撤销 beside them
+        const val MIN_WORDS_DP = 48
 
         const val CORNER_DP = 18
         const val RIPPLE_INSET_DP = 4

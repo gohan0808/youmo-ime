@@ -16,6 +16,7 @@ import org.fcitx.fcitx5.android.BuildConfig
 import org.fcitx.fcitx5.android.FcitxApplication
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.Uat
+import org.fcitx.fcitx5.android.assertRows as assertNamedRows
 import org.fcitx.fcitx5.android.data.UserDataManager
 import org.fcitx.fcitx5.android.data.UserDataOrigin
 import org.fcitx.fcitx5.android.until
@@ -47,8 +48,6 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import java.io.File
-import java.io.IOException
-import java.util.Collections
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
@@ -66,7 +65,7 @@ class KotlinHostTest {
     private lateinit var engine: ScriptedEngine
     private lateinit var fcitx: KotlinHost
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
-    private val events: MutableList<HostEvent> = Collections.synchronizedList(ArrayList())
+    private val events = HostLog<HostEvent>()
 
     private fun config(path: String) = File(home, "config/$path")
 
@@ -81,7 +80,7 @@ class KotlinHostTest {
     private fun start(side: (ScriptedEngine) -> KotlinHost.EngineSide = { it }) {
         engine = ScriptedEngine(home)
         // the first run is the case's setUp's (or the case's own) to set: a restart is none
-        fcitx = startedHost(side(engine), firstRun = false) { host -> scope.launch { host.eventFlow.collect { events += it } } }
+        fcitx = startedHost(side(engine), firstRun = false) { host -> scope.launch { host.eventFlow.collect(events::add) } }
     }
 
     private fun restart() {
@@ -96,6 +95,7 @@ class KotlinHostTest {
         home.deleteRecursively()
         // the singleton's prefs outlive the test: a notice one left unseen is not the next one's
         AppPrefs.getInstance().internal.nineKeysUnseen.setValue(false)
+        AppPrefs.getInstance().internal.themeLayoutsUnseen.setValue("")
         AppPrefs.getInstance().keyboard.pinyinKeyboard.run { setValue(defaultValue) }
         AppPrefs.getInstance().internal.nineKeysMerged.run { setValue(defaultValue) }
         // published by the host, read by the keyboard window: not the next test's
@@ -103,12 +103,14 @@ class KotlinHostTest {
         EngineState.ownKeys = null
         NineKeyLetters.clearInUse()
         EngineNotices.sayer = null
+        // the notices it told till seen (nine keys merged) wait in the object: not the next class's to say
+        EngineNotices.forgetToldOnce()
         directBoot(false)
     }
 
     @Test
     fun readyIsTheFirstEventAndPinyinLeadsTheGroupOnTheFirstRun() = runBlocking {
-        assertTrue(events.first() is HostEvent.Ready)
+        assertTrue(events.list().first() is HostEvent.Ready)
         assertEquals(InputMethodCatalog.PINYIN, fcitx.enabledIme().first().uniqueName)
         // UAT decision 6: no options file yet, so the engine is told the host options' defaults, which the
         // engine replay's UatEngines.BASELINE reads too (but for 双拼's scheme)
@@ -133,16 +135,14 @@ class KotlinHostTest {
     fun anInputMethodWithNoPageHasNoOptionsAndALanguageWithNoMapNoPunctuation() = runBlocking {
         assertNull(fcitx.imOptions("keyboard-xx"))
         assertEquals(emptyList<PunctuationMapEntry>(), fcitx.punctuationMap("ja_JP"))
-        fcitx.setPunctuationMap("ja_JP", listOf(PunctuationMapEntry(",", "、", "")))
-        assertEquals(emptyList<PunctuationMapEntry>(), fcitx.punctuationMap("ja_JP"))
     }
 
-    // the keyboard's punctuation popups and the punctuation page read it so (PunctuationManager.load);
-    // the built-in table is an app asset, not on the JVM's classpath: the page's save gives one
+    // the keyboard's punctuation popups read it so (PunctuationManager.load); the built-in table is an
+    // app asset, not on the JVM's classpath: a user's file there is what is read (none is saved since 0.6.1)
     @Test
-    fun thePunctuationMapSavedReadsBack() = runBlocking {
+    fun theUsersTableIsTheMapRead() = runBlocking {
         val table = listOf(PunctuationMapEntry("(", "（", ""), PunctuationMapEntry(",", "，", ""))
-        fcitx.setPunctuationMap(ZH_CN, table)
+        fcitx.putPunctuationTable(home, table)
         assertEquals("（", fcitx.punctuationMap(ZH_CN).first { it.key == "(" }.mapping)
     }
 
@@ -172,18 +172,19 @@ class KotlinHostTest {
         }
     }
 
-    private val said: MutableList<String> = Collections.synchronizedList(ArrayList())
+    private val said = HostLog<String>()
 
     private fun listen() {
-        EngineNotices.sayer = EngineNotices.Sayer { message, _ -> said += message; true }
+        EngineNotices.sayer = EngineNotices.Sayer { message, _ -> said.add(message); true }
     }
 
     private fun idle() = shadowOf(Looper.getMainLooper()).idle()
 
     /**
      * A file the host keeps that it cannot read this run: [file] holds [text],
-     * the user is told [notice], [shown] is what the run has instead, and what [edit] saves from it
-     * leaves the file as it was; [after] checks anything more once the file reads again.
+     * the user is told [notice], [shown] is what the run has instead, and what [edit] saves from it (a row whose file
+     * has no setter to save through leaves it out) leaves the file as it was; [after] checks anything more once the
+     * file reads again.
      */
     private class Unreadable(
         val why: String,
@@ -191,7 +192,7 @@ class KotlinHostTest {
         val text: String,
         val notice: Int,
         val shown: suspend KotlinHost.() -> Unit,
-        val edit: suspend KotlinHost.() -> Unit,
+        val edit: suspend KotlinHost.() -> Unit = {},
         val after: suspend () -> Unit = {},
     )
 
@@ -221,14 +222,13 @@ class KotlinHostTest {
                     start()
                     idle()
                     assertEquals("9", fcitx.imOptions(InputMethodCatalog.PINYIN)!!["PageSize"])
-                    assertEquals(emptyList<String>(), said)
+                    assertEquals(emptyList<String>(), said.list())
                 },
             ),
             Unreadable(
-                "an edited punctuation table: the built-in one typed with (an app asset not on the JVM's classpath: none here), the edit page's save not written over it",
+                "an edited punctuation table: the built-in one typed with (an app asset not on the JVM's classpath: none here), the file kept as it is",
                 { File(home, "data/punctuation/punc.mb.zh_CN") }, ", 、\n", R.string.user_data_unreadable,
                 shown = { assertEquals(emptyList<PunctuationMapEntry>(), punctuationMap("zh_CN")) },
-                edit = { assertTrue(runCatching { setPunctuationMap("zh_CN", listOf(PunctuationMapEntry("(", "（", ""))) }.exceptionOrNull() is IOException) },
             ),
         ),
         { it.why },
@@ -245,7 +245,7 @@ class KotlinHostTest {
                 listen()
                 start()
                 idle()
-                assertEquals(listOf(appContext.getString(row.notice)), said)
+                assertEquals(listOf(appContext.getString(row.notice)), said.list())
                 row.shown(fcitx)
                 row.edit(fcitx)
                 fcitx.stop()
@@ -285,20 +285,15 @@ class KotlinHostTest {
                 },
             ),
             NotSettled(
-                "fcitx's data: the punctuation table saved is not written",
+                "fcitx's data: the user's punctuation table there read",
                 notice = R.string.user_data_unreadable,
-                prepare = {},
+                prepare = { File(home, "data/punctuation/punc.mb.zh_CN").apply { parentFile!!.mkdirs() }.writeText(", 、\n") },
                 side = { scripted ->
                     object : KotlinHost.EngineSide by scripted {
                         override fun data() = HostConfig(File(home, "data"), writable = false, ConfigHome.Problem.EXTERNAL_AWAY)
                     }
                 },
-                check = {
-                    assertTrue(runCatching { setPunctuationMap("zh_CN", listOf(PunctuationMapEntry(",", "、", ""))) }.exceptionOrNull() is IOException)
-                    // refused, not used either
-                    assertEquals(emptyList<PunctuationMapEntry>(), punctuationMap("zh_CN"))
-                    assertFalse(File(home, "data/punctuation").exists())
-                },
+                check = { assertEquals(listOf(PunctuationMapEntry(",", "、", "")), punctuationMap("zh_CN")) },
             ),
         ),
         { it.why },
@@ -313,7 +308,7 @@ class KotlinHostTest {
             try {
                 start(row.side)
                 idle()
-                assertEquals(listOf(appContext.getString(row.notice)), said)
+                assertEquals(listOf(appContext.getString(row.notice)), said.list())
                 row.check(fcitx)
             } finally {
                 EngineNotices.sayer = null
@@ -381,7 +376,7 @@ class KotlinHostTest {
             try {
                 start(row.side)
                 idle()
-                assertEquals(if (row.held) listOf(appContext.getString(R.string.config_unreadable)) else emptyList<String>(), said)
+                assertEquals(if (row.held) listOf(appContext.getString(R.string.config_unreadable)) else emptyList<String>(), said.list())
                 fcitx.setImOptions(InputMethodCatalog.PINYIN, fcitx.imOptions(InputMethodCatalog.PINYIN)!! + ("PageSize" to "8"))
                 fcitx.save()
                 fcitx.stop()
@@ -430,14 +425,14 @@ class KotlinHostTest {
     fun reloadConfigSendsTheStatusOnce() = runBlocking {
         fcitx.activate(1, "org.example")
         fcitx.focus(true)
-        fcitx.setPunctuationMap("zh_CN", listOf(PunctuationMapEntry(",", "、", "")))
+        fcitx.putPunctuationTable(home, listOf(PunctuationMapEntry(",", "、", "")))
         fcitx.isEmpty()
         idle()
-        val before = events.count { it is HostEvent.StatusArea }
+        val before = events.list().count { it is HostEvent.StatusArea }
         fcitx.reloadConfig()
         fcitx.isEmpty()
         idle()
-        val sent = events.filterIsInstance<HostEvent.StatusArea>().drop(before)
+        val sent = events.list().filterIsInstance<HostEvent.StatusArea>().drop(before)
         assertEquals(1, sent.size)
         assertEquals(mapOf("," to "、"), sent.single().punctuation)
     }
@@ -469,16 +464,16 @@ class KotlinHostTest {
         assertEquals(InputMethodCatalog.PINYIN, fcitx.inputMethodEntryCached.uniqueName)
         events.clear()
         "nihao".forEach { fcitx.sendKey(it, 0u, 0, false, 0) }
-        val list = events.filterIsInstance<HostEvent.Candidates>().last()
+        val list = events.list().filterIsInstance<HostEvent.Candidates>().last()
         assertEquals(ScriptedEngine.WORDS, list.candidates.map { it.text })
         assertEquals("nihao", fcitx.inputPanelCached.preedit.toString())
         // kept for a view made anew (A2): the list as the bar last had it
         assertEquals(list, fcitx.candidatesCached)
         fcitx.select(0, null)
-        assertEquals("你好", events.filterIsInstance<HostEvent.Commit>().single().text)
+        assertEquals("你好", events.list().filterIsInstance<HostEvent.Commit>().single().text)
         // the panel cleared after the commit, as the addon's show() of an empty snapshot clears it
         assertEquals("", fcitx.inputPanelCached.preedit.toString())
-        assertEquals(0, events.filterIsInstance<HostEvent.Candidates>().last().candidates.size)
+        assertEquals(0, events.list().filterIsInstance<HostEvent.Candidates>().last().candidates.size)
         assertEquals(0, fcitx.candidatesCached.candidates.size)
     }
 
@@ -574,22 +569,22 @@ class KotlinHostTest {
         val keyboard = AppPrefs.getInstance().keyboard.pinyinKeyboard
         val merged = AppPrefs.getInstance().internal.nineKeysMerged
         zeroFourInstalled()
-        val steady = Collections.synchronizedList(ArrayList<Boolean>())
-        EngineNotices.sayer = EngineNotices.Sayer { message, isSteady -> said += message; steady += isSteady; true }
+        val steady = HostLog<Boolean>()
+        EngineNotices.sayer = EngineNotices.Sayer { message, isSteady -> said.add(message); steady.add(isSteady); true }
         start()
         idle()
         assertEquals(listOf(InputMethodCatalog.PINYIN, InputMethodCatalog.ENGLISH), fcitx.enabledIme().map { it.uniqueName })
         assertEquals(PinyinKeyboard.NineKeys, keyboard.getValue())
         assertTrue(merged.getValue())
-        assertEquals(listOf(appContext.getString(R.string.nine_keys_merged)), said)
+        assertEquals(listOf(appContext.getString(R.string.nine_keys_merged)), said.list())
         // news, not a failure: the plain notice
-        assertEquals(listOf(false), steady)
+        assertEquals(listOf(false), steady.list())
         fcitx.save()
         assertFalse(config(PROFILE).readText(), InputMethodCatalog.T9 in config(PROFILE).readText())
         said.clear()
         restart()
         idle()
-        assertEquals(emptyList<String>(), said)
+        assertEquals(emptyList<String>(), said.list())
         assertEquals(PinyinKeyboard.NineKeys, keyboard.getValue())
         assertEquals(listOf(InputMethodCatalog.PINYIN, InputMethodCatalog.ENGLISH), fcitx.enabledIme().map { it.uniqueName })
     }
@@ -615,12 +610,29 @@ class KotlinHostTest {
         listen()
         start()
         idle()
-        assertEquals(listOf(notice), said)
+        assertEquals(listOf(notice), said.list())
         assertFalse(unseen.getValue())
         said.clear()
         restart()
         idle()
-        assertEquals(emptyList<String>(), said)
+        assertEquals(emptyList<String>(), said.list())
+    }
+
+    // the theme packs' boards listed and chosen at the start (ThemeLayoutsToList, 061-custom-layout §11): what was made
+    // said as it is, once seen
+    @Test
+    @Uat("ST-175")
+    fun theThemeLayoutsChosenAreToldOnce() = runBlocking {
+        val unseen = AppPrefs.getInstance().internal.themeLayoutsUnseen
+        unseen.setValue("主题「薄荷」带的17 键已放进 外观 → 布局，拼音正在用")
+        fcitx.stop()
+        EngineNotices.forgetToldOnce()
+        said.clear()
+        listen()
+        start()
+        idle()
+        assertEquals(listOf("主题「薄荷」带的17 键已放进 外观 → 布局，拼音正在用"), said.list())
+        assertEquals("", unseen.getValue())
     }
 
     // a 0.4 install's files with both pinyins on, no merge done yet; the host stopped, listened to
@@ -651,7 +663,7 @@ class KotlinHostTest {
         start(unwritable)
         idle()
         assertEquals(PinyinKeyboard.NineKeys, keyboard.getValue())
-        assertEquals(1, said.count { it == notice })
+        assertEquals(1, said.list().count { it == notice })
         fcitx.save()
         assertTrue(InputMethodCatalog.T9 in config(PROFILE).readText())
         keyboard.setValue(PinyinKeyboard.Full)
@@ -661,7 +673,7 @@ class KotlinHostTest {
         idle()
         assertEquals(listOf(InputMethodCatalog.PINYIN, InputMethodCatalog.ENGLISH), fcitx.enabledIme().map { it.uniqueName })
         assertEquals(PinyinKeyboard.Full, keyboard.getValue())
-        assertEquals(0, said.count { it == notice })
+        assertEquals(0, said.list().count { it == notice })
     }
 
     // before the first unlock the config is none of the user's (HostConfigDir: no folder): nothing merged,
@@ -676,7 +688,7 @@ class KotlinHostTest {
         idle()
         assertEquals(PinyinKeyboard.Full, keyboard.getValue())
         assertFalse(merged.getValue())
-        assertFalse(appContext.getString(R.string.nine_keys_merged) in said)
+        assertFalse(appContext.getString(R.string.nine_keys_merged) in said.list())
         assertEquals(zeroFourProfile, config(PROFILE).readText())
         directBoot(false)
         restart()

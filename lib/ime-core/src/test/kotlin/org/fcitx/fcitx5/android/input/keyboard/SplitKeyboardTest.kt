@@ -4,7 +4,6 @@
  */
 package org.fcitx.fcitx5.android.input.keyboard
 
-import org.fcitx.fcitx5.android.input.keyboard.SplitKeyboard.Mode
 import org.fcitx.fcitx5.android.input.keyboard.SplitKeyboard.Sizes
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -13,16 +12,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SplitKeyboardTest {
-
-    @Test
-    fun autoSplitsAWideScreenHeldSidewaysOnly() {
-        assertTrue(SplitKeyboard.splits(Mode.AUTO, landscape = true, widthDp = 800))
-        // a screen narrower on its side than a phone's is not split, nor a tablet upright
-        assertFalse(SplitKeyboard.splits(Mode.AUTO, landscape = true, widthDp = 560))
-        assertFalse(SplitKeyboard.splits(Mode.AUTO, landscape = false, widthDp = 800))
-        assertTrue(SplitKeyboard.splits(Mode.ALWAYS, landscape = false, widthDp = 360))
-        assertFalse(SplitKeyboard.splits(Mode.OFF, landscape = true, widthDp = 1280))
-    }
 
     @Test
     fun eachHalfIsAFullGridAgainstTheRoomInTheMiddle() {

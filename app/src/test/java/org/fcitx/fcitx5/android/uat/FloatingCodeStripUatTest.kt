@@ -31,6 +31,7 @@ import org.fcitx.fcitx5.android.input.floating.FloatingHandle
 import org.fcitx.fcitx5.android.input.keyboard.CodeRowHeight
 import org.fcitx.fcitx5.android.input.keyboard.ImKeyboard
 import org.fcitx.fcitx5.android.input.keyboard.ImKeyboards
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardStyle
 import org.fcitx.fcitx5.android.input.keyboard.OneHanded
 import org.fcitx.fcitx5.android.input.preedit.CodeRowStyle
 import org.fcitx.fcitx5.android.input.preedit.FloatingCodeStrip
@@ -104,7 +105,8 @@ class FloatingCodeStripUatTest {
     }
 
     private fun typing(code: String, im: String = InputMethodCatalog.PINYIN, vararg syllables: String) {
-        val panel = HostEvent.InputPanel(FormattedText(arrayOf(code), intArrayOf(0), code.length), FormattedText.Empty, FormattedText.Empty)
+        // the session's code, as the engine flags it (InputPanel.code)
+        val panel = HostEvent.InputPanel(FormattedText(arrayOf(code), intArrayOf(0), code.length), FormattedText.Empty, FormattedText.Empty, code = true)
         h.api.inputPanelCached = panel
         h.emit(panel)
         if (syllables.isNotEmpty()) EngineState.syllablesState.value = EngineState.SyllableState(im, composing = true, syllables = syllables.toList(), id = 1)
@@ -191,7 +193,7 @@ class FloatingCodeStripUatTest {
     }
 
     @Test
-    @Uat("ST-49")
+    @Uat("ST-49", "ST-118")
     fun theKeyboardIsAsHighOnEveryKeyboardAndLowerThanEmbedded() {
         fun heights(style: CodeRowStyle, keyboards: ImKeyboards.Chosen): Pair<Int, Int> {
             open(keyboards, style = style)
@@ -207,6 +209,22 @@ class FloatingCodeStripUatTest {
         assertEquals(full.second, embedded.second)
         assertEquals(CodeRowHeight.THIN_DP.toFloat(), (embedded.first - full.first) / dp, 1f)
         assertEquals(CodeRowHeight.STRIP_DP.toFloat(), (embedded14.first - fourteen.first) / dp, 1f)
+        // 输入框里 (061-code-in-field §4.5): the row not in the keyboard either, as high as floating
+        assertEquals(full, heights(CodeRowStyle.InField, ImKeyboards.Chosen()))
+        assertEquals(fourteen, heights(CodeRowStyle.InField, ImKeyboards.Chosen(pinyin = ImKeyboard.KEYS14)))
+    }
+
+    @Test
+    @Uat("ST-118")
+    fun withTheCodeInTheFieldTheStripShowsTheSyllablesAlone() {
+        open(ImKeyboards.Chosen(pinyin = ImKeyboard.KEYS14), style = CodeRowStyle.InField)
+        typing("ni", InputMethodCatalog.PINYIN, "ni", "mi")
+        assertTrue("the syllables shown", shownStrip())
+        assertEquals("ni", h.field.text.toString())
+        val code = KeyboardHarness.all(h.inputView.findViewById<HorizontalScrollView>(R.id.code_row_text)).filterIsInstance<TextView>()
+            .filter { h.shown(it) }.joinToString("") { it.text }
+        assertEquals("none of the code on it", "", code)
+        assertEquals(listOf("ni", "mi"), syllableItems().map { it.text.toString() })
     }
 
     private fun syllables(): SyllableStrip = h.inputView.findViewById(R.id.code_row_syllables)
@@ -237,7 +255,7 @@ class FloatingCodeStripUatTest {
     @Test
     @Uat("ST-50")
     fun oneHandedTheStripIsAtTheBoardsLeft() {
-        prefs.set(ThemeManager.prefs.oneHanded, OneHanded.Right)
+        prefs.setStyle(KeyboardStyle.ONE_HANDED, side = OneHanded.Right)
         open()
         typing("ni hao")
         val bar = h.box(h.bar)
@@ -250,7 +268,7 @@ class FloatingCodeStripUatTest {
     @Test
     @Uat("ST-50")
     fun floatingTheStripIsOutsideTheKeyboardAndUnderItAtTheTop() {
-        prefs.set(ThemeManager.prefs.floatingKeyboard, true)
+        prefs.setStyle(KeyboardStyle.FLOATING)
         open()
         typing("ni hao")
         val keyboard = h.box(h.keyboard)
@@ -349,10 +367,11 @@ class FloatingCodeStripUatTest {
         open()
         drawn()
         h.service.say("词库没装上", steady = true)
-        h.advance(1000)
+        // well inside its 2 s
+        h.advance(500)
         val before = h.noticeBox()
         typing("zhuang bu hao kuo ni hao a ni hao a ni hao")
-        h.advance(1000)
+        h.advance(500)
         val strip = region()!!
         val chip = h.noticeBox()
         assertTrue("$chip off $strip (was $before)", !Rect.intersects(chip, strip))

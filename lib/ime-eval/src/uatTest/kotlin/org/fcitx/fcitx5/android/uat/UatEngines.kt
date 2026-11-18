@@ -93,6 +93,9 @@ object UatEngines {
     /** The common words file, as the app keeps it (an export's text): read by the engine on [Engines.reload]. */
     var commonWords: String = ""
 
+    /** 生僻字屏蔽's file, as the app keeps it (`pinyin/rarechars.txt`'s text): read by the engine on [Engines.reload]. */
+    var rareChars: String = ""
+
     // what a case's user dir errors were: a case fails on one, as the app would log and go on
     private val errors = ArrayList<IOException>()
 
@@ -133,6 +136,7 @@ object UatEngines {
                 indexes = indexes?.let(::JvmFiles),
                 commonWords = commonWords,
                 saveCommonWords = { commonWords = it.format() },
+                rareChars = rareChars,
             )
         },
         // on the caller's thread: what a case sees does not depend on a warm-up's timing
@@ -160,6 +164,7 @@ object UatEngines {
         Clock.reset()
         phrases = ""
         commonWords = ""
+        rareChars = ""
         dictionary = { null }
         indexes = null
         val left = synchronized(errors) { errors.toList().also { errors.clear() } }
@@ -199,12 +204,12 @@ object UatEngines {
 
     /**
      * The recognizer's [readings] (best first, scored as it ranks them) for a new ink piece, after
-     * [last] (the replay's last written) and after what the pad ended: what the Ink key carries.
+     * [last] (the replay's last written), written over the keys of [im] and after what the pad ended: what the Ink key carries.
      * EngineReplay's and HostReplay's one rule, so their handwriting cannot drift apart (F4299).
      */
-    fun ink(engines: Engines, readings: List<String>, last: Int): Action.Ink {
+    fun ink(engines: Engines, im: String, readings: List<String>, last: Int): Action.Ink {
         val piece = maxOf(last + 1, engines.inkEnded + 1)
-        return Action.Ink(piece, InkReading(readings, DoubleArray(readings.size) { -it.toDouble() })).also { engines.ink(it, shown = true) }
+        return Action.Ink(piece, InkReading(readings, DoubleArray(readings.size) { -it.toDouble() })).also { engines.ink(it, shown = true, im = im) }
     }
 
     /** The learning record as the engines wrote it ([LearnLog.FILE]), its background work done first; empty for none yet. */

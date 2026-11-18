@@ -46,6 +46,29 @@ case("KB-10", needs="jvm:KeyboardFieldsUatTest.backspaceTakesAnEmojiWithItsSkinT
 case("KB-11", needs="jvm:KeyboardUatTest.holdingBackspaceRepeatsFasterTillLetGo")(lambda d: None)
 
 
+@case("KB-112")
+def kb112(d):
+    d.open_page("text")
+    d.clear()
+    d.type("nihao")
+    d.cands(want="你好")
+    d.space()
+    d.expect_field("你好")
+    d.type("nihao")
+    d.cands(want="你好")
+    bksp = d.keys(refresh=True)["bksp"]
+    # 4 s: the pinyin gone in well under a second, then held on past the stop; letting go deletes nothing either
+    d.hold(bksp, 4000)
+    d.idle()
+    s = d.screen()
+    p, t = d.preedit(s), d.field_text(s)
+    check(not p, f"按住 4 秒后编码行还有「{p}」")
+    check(t == "你好", f"打拼音时按住退格（删完后接着按住再松手），框里成了「{t}」")
+    d.hold(bksp, 2000)
+    d.expect_field("", msg="没在打字时按住退格，框里还剩「{got}」")
+    return "第一次按住 4 秒：删光拼音、停住后再松手，框里留着「你好」；第二次按住删空"
+
+
 case("KB-12", needs="jvm:KeyboardUatTest.swipingBackspaceLeftSelectsAndDeletes")(lambda d: None)
 
 
@@ -134,7 +157,8 @@ def kb31(d):
 case("KB-32", needs="jvm:KeyboardUatTest.glideIsOffByDefault")(lambda d: None)
 
 
-case("KB-33", needs="jvm:HostCasesUatTest.aGlideGoesInWithItsSpaceItsWordChangedOrErasedWholeAMarkTakesTheSpace、KeyboardFieldsUatTest.aGlideDrawsTheFingersTrail")(lambda d: None)
+case("KB-33", needs="jvm:HostCasesUatTest.aGlideGoesInWithItsSpaceItsWordChangedOrErasedWholeAMarkTakesTheSpace、KeyboardFieldsUatTest.aGlideDrawsTheFingersTrail、"
+     "TextSceneWiringTest.aGlideReadsEachLetterWhereTheKeySendingItIsWhateverItsId")(lambda d: None)
 
 
 case("KB-35", needs="jvm:KeyboardUatTest.tapsShortSwipesAndHoldsAreNoGlide")(lambda d: None)
@@ -152,10 +176,59 @@ case("KB-39", needs="jvm:KeyboardUatTest.shiftChangesAllThreeRows")(lambda d: No
 case("KB-41", needs="jvm:KeyboardUatTest.aFirstMoveSidewaysAfterSlippingOffKeepsThePopup")(lambda d: None)
 
 
+@case("KB-106", visual=True)
+def kb106(d):
+    d.open_page("text")
+    d.clear()
+    check("shift" in d.keys(refresh=True) and "分词" not in d.keys(), "没打字时 ⇧ 的位置不是 ⇧")
+    d.type("xi", after=0.6)
+    k = d.keys(refresh=True)
+    check("分词" in k and "shift" not in k, f"打 xi 后 ⇧ 的位置没变成分词：{sorted(k)}")
+    d.shot("kb", "打 xi 时 ⇧ 的位置是分词")
+    d.tap(k["分词"], after=0.4)
+    d.type("an", after=0.8)
+    pre = d.preedit()
+    check(pre.replace(" ", "'") == "xi'an", f"xi 分词 an 的编码行是「{pre}」，不是 xi'an")
+    d.pick("西安")
+    d.expect_field("西安")
+    check("shift" in d.keys(refresh=True), "上屏后没变回 ⇧")
+    return f"编码行「{pre}」，上屏「西安」"
+
+
+case("KB-107", needs="jvm:ShiftSeparatorCanvasTest.aShiftKeptBesideTheSeparatorStaysShift、ShiftSeparatorCanvasTest.theSeparatorKeepsShiftAsItWas、ShiftSeparatorCanvasTest.shiftDownAsTypingBeginsUpIsTheSeparator、ShiftSeparatorCanvasTest.theSeparatorLiftedAfterTypingEndedKeepsShiftOnce、ShiftSeparatorCanvasTest.aThemesOwnShiftStaysShiftWhilePinyinIsTyped、ShiftSeparatorCanvasTest.aThemesPlainApostropheKeyUsesUpShiftOnce")(lambda d: None)
+
+
 case("KB-42", needs="jvm:StrokeUatTest.aStrokeDrawnWhilePinyinIsTypedIsSentAsOneTheKeysNone、StrokeUatTest.theNineAndFourteenKeysSendAStrokeToo、StrokeUatTest.aStrokeStartsInTheSplitGapTooATapOrAGlideThereDoNothing、StrokeUatTest.aSecondFingerOnALetterWhileOneRestsInTheGapTypesIt、StrokeUatTest.aStrokeFromTheGapCancelledSendsNothingAndLeavesNoTrail、StrokeUatTest.noOtherLayoutHasAGap、StrokeUatTest.theSweepFindsTheSplitGap")(lambda d: None)
 
 
 case("KB-43", needs="jvm:StrokeUatTest.withNothingTypedGlideChosenOrEnglishNoStrokeIsSent")(lambda d: None)
+case("KB-101", needs="jvm:StrokeUatTest.aFingerThatSlidesShortOfTheLiftDistanceIsTheKeysTap、StrokeUatTest.aShortStrokeAsAnotherFingerLandsIsItsTapAndTheOtherKeyTypedToo")(lambda d: None)
+case("KB-102", needs="jvm:StrokeUatTest.aTapNearTheEdgeSlidingOffTheKeyIsStillItsTap")(lambda d: None)
+case("KB-103", needs="jvm:StrokeUatTest.aSlowStrokeIsReadBeforeAnyLongPress")(lambda d: None)
+
+
+@case("KB-104", mutates=True)
+def kb104(d):
+    home(d, "通用输入")
+    choose(d, "在键上划", "笔画筛选")
+    d.open_page("text")
+    d.clear()
+    dp = d.dpx()
+    d.type("hao", after=0.6)
+    q = d.keys(refresh=True)["q"]
+    # 15dp sideways in 150ms: short of 笔画筛选灵敏度 (中, 24dp), the q key's tap
+    d.swipe(q, (q[0] + int(15 * dp), q[1]), 150, after=0.8)
+    short = d.preedit()
+    d.clear()
+    d.type("hao", after=0.6)
+    q = d.keys(refresh=True)["q"]
+    # 40dp: past it, a 横
+    d.swipe(q, (q[0] + int(40 * dp), q[1]), 150, after=0.8)
+    long = d.preedit()
+    d.clear()
+    check(short.replace(" ", "").replace("'", "") == "haoq", f"打 hao 后在 q 上横滑 15dp，编码行是「{short}」，不是 haoq")
+    check(long.endswith("一") and "q" not in long, f"打 hao 后在 q 上横划 40dp，编码行是「{long}」，末尾不是一笔横")
+    return f"15dp：「{short}」；40dp：「{long}」"
 
 
 case("KB-44", needs="jvm:AddressUatTest.anEmptyEmailFieldOffersTheSuffixesTheCursorStaysBeforeTheAt")(lambda d: None)
@@ -212,7 +285,12 @@ case("KB-60", needs="jvm:HostCoreContractTest.an app unbound clears the panel it
 case("KB-61", needs="jvm:BaseKeyboardTest.aLettersSwipeDownIsItsShortcutAndUpItsFirst")(lambda d: None)
 
 
-case("KB-62", needs="jvm:BaseKeyboardTest.theSpaceUpIsTheEditMenuAndTheBackspaceUpAndDownClearAndRestore、EditPlanTest、EditPlanTest.aShortReadClearsWhatWasGivenAndPutsBackJustThatAtTheCursor、EditPlanTest.aClearAtTheLimitWithTheCursorReportedAheadKeepsWhatIsAfterTheCursor、EditPlanTest.aShortReadClearIsNotPutBackOnceSomethingWasTypedBeforeTheCursor、HostCoreEnginesTest.what is typed is cleared without a commit and typed again、HostCoreEnginesTest.what is typed after a syllable taken off the nine keys' bar is never typed again、EnginesTest.aSyllableTakenOffTheBarIsAPick、SwipePopupScreenshotTest.theEditMenusCellsAreReadByTheirLabels")(lambda d: None)
+case("KB-62", needs="jvm:BaseKeyboardTest.theSpaceUpIsTheEditMenuAndTheBackspaceUpAndDownClearAndRestore、EditPlanTest、EditPlanTest.aShortReadClearsWhatWasGivenAndPutsBackJustThatAtTheCursor、EditPlanTest.aClearAtTheLimitWithTheCursorReportedAheadKeepsWhatIsAfterTheCursor、EditPlanTest.aShortReadClearIsNotPutBackOnceSomethingWasTypedBeforeTheCursor、EditPlanTest.nothingReadBeforeAReportedCursorPutsWhatIsAfterBackAtThatCursor、KeyShortcutsHostTest.aClearMadeBeforeTheCursorsReportIsInIsPutBackWithTheCursorWhereItIsReportedThen、HostCoreEnginesTest.what is typed is cleared without a commit and typed again、HostCoreEnginesTest.what is typed after a syllable taken off the nine keys' bar is never typed again、EnginesTest.aSyllableTakenOffTheBarIsAPick、SwipePopupScreenshotTest.theEditMenusCellsAreReadByTheirLabels")(lambda d: None)
+
+
+case("KB-105", needs="jvm:SwipePopupScreenshotTest.uprightOnTheCanvas、SwipePopupScreenshotTest.compactOnTheCanvas、SwipePopupScreenshotTest.floatingOnTheCanvas、"
+     "SwipePopupScreenshotTest.turnedOnTheCanvas、KeyShortcutsScreenshotTest.theEditMenuOverTheSpace、BuiltinThemeEquivalenceTest.theMenusCellInFocusStandsOutInEveryBuiltInTheme、"
+     "PopupsTest.aMenusCellInFocusIsLargerAndReturnsColourOneDisabledFaded、PopupsTest.aMenusCellInFocusThatIsDisabledKeepsReturnsColourFaded")(lambda d: None)
 
 
 case("KB-63", needs="jvm:BaseKeyboardTest.aKeysOwnTextShortcutIsWhatItsSwipeRuns")(lambda d: None)
@@ -225,6 +303,7 @@ case("KB-65", needs="jvm:SwipePopupScreenshotTest.theBubbleSaysTheShortcutFitted
 
 
 case("KB-66", needs="jvm:KeyMarksUatTest.eachWhereItsSettingSays、KeyMarksUatTest.onePlaceStoredInBothTheSymbolYields、KeyMarkPositionSettingsTest.theTwoTogetherTheOthersPlaceGreyedOut、KeyMarksUatTest.theFirstOpenIsAsAfterAnySettingChanges、KeyMarksUatTest.aLongPressTurnedOffPlacesTheMarksAsAKeyboardMadeWithIt、KeyMarksScreenshotTest.everyPlaceOnTheKeyboards、KeyMarksTest、KeyMarkYieldTest")(lambda d: None)
+case("KB-89", needs="jvm:KeyMarksUatTest.theTopIsTheTopEdgesMiddle")(lambda d: None)
 
 
 case("KB-68", needs="jvm:LetterCaseScreenshotTest、LetterCaseRuleTest")(lambda d: None)
@@ -282,27 +361,29 @@ def kb85(d):
     qx, qy = d.keys(refresh=True)["q"]
     sel = lambda: (ml()["selStart"], ml()["selEnd"])
     free = lambda a, b: a if b == anchor else b
-    d.touch(("down", qx, qy), ("move", qx, qy - 15 * p), ("move", qx, qy - 30 * p), ("sleep", 0.2),
-            ("move", qx - 10 * p, qy - 30 * p), ("sleep", 0.3))
+    # 42 dp up: past the keys' swipe threshold, 36 dp (BaseKeyboard.inputSwipeThreshold); 30 dp fell short, 滑选 never
+    # began and the lift typed q's 1
+    d.touch(("down", qx, qy), ("move", qx, qy - 21 * p), ("move", qx, qy - 42 * p), ("sleep", 0.2),
+            ("move", qx - 10 * p, qy - 42 * p), ("sleep", 0.3))
     s1 = sel()
     check(s1 in ((c0 - 1, c0), (c0, c0 - 1)), f"往左挪一个字后选区 {s1}，起点 {c0}")
     anchor = c0
     for i in range(1, 4):
-        d.touch(("move", qx - 10 * p, qy - 30 * p - i * 28 * p), ("sleep", 0.3))
+        d.touch(("move", qx - 10 * p, qy - 42 * p - i * 28 * p), ("sleep", 0.3))
     s2 = sel()
     f2 = free(*s2)
     d.shot("app", "滑选上挪三行：选区跨四行，起点不动")
     # three screen lines: some 15 to 80 letters a line, never the paragraph's start (a logical line up)
     check(anchor in s2 and 45 <= anchor - f2 <= 240 and f2 > 0, f"上挪三行后选区 {s2}，起点 {anchor}")
     for i in range(2, -3, -1):
-        d.touch(("move", qx - 10 * p, qy - 30 * p - i * 28 * p), ("sleep", 0.3))
+        d.touch(("move", qx - 10 * p, qy - 42 * p - i * 28 * p), ("sleep", 0.3))
     s3 = sel()
     f3 = free(*s3)
     check(anchor in s3 and 30 <= f3 - anchor <= 160, f"往下挪回五行后选区 {s3}，起点 {anchor}")
-    d.touch(("move", qx - 20 * p, qy - 30 * p + 2 * 28 * p), ("sleep", 0.3))
+    d.touch(("move", qx - 20 * p, qy - 42 * p + 2 * 28 * p), ("sleep", 0.3))
     s4 = sel()
     check(anchor in s4 and free(*s4) == f3 - 1, f"再往左挪一个字后选区 {s4}，之前 {s3}")
-    d.touch(("up", qx - 20 * p, qy - 30 * p + 2 * 28 * p), ("sleep", 0.5))
+    d.touch(("up", qx - 20 * p, qy - 42 * p + 2 * 28 * p), ("sleep", 0.5))
     after = ml()
     check(after["text"] == t and (after["selStart"], after["selEnd"]) == s4, f"松手后框里 {after['text'][:20]!r}…，选区 {(after['selStart'], after['selEnd'])}")
     d.step("单行框")
@@ -312,9 +393,9 @@ def kb85(d):
     time.sleep(0.3)
     one = lambda: d.testbed_state()["text"]
     qx, qy = d.keys(refresh=True)["q"]
-    d.touch(("down", qx, qy), ("move", qx, qy - 15 * p), ("move", qx, qy - 30 * p), ("sleep", 0.2),
-            ("move", qx - 10 * p, qy - 30 * p), ("sleep", 0.3), ("move", qx - 10 * p, qy - 30 * p - 50 * p), ("sleep", 0.3),
-            ("up", qx - 10 * p, qy - 30 * p - 50 * p), ("sleep", 0.3))
+    d.touch(("down", qx, qy), ("move", qx, qy - 21 * p), ("move", qx, qy - 42 * p), ("sleep", 0.2),
+            ("move", qx - 10 * p, qy - 42 * p), ("sleep", 0.3), ("move", qx - 10 * p, qy - 42 * p - 50 * p), ("sleep", 0.3),
+            ("up", qx - 10 * p, qy - 42 * p - 50 * p), ("sleep", 0.3))
     o = one()
     check(o["text"] == "hello" and (o["selStart"], o["selEnd"]) == (4, 5), f"单行框：{o['text']!r} 选区 {(o['selStart'], o['selEnd'])}，应只选中 o")
     return f"起点 {anchor}：上挪三行到 {f2}，下挪到 {f3}，左挪到 {free(*s4)}"
@@ -564,3 +645,212 @@ def kb87(d):
     check(up == long, f"上滑 q 打出「{up}」")
     return f"键角「{corner}」，上滑「{up}」"
 
+
+case("KB-88", needs="manual:输入测试台 null_before 框里退格上滑清除、下滑恢复，光标留在原处；还没写成脚本，在模拟器上手工跑")(lambda d: None)
+
+
+def board_keys(d):
+    """the canvas's keys on the screen by their scene id (Dumper's key=): {id: (bounds, text or description)}"""
+    out = {}
+    for n in d.screen().ime():
+        if n.key and n.key not in out:
+            out[n.key] = (n.b, n.text or n.desc)
+    return out
+
+
+def tap_key(d, id, after=0.6):
+    """a canvas key by its scene id"""
+    k = board_keys(d).get(id)
+    if not k:
+        raise Blocked(f"键盘上没有 {id}")
+    b = k[0]
+    d.tap(((b[0] + b[2]) // 2, (b[1] + b[3]) // 2), after)
+
+
+@case("KB-90", base="B0-九键", visual=True)
+def kb90(d):
+    ids = [str(i) for i in range(1, 10)] + ["backspace", "enter", "symbols", "numbers"]
+    nine = board_keys(d)
+    if any(i not in nine for i in ids):
+        raise Blocked(f"九键上缺 {[i for i in ids if i not in nine]}")
+    d.shot("kb", "九键")
+    tap_key(d, "numbers")
+    pad = board_keys(d)
+    d.shot("kb", "九键点 123 后的数字键盘")
+    pairs = [(i, i) for i in ids[:-1]] + [("back", "numbers")]
+    moved = [f"{p}{pad.get(p, (None,))[0]}≠{nine[t][0]}" for p, t in pairs if pad.get(p, (None,))[0] != nine[t][0]]
+    check(not moved, f"不在九键的位置：{moved}")
+    check(pad["symbols"][1] == "符" and pad["back"][1] == "返回", f"符、返回 写的是「{pad['symbols'][1]}」「{pad['back'][1]}」")
+    tap_key(d, "back")
+    again = board_keys(d)
+    check(all(again.get(i, (None,))[0] == nine[i][0] for i in ids), "返回 后九键的键挪了")
+    return "1–9、⌫、回车、符 原位，返回 在 123 的位置；返回 后九键不变"
+
+
+@case("KB-91", visual=True)
+def kb91(d):
+    tap_key(d, "symbols")
+    keys = board_keys(d)
+    row = ["back", "numbers", "lock", "space", "backspace", "enter"]
+    order = sorted((k for k in row if k in keys), key=lambda k: keys[k][0][0])
+    d.shot("kb", "符号面板")
+    check(order == row, f"底排 {order}")
+    check(keys["numbers"][1] == "123" and keys["back"][1] == "返回", f"返回、123 写的是「{keys['back'][1]}」「{keys['numbers'][1]}」")
+    tap_key(d, "numbers")
+    pad = board_keys(d)
+    check("=" in pad and "back" in pad, f"123 后不是数字键盘：{sorted(pad)[:8]}")
+    tap_key(d, "symbols")
+    check("lock" in board_keys(d), "数字键盘的 符 没打开符号面板")
+    tap_key(d, "back")
+    check("=" in board_keys(d), "符号面板的 返回 没回到数字键盘")
+    return "返回、123、锁…；123 进数字键盘，符 进面板，返回 回到数字键盘"
+
+
+@case("KB-92", page="tel", visual=True)
+def kb92(d):
+    pad = board_keys(d)
+    d.shot("kb", "电话框的数字键盘")
+    check(pad.get("back", (None, ""))[1] == "返回", f"电话框数字键盘的返回键写「{pad.get('back', (None, ''))[1]}」")
+    tap_key(d, "back")
+    letters = board_keys(d)
+    check("numbers" in letters and "back" not in letters, "返回 后不是字母键盘")
+    s = d.screen()
+    emoji = s.find(text="表情", where="ime") or s.find(desc="表情", where="ime")
+    if not emoji:
+        raise Blocked("工具栏上没有表情")
+    d.tap(emoji.c, 0.8)
+    said = {"表情": board_keys(d).get("back", (None, ""))[1]}
+    d.shot("kb", "表情面板")
+    tap_key(d, "emoticon")
+    said["颜文字"] = board_keys(d).get("back", (None, ""))[1]
+    d.shot("kb", "颜文字面板")
+    check(all(v == "返回" for v in said.values()), f"返回键写的是 {said}")
+    return "电话框数字键盘、表情、颜文字的返回键都写「返回」"
+
+
+def hold_pick(d, xy, text, shot=None):
+    """[xy] held: its long press's cell reading [text] picked, the popup's texts as they were. The focus follows the
+    finger's way from where the popup opened, a step each 0.6 of a cell (PopupFocus), not the cell under it: the
+    finger moved from the cell in focus by the cells between them, at that rate, and lifted"""
+    x, y = xy
+    d.touch(("down", x, y), ("sleep", 0.9), ("move", x, y))
+    s = d.screen()
+    if shot:
+        d.shot("full", shot)
+    cells = [n for n in s.nodes if n.text and not n.clickable and n.b[3] <= y]
+    texts = s.texts(where="all")
+    # the popup's own: the one in focus and the one reading [text] nearest it
+    focused = next((n for n in cells if n.selected), None)
+    cell = min((n for n in cells if n.text == text), default=None,
+               key=lambda n: (n.c[0] - (focused or n).c[0]) ** 2 + (n.c[1] - (focused or n).c[1]) ** 2)
+    if not cell or not focused:
+        d.touch(("up", x, y))
+        raise Blocked(f"长按弹出里没有「{text}」或没有选中的格：{texts[-16:]}")
+    w, h = focused.b[2] - focused.b[0], focused.b[3] - focused.b[1]
+    cols = round((cell.c[0] - focused.c[0]) / w)
+    rows = round((cell.c[1] - focused.c[1]) / h)
+    tx, ty = x + int(cols * 0.6 * w), y + int(rows * 0.6 * h)
+    d.touch(("move", (x + tx) // 2, (y + ty) // 2), ("move", tx, ty), ("sleep", 0.2), ("up", tx, ty))
+    time.sleep(0.5)
+    return texts
+
+
+def checked_box(d, text):
+    """the first check box reading [text] (the one by the field: the ways' come after it) ticked"""
+    s = d.screen()
+    box = min((n for n in s.app() if n.text == text and n.cls.endswith("CheckBox")), key=lambda n: n.b[1], default=None)
+    if not box:
+        raise Blocked(f"对话框里没有勾选框「{text}」")
+    d.tap(box.c, 0.5)
+
+
+def row_toggle(d, text):
+    """the button row's toggle reading [text] (not the check box by the field)"""
+    n = next((n for n in d.screen().app() if n.text == text and n.clickable and not n.cls.endswith("CheckBox")), None)
+    if not n:
+        raise Blocked(f"按钮排里没有「{text}」")
+    return n
+
+
+@case("KB-93", base="B0-设置", mutates=True, visual=True)
+def kb93(d):
+    st = script("14-settings")
+    st.slots_tab(d, "全键盘")
+    st.key_dialog(d, "q")
+    checked_box(d, "使用变量")
+    d.tap_text("插入变量", scroll=False, after=0.8)
+    d.tap_text("${weekday_cn}", contains=True, after=0.6)
+    s = d.screen()
+    now = next((n.text for n in s.app() if n.text.startswith("现在打出：")), None)
+    check(now, f"框下没有「现在打出：」：{s.texts()[-12:]}")
+    value = now.removeprefix("现在打出：")
+    d.tap_text("添加", scroll=False, after=0.6)
+    d.shot("app", "q 的对话框：加了一项「变量」")
+    marked = any(n.desc == f"{value}, 变量" or n.desc == "${weekday_cn}, 变量" for n in d.screen().app())
+    st.dialog_ok(d)
+    d.open_page("text")
+    d.clear()
+    q = d.face("q", "Q")
+    shown = hold_pick(d, q.c, value, shot=f"长按 q：弹出里是今天的「{value}」")
+    got = d.expect_field(value, msg="选了打出「{got}」，应打出 " + value)
+    check(marked, "对话框里那一项读屏没念「…，变量」")
+    check("${weekday_cn}" not in shown, "弹出里画着 ${weekday_cn}，不是它的值")
+    return f"预览「{now}」，弹出有「{value}」，选了打出「{got}」"
+
+
+case("KB-94", needs="jvm:TextVariablesUatTest.aSwipesTextOfVariablesTypesTheTimeItIsSwiped")(lambda d: None)
+
+case("KB-95", needs="jvm:TextVariablesUatTest.withoutTheMarkAsWrittenWithItAsFilledIn")(lambda d: None)
+
+case("KB-96", needs="manual:键盘开着等到下一分钟再选带变量的项，打出新时间；JVM 见 KeyResolverMarksTest.outputFillsInAgainAsPicked、"
+                     "TextVariablesUatTest.rowsCountedInANewMinuteLeaveTheCatchUpToDrawIt")(lambda d: None)
+
+case("KB-97", needs="jvm:TextVariablesUatTest.anItemOfVariablesFirstIsTypedBySwipingUp")(lambda d: None)
+
+
+def comma_as_is(d):
+    """，键's `.` marked 不转中文标点 on the settings page"""
+    st = script("14-settings")
+    st.slots_tab(d, "功能键")
+    st.key_dialog(d, "，键")
+    st.dialog_pick(d, ".")
+    t = row_toggle(d, "不转中文标点")
+    d.tap(t.c, 0.5)
+    n = row_toggle(d, "不转中文标点")
+    # its name the words, on or off its state (read 「不转中文标点，已开」)
+    said = f"{n.desc}，{'已开' if n.checked else '已关'}"
+    d.shot("app", "，键的对话框：`.` 开了不转中文标点，键帽下写「原样」")
+    st.dialog_ok(d)
+    return said
+
+
+@case("KB-98", base="B0-设置", mutates=True, visual=True)
+def kb98(d):
+    said = comma_as_is(d)
+    d.open_page("text")
+    d.clear()
+    comma = board_keys(d).get("comma")
+    if not comma:
+        raise Blocked(f"键盘上没有，键：{sorted(board_keys(d))[:20]}")
+    b = comma[0]
+    xy = ((b[0] + b[2]) // 2, (b[1] + b[3]) // 2)
+    shown = hold_pick(d, xy, ".", shot="长按，键：`.` 画成 `.`，别的照旧是中文标点")
+    got = d.expect_field(".", msg="选 `.` 打出「{got}」，应是 `.`")
+    d.clear()
+    d.type("ni")
+    first = (d.cands() or [""])[0]
+    hold_pick(d, xy, ".")
+    then = d.expect_field(first + ".", msg=f"打着 ni 选 `.` 打出「{{got}}」，应是「{first}.」")
+    check(said == "不转中文标点，已开", f"按钮排的开关读作「{said}」")
+    return f"开关读作「{said}」；弹出 {[t for t in shown if t in ('.', '。', '，', '？', '！')]}；打出「{got}」，打着 ni「{then}」"
+
+
+case("KB-99", needs="jvm:AsIsPunctuationTypedTest.aMarkedFirstIsTypedBySwipingUp")(lambda d: None)
+
+case("KB-100", needs="jvm:AsIsPunctuationTypedTest.notMarkedItIsChinesePunctuationAsEver、AsIsPunctuationTypedTest.englishTypesTheSameMarkedOrNot")(lambda d: None)
+
+
+case("KB-110", needs="jvm:AsIsPunctuationTypedTest.aMarkedBracketGoesInPairedAfterTheCandidate")(lambda d: None)
+
+
+case("KB-111", needs="jvm:AsIsPunctuationTypedTest.englishPairsTheBracketMarkedOrNot")(lambda d: None)

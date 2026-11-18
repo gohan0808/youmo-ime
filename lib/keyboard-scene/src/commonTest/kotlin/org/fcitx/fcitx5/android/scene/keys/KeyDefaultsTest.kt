@@ -44,7 +44,7 @@ class KeyDefaultsTest {
 
     @Test
     fun aGroupsCornerIsFirstAndItsSymbolsTheLettersOwn() {
-        val qw = KeyDefaults.of(KeyId("g14/qw"), KeyboardVariant(Form.Grouped14), NodeFacts(letters = "qw", themeFirst = "keypad:1", place = 0))!!
+        val qw = KeyDefaults.of(KeyId("g14/qw"), KeyboardVariant(Form.Grouped14), NodeFacts(letters = "qw", layoutFirst = "keypad:1", place = 0))!!
         assertEquals(listOf("Q", "W", "1", "q", "w"), texts(qw))
         assertEquals(Item("1", Commit.Keypad('1')), qw.first)
         assertEquals(2, qw.focus)
@@ -54,7 +54,7 @@ class KeyDefaultsTest {
         // a theme's swipe-up= that types nothing (an action, an empty commit:) is no first, as on any other key:
         // the built-in corner of its place, never an empty cell between the capitals and the lower case
         for (written in listOf("sym:BackSpace", "commit:")) {
-            val g = KeyDefaults.of(KeyId("g14/as"), KeyboardVariant(Form.Grouped14), NodeFacts(letters = "as", themeFirst = written, place = 5))!!
+            val g = KeyDefaults.of(KeyId("g14/as"), KeyboardVariant(Form.Grouped14), NodeFacts(letters = "as", layoutFirst = written, place = 5))!!
             assertEquals(listOf("A", "S", "6", "a", "s", "@", "*"), texts(g), written)
             assertEquals(Item("6", Commit.Keypad('6')), g.first, written)
         }
@@ -71,7 +71,7 @@ class KeyDefaultsTest {
     @Test
     fun theFullKeyboardsLettersArePresets() {
         val full = KeyboardVariant(Form.Full)
-        val q = KeyDefaults.of(KeyId("full/q"), full, NodeFacts(text = "q", typing = true, themeFirst = "1"))!!
+        val q = KeyDefaults.of(KeyId("full/q"), full, NodeFacts(text = "q", typing = true, layoutFirst = "1"))!!
         assertEquals(listOf("1", "Q"), texts(q))
         assertEquals(Item("1"), q.first)
         assertEquals(listOf("1", "q"), texts(KeyDefaults.of(KeyId("full/q"), full, NodeFacts(text = "q", typing = true), caps = true)))
@@ -89,7 +89,7 @@ class KeyDefaultsTest {
     @Test
     fun aListsItemsKeepTheirActions() {
         val p = Popup("list", null, listOf("˙" to "action:tone-5"), emptyMap())
-        val tone = KeyDefaults.of(null, KeyboardVariant(Form.ZhuyinNine), NodeFacts(popup = p, themeFirst = "action:tone-5"))!!
+        val tone = KeyDefaults.of(null, KeyboardVariant(Form.ZhuyinNine), NodeFacts(popup = p, layoutFirst = "action:tone-5"))!!
         assertEquals(Item("˙", Commit.Action("action:tone-5")), tone.first)
         val asIs = Popup("list", null, listOf("。" to null, "？" to null), mapOf("as-is" to "true"))
         assertEquals(Item("。", Commit.AsIs), KeyDefaults.listed(asIs)?.first)
@@ -127,22 +127,45 @@ class KeyDefaultsTest {
         assertEquals(Item("、"), KeyDefaults.itemOf("code:U+3001"))
         assertEquals(Item("", Commit.Action("sym:BackSpace")), KeyDefaults.itemOf("sym:BackSpace"))
         val full = KeyboardVariant(Form.Full)
-        val qq = KeyDefaults.of(KeyId("full/q"), full, NodeFacts(text = "q", typing = true, themeFirst = "commit:qq"))!!
+        val qq = KeyDefaults.of(KeyId("full/q"), full, NodeFacts(text = "q", typing = true, layoutFirst = "commit:qq"))!!
         assertEquals(Item("qq", Commit.AsIs), qq.first)
         assertEquals(listOf("qq", "1", "Q"), texts(qq))
         // the list's own 1, not a second
-        val one = KeyDefaults.of(KeyId("full/q"), full, NodeFacts(text = "q", typing = true, themeFirst = "commit:1"))!!
+        val one = KeyDefaults.of(KeyId("full/q"), full, NodeFacts(text = "q", typing = true, layoutFirst = "commit:1"))!!
         assertEquals(listOf("1", "Q"), texts(one))
         assertEquals(Item("1"), one.first)
-        val action = KeyDefaults.of(KeyId("full/q"), full, NodeFacts(text = "q", typing = true, themeFirst = "sym:BackSpace"))!!
+        val action = KeyDefaults.of(KeyId("full/q"), full, NodeFacts(text = "q", typing = true, layoutFirst = "sym:BackSpace"))!!
         assertEquals(listOf("1", "Q"), texts(action))
     }
 
     @Test
     fun aThemesFirstNotInTheListGoesFirstAmongTheSymbols() {
-        val l = KeyDefaults.of(KeyId("full/q"), KeyboardVariant(Form.Full), NodeFacts(text = "q", typing = true, themeFirst = "!"))!!
+        val l = KeyDefaults.of(KeyId("full/q"), KeyboardVariant(Form.Full), NodeFacts(text = "q", typing = true, layoutFirst = "!"))!!
         assertEquals(listOf("!", "1", "Q"), texts(l))
         assertEquals(0, l.focus)
+    }
+
+    // a user's layout's new key of no list (it types `commit:` text): the first it writes alone; none written, none
+    @Test
+    fun aFirstWrittenOnAKeyOfNoListIsItsListAlone() {
+        val full = KeyboardVariant(Form.Full)
+        val l = KeyDefaults.of(KeyId("mine/ha"), full, NodeFacts(layoutFirst = "commit:哈哈"))!!
+        assertEquals(listOf("哈哈"), texts(l))
+        assertEquals(Item("哈哈", Commit.AsIs), l.first)
+        assertNull(KeyDefaults.of(KeyId("mine/ha"), full, NodeFacts()))
+        // one that writes `<popup from="none"/>` has none, its swipe-up= or alt= aside (R26 F8345)
+        val none = Popup("none", null, emptyList(), emptyMap())
+        assertNull(KeyDefaults.of(KeyId("mine/ha"), full, NodeFacts(popup = none, layoutFirst = "commit:哈哈")))
+        assertNull(KeyDefaults.of(KeyId("full/q"), full, NodeFacts(text = "q", typing = true, popup = none, layoutFirst = "commit:qq")))
+        // an action first names no item of a list: none
+        assertNull(KeyDefaults.of(KeyId("mine/ha"), full, NodeFacts(layoutFirst = "sym:BackSpace")))
+        // nor a bare word of the vocabulary: an action, never its letters typed (L6 review M1)
+        for (word in listOf("ime-picker", "lang", "panel-back", "space-long-press", "caps")) {
+            assertNull(KeyDefaults.of(KeyId("mine/globe"), full, NodeFacts(layoutFirst = word)), word)
+            assertEquals(Item("", Commit.Action(word)), KeyDefaults.itemOf(word))
+        }
+        // on a key of a list: no first of it either
+        assertEquals(KeyDefaults.of(KeyId("full/q"), full, NodeFacts(text = "q", typing = true)), KeyDefaults.of(KeyId("full/q"), full, NodeFacts(text = "q", typing = true, layoutFirst = "lang")))
     }
 
     @Test

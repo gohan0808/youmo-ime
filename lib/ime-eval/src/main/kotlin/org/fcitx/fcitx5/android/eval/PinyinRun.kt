@@ -18,6 +18,7 @@ import org.fcitx.fcitx5.android.engine.pinyin.KeyedSegmenter
 import org.fcitx.fcitx5.android.engine.pinyin.PinyinSegmenter
 import org.fcitx.fcitx5.android.engine.pinyin.Segmenter
 import org.fcitx.fcitx5.android.engine.pinyin.SyllableGraph
+import org.fcitx.fcitx5.android.engine.pinyin.Touch
 import org.fcitx.fcitx5.android.engine.rerank.SentencePicker
 import org.fcitx.fcitx5.android.engine.rerank.SentenceRefiner
 import org.fcitx.fcitx5.android.engine.session.CoarseCandidates
@@ -59,6 +60,8 @@ class PinyinRun(
     merged: DictionaryFile? = null,
     /** [merged] compiled against another base dictionary, as after an app update till the recompile. */
     mergedStale: Boolean = false,
+    /** Words typed before the run ([TypedHistory]'s lines), counted as the user's: what a 双拼 key read alone reads. */
+    typed: List<String>? = null,
 ) {
     // the user model is read only when scoring, by then made
     private val prior: LayerPrior? = layers?.let { spec ->
@@ -69,7 +72,7 @@ class PinyinRun(
         }
         LayerPrior.parse(data.layers, spec, listOfNotNull(pack?.layer), extra)
     }
-    private val user: UserModel? = if (pack == null && merged == null) {
+    private val user: UserModel? = if (pack == null && merged == null && typed == null) {
         null
     } else {
         UserModel(data.dictionary, data.vocabulary, index = data.wordIndex, merged = merged, mergedStale = mergedStale).also { u ->
@@ -77,6 +80,7 @@ class PinyinRun(
                 val layer = prior?.layer(p.layer) ?: 1
                 p.words.forEach { u.list(it.entry, it.score, layer, data.model.vocabularySize) }
             }
+            typed?.let { TypedHistory.count(u, data, it) }
         }
     }
     // as the app's session has them
@@ -103,7 +107,7 @@ class PinyinRun(
             val typing = Typing()
             val latencies = (1..sample.input.length).map { length ->
                 val started = System.nanoTime()
-                typing.type(sample.input.substring(0, length), sample.context, sample.taps?.subList(0, length))
+                typing.type(sample.input.substring(0, length), sample.context, sample.taps?.subList(0, length), sample.touches?.subList(0, length))
                 (System.nanoTime() - started) / NANOS_PER_MICRO
             }
             RunResult(sample.input, typing.pause(), latencies)
@@ -145,12 +149,12 @@ class PinyinRun(
         private var picked = 0
         private var refines = false
 
-        /** Reads [input] typed after [context], as a key typed does, and gives what is shown; [taps] where each key was tapped. */
-        fun type(input: String, context: String, taps: List<Float>? = null): List<String> {
+        /** Reads [input] typed after [context], as a key typed does, and gives what is shown; [taps] and [touches] where each key was tapped. */
+        fun type(input: String, context: String, taps: List<Float>? = null, touches: List<Touch?>? = null): List<String> {
             val contextWords = textWords.lastTwo(context)
             // text that ends in no word is no context for the rerankers either, as in the session
             before = if (contextWords.isEmpty()) "" else context
-            val graph = segmenter.segment(input, taps?.toFloatArray())
+            val graph = segmenter.segment(input, taps?.toFloatArray(), touches?.toTypedArray())
             val decoding = decode(graph, contextWords)
             sentences = decoding.sentences
             readings = sentences.map { it.text }

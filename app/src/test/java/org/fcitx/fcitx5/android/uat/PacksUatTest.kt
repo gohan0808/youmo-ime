@@ -7,6 +7,7 @@ package org.fcitx.fcitx5.android.uat
 import android.content.Intent
 import androidx.preference.PreferenceFragmentCompat
 import kotlinx.coroutines.runBlocking
+import org.fcitx.fcitx5.android.BuildConfig
 import org.fcitx.fcitx5.android.FcitxApplication
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.Uat
@@ -162,12 +163,18 @@ class PacksUatTest {
             TestShelves.use(text = true, voice = false)
             h.idle()
             assertNull("the keyboard types without the voice pack", gate(h))
-            // holding the space (voice input, the default): nothing, as 0.5.x's text build; no notice, nothing opened
+            // holding the space (voice input, the default): nothing, as 0.5.x's text build; no notice, nothing opened,
+            // and lifted it types one space as a tap would (R27 F8580: none or two passed before)
             val space = h.keyNamed("space")
+            h.api.calls.clear()
             val f = h.finger(space, h.at(space))
             h.advance(700)
             f.up(h.at(space))
             h.idle()
+            val spaces = h.api.calls.filter {
+                it.startsWith("sendKey") && "up=false" in it && ("sym=32," in it || "char= ," in it || "key=space," in it)
+            }
+            assertEquals(h.api.calls.toString(), 1, spaces.size)
             assertEquals(emptyList<String>(), h.noticeTexts())
             assertNull(opened())
             // the bar's microphone: the notice says which pack, and the page opens; no permission asked
@@ -176,6 +183,79 @@ class PacksUatTest {
             h.idle()
             assertEquals(listOf(h.service.getString(R.string.pack_voice_needed)), h.noticeTexts())
             assertTrue(openedPacks(opened()))
+        }
+    }
+
+    // this build takes voice packs from v2 (0.6.0's): a v1 kept from 0.6.0's first test build stays installed
+    // but unused, the microphone says which version to import and opens the page, the space does nothing as
+    // without the pack, nothing reads its models, and importing v2 is the way back
+    @Test
+    @Uat("VO-34")
+    fun aVoicePackOlderThanTheAppTakesAsksForTheNewOneAndVoiceStaysOff() {
+        val dir = Files.createTempDirectory("packs").toFile()
+        // this build's requirements, as PackStore makes them
+        val app = TestShelves.requirements + (PackKind.VOICE to PackRequirement(BuildConfig.PACK_VOICE_FORMAT, BuildConfig.PACK_VOICE_MIN_VERSION))
+        // the v1 imported under the test build that took it; then this app's start
+        val old = PackShelf(dir, listOf(TestShelves.packs.publicKey), TestShelves.requirements).apply { load() }
+        assertTrue(old.import(TestShelves.pack(PackKind.TEXT).inputStream()) is ImportResult.Imported)
+        assertTrue(old.import(TestShelves.pack(PackKind.VOICE, version = 1, format = BuildConfig.PACK_VOICE_FORMAT).inputStream()) is ImportResult.Imported)
+        val shelf = PackShelf(dir, listOf(TestShelves.packs.publicKey), app).apply { load() }
+        try {
+            KeyboardHarness().use { h ->
+                h.start()
+                PackStore.useShelf(shelf)
+                h.idle()
+                // what the keyboard shows taken first, the space held before the microphone opens anything; the
+                // table only reads them, so no row stands on another's (review R26 F8179)
+                val status = shelf.status(PackKind.VOICE)
+                val voiceDir = PackStore.dir(PackKind.VOICE)
+                val gated = gate(h)
+                val needed = PackImports.describe(h.service, status)
+                val space = h.keyNamed("space")
+                val f = h.finger(space, h.at(space))
+                h.advance(700)
+                f.up(h.at(space))
+                h.idle()
+                val spaceHeld = h.noticeTexts() to opened()
+                val mic = KeyboardHarness.all(h.inputView).first { h.shown(it) && it.contentDescription == h.service.getString(R.string.voice_input) }
+                h.tap(mic)
+                h.idle()
+                val micTapped = h.noticeTexts() to opened()
+                assertRows(
+                    "this build takes the voice pack from v2: the test build's v1 is too old" to {
+                        assertEquals(2, BuildConfig.PACK_VOICE_MIN_VERSION)
+                        assertTrue("$status", status is PackStatus.NeedsUpdate)
+                    },
+                    "nothing reads the old pack's models: no directory is given for it" to { assertNull(voiceDir) },
+                    "the keyboard still types: the text pack is ready" to { assertNull(gated) },
+                    "the space held does nothing, as without the pack: no notice, no page" to {
+                        assertEquals(emptyList<String>(), spaceHeld.first)
+                        assertNull(spaceHeld.second)
+                    },
+                    "the microphone says to import v2 and opens the packs page" to {
+                        assertEquals(listOf(h.service.getString(R.string.pack_voice_needed_update, 2)), micTapped.first)
+                        assertTrue(openedPacks(micTapped.second))
+                    },
+                    "the packs page says which version is needed and which is there" to {
+                        assertEquals(h.service.getString(R.string.pack_status_needs_update, 2, 1), needed)
+                    },
+                )
+                // then the imports, in order: the old v1 again is refused, saying v2 is needed, the one there staying;
+                // v2 over it makes voice ready
+                val again = shelf.import(TestShelves.pack(PackKind.VOICE, version = 1, format = BuildConfig.PACK_VOICE_FORMAT).inputStream())
+                assertEquals(
+                    "v1 again: refused",
+                    h.service.getString(R.string.pack_incompatible_old, "youmo-voice-v1.youmopack", h.service.getString(R.string.pack_voice), 1, 2),
+                    PackImports.describe(h.service, PackImports.Outcome("youmo-voice-v1.youmopack", again)),
+                )
+                assertTrue("v1 refused: the one there stays", shelf.status(PackKind.VOICE) is PackStatus.NeedsUpdate)
+                assertTrue("v2 imported", shelf.import(TestShelves.pack(PackKind.VOICE, version = 2, format = BuildConfig.PACK_VOICE_FORMAT).inputStream()) is ImportResult.Imported)
+                assertTrue("v2: voice ready", shelf.status(PackKind.VOICE) is PackStatus.Ready)
+                assertNotNull("v2: its models read", shelf.dir(PackKind.VOICE))
+            }
+        } finally {
+            TestShelves.use()
+            dir.deleteRecursively()
         }
     }
 

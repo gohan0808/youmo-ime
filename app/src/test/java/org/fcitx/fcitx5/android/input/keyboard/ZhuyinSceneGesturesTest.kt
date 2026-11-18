@@ -309,10 +309,10 @@ class ZhuyinSceneGesturesTest {
                 assertEquals(",", h.keyNamed("comma").label)
                 h.tap(h.key("123"))
                 h.idle()
-                val active = listOf(StatusEntry(1, "punctuation", "fcitx-punc-active", ""))
+                val active = listOf(StatusEntry(1, "punctuation", "fcitx-punc-active", "", true))
                 h.emit(HostEvent.StatusArea(active, KeyboardHarness.PINYIN, mapOf("," to "，")))
                 h.idle()
-                h.tap(h.key("ABC"))
+                h.tap(h.keyNamed("back"))
                 h.idle()
                 assertEquals(listOf("，", "，"), listOf(h.keyNamed("comma").label, h.keyNamed("r4c4").label))
             }
@@ -354,7 +354,7 @@ class ZhuyinSceneGesturesTest {
         for (level in listOf(KeyboardHeightLevels.COMPACT, KeyboardHeightLevels.ALL.size - 1)) {
             val heights = KeyboardHeightLevels.ALL[level]
             prefs.set(keyboard.keyboardHeightPercent, heights.portrait)
-            prefs.set(keyboard.keyboardHeightPercentLandscape, heights.landscape)
+            prefs.set(keyboard.keyboardHeightPercentLandscape, heights.landscapeLevel)
             val shown = run {
                 harness(InputType.TYPE_CLASS_TEXT, PinyinKeyboard.ZhuyinNine).use { h ->
                     val grid = h.keys().filter { it.id == "backspace" || it.id?.matches(Regex("r[1-4]c[1-5]")) == true }
@@ -522,7 +522,7 @@ class ZhuyinSceneGesturesTest {
         for (level in listOf(KeyboardHeightLevels.COMPACT, KeyboardHeightLevels.ALL.size - 1)) {
             val heights = KeyboardHeightLevels.ALL[level]
             prefs.set(keyboard.keyboardHeightPercent, heights.portrait)
-            prefs.set(keyboard.keyboardHeightPercentLandscape, heights.landscape)
+            prefs.set(keyboard.keyboardHeightPercentLandscape, heights.landscapeLevel)
             val sizes = run {
                 harness(InputType.TYPE_CLASS_TEXT).use { h -> listOf("ㄅ", "ˇ", "ㄥ").map { h.key(it).textSize(it)!! } }
             }

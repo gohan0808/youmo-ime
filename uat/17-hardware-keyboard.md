@@ -12,6 +12,8 @@ uat/tools/emu-keyboard.sh key SHIFT          # 依次按下松开
 uat/tools/emu-keyboard.sh combo CTRL SPACE   # 按住前面的，按最后一个
 ```
 
+Android 10（API 29，youmo29）没有 `uinput` 命令，脚本在那里改用系统的 `hid` 命令插同一个键盘，用法一样；键盘没插上时 `up` 直接报错。
+
 不要用模拟器自带的键盘（qwerty2，它的 Shift 是粘滞的，也不给输入法字符），也不要在 redroid 这类和宿主机共用内核的容器里造键盘（见脚本开头）。
 
 前提里的 **B0-实体**：B0，再接上实体键盘（系统设置里"显示屏幕键盘"保持关闭，这是默认），点「普通文本」框，屏幕键盘弹出来。
@@ -127,11 +129,6 @@ uat/tools/emu-keyboard.sh combo CTRL SPACE   # 按住前面的，按最后一个
 - **预期**：第一次 Shift 到英文；第二次回到五笔（不是拼音），q 的候选里有「我」。
 - **JVM**：`HardwareKeyUatTest.shiftBackFromEnglishIsWubiNotPinyin`（五笔 → 英文 → 五笔）；设备上不跑。
 
-### HK-14 [P1] Ctrl+Shift 轮流切换，跳过手写
-- **前提**：B0-实体，在 **输入法 → 拼音** 里把 **键盘** 选成「九键」，在 **输入法** 里依次添加五笔、手写（列表：拼音、英文、五笔、手写）。
-- **操作**：反复按 Ctrl+Shift，每次看光标旁闪出的名字。
-- **预期**：依次是 En → 五 → 拼 → En…，不出现手写；拼音照常轮到（键盘选了九键，实体键盘上仍打全拼）。
-- **JVM**：`HardwareKeyUatTest.ctrlShiftGoesRoundSkippingHandwriting`（拼音在九键上，Ctrl+Shift 依次 En、五、拼、En，跳过手写）；设备上不跑。
 
 ### HK-15 [P1] Shift+Ctrl 顺序反过来也行
 - **前提**：B0-实体。
@@ -152,17 +149,7 @@ uat/tools/emu-keyboard.sh combo CTRL SPACE   # 按住前面的，按最后一个
 
 ## 手写和九键遇上实体键盘
 
-### HK-18 [P1] 手写里按实体键盘，用拼音打
-- **前提**：B0-实体，添加了手写；点「普通文本」框，在屏幕键盘上用地球键切到手写（屏幕上是书写板）。
-- **操作**：按 n i 空格。
-- **预期**：屏幕键盘收起；按 n 时就切成了拼音，「你」上屏。
-- **JVM**：`HardwareKeyUatTest.handwritingTypedOnIsPinyin`（手写里打 n 就换成拼音，屏幕键盘收起）；设备上不跑。
-
-### HK-19 [P1] 叫回屏幕键盘，回到手写板
-- **前提**：B0-实体，切到手写，按 n i 空格（屏幕键盘收起）。
-- **操作**：点光标旁小窗上的键盘图标。
-- **预期**：屏幕键盘回来，而且是手写书写板，不是拼音键盘。
-- **JVM**：`HardwareKeyUatTest.theTouchKeyboardBackIsHandwriting`（点小窗的键盘按钮，回来的是手写板）；设备上不跑。
+0.6.1 起手写不是输入法（工具栏的开关）：0.6.0 的「Ctrl+Shift 跳过手写」「手写里按实体键用拼音打」「叫回屏幕键盘回到手写板」「快捷键切过后不跳回手写」（HK-14、HK-18、HK-19、HK-22）都没有了，所在的输入法本来就能用实体键盘打。
 
 ### HK-20 [P1] 九键里按实体键盘打全拼
 - **前提**：B0-实体，在 **输入法 → 拼音** 里把 **键盘** 选成「九键」。
@@ -171,16 +158,11 @@ uat/tools/emu-keyboard.sh combo CTRL SPACE   # 按住前面的，按最后一个
 - **JVM**：`HardwareKeyUatTest.nineKeysTypedOnAndBack`（九键里按 2026hao 空格都发给引擎；回来是九键）；设备上不跑。
 
 ### HK-21 [P1] 手写里写了字再按实体回车：先上屏，再按才发
-- **前提**：B0-实体，点「聊天」框，切到手写；用手指在书写板上写「人」，停笔（字在框里带下划线）。
+- **前提**：B0-实体，点「聊天」框，点工具栏的 **手写**；用手指在字母区写「人」，停笔（「人」在编码处，没上屏）。
 - **操作**：按实体键盘的回车；看聊天框；再按一次回车。
-- **预期**：第一次回车「人」上屏（下划线没了），还没发出去，和拼音里回车先上屏字母一样；第二次回车发出一条「人」，框清空。全程没有切到拼音，没有多发空消息。
+- **预期**：第一次回车「人」上屏，还没发出去，和拼音里回车先上屏字母一样；第二次回车发出一条「人」，框清空。没有多发空消息。
 - **JVM**：`HardwareKeysUatTest.returnPutsTheWrittenInThenGoesToTheApp`（手写的字第一下回车先上屏，第二下交给应用（`EngineReplay` 按宿主 `KeyRouter` 把实体键盘的键（isVirtual 为假）交给真的引擎；`:lib:ime-eval:uatTest`））；设备上不跑。
 
-### HK-22 [P1] 用快捷键主动切过之后，点框不再跳回手写
-- **前提**：B0-实体，切到手写，按 n i 空格（切成拼音）。
-- **操作**：按 Ctrl+Shift（切到下一个）；按 Esc；点光标旁小窗上的键盘图标。
-- **预期**：屏幕键盘回来时是用快捷键切到的那个输入法，不是手写。
-- **JVM**：`HardwareKeyUatTest.aShortcutsChoiceIsKeptWhenTheTouchKeyboardIsBack`（快捷键切过之后，键盘回来是切到的那个，不是手写）；设备上不跑。
 
 ## 其他
 
@@ -252,10 +234,10 @@ uat/tools/emu-keyboard.sh combo CTRL SPACE   # 按住前面的，按最后一个
 - **预期**：小窗里一页 3 个候选（1–3），按 = 换成下一页的 3 个。（屏幕键盘的候选栏是横着滑的一整排，不分页，不受这个设置影响。）
 - **JVM**：`HardwareKeysUatTest.thePageSizeSetIsTheWindowsPage`（每页 3 个，= 换下一页的 3 个（`EngineReplay` 按宿主 `KeyRouter` 把实体键盘的键（isVirtual 为假）交给真的引擎；`:lib:ime-eval:uatTest`））；设备上不跑。
 
-### HK-35 [P1] 引擎的提示（Ctrl+. 全角标点）说 2 秒，打字就收起
+### HK-35 [P1] 引擎的提示（Ctrl+. 全角标点）说 1 秒，打字就收起
 - **前提**：B0-实体，测试页「普通文本」框，屏幕键盘已收起。
-- **操作**：按 Ctrl+.，看到提示后马上按 n；按 Esc 清掉；再按 Ctrl+.，不打字等约 3 秒；最后再按一次 Ctrl+.。
-- **预期**：第一次出现「标点: 已启用全角标点。」或「标点: 全角标点已禁用。」，按 n 后提示马上收起；第二次的提示说的是相反的状态，不打字约 2 秒后自己收起（不是常驻 6 秒）；第三次的提示和第一次相同。
+- **操作**：按 Ctrl+.，看到提示后马上按 n；按 Esc 清掉；再按 Ctrl+.，不打字，按下后约 1.5 秒时看；最后再按一次 Ctrl+.。
+- **预期**：第一次出现「标点: 已启用全角标点。」或「标点: 全角标点已禁用。」，按 n 后提示马上收起；第二次的提示说的是相反的状态，不打字约 1 秒后自己收起，1.5 秒时已经不在（出错提示才停 2 秒）；第三次的提示和第一次相同。脚本读屏和按键各要几百毫秒，1 秒的提示等不到打字那一下之后再看，所以打字那一步临时把无障碍的阅读时长设成 5 秒（`settings put secure accessibility_non_interactive_ui_timeout_ms 5000`，这一步完就恢复原值，原来没设就删掉），提示停 5 秒，收起的只能是打字；不打字那次在按下后约 1.6 秒看。从按下 Ctrl+. 算到看完，打字那次超过 4.5 秒、不打字那次超过 1.95 秒时分不清是谁收起的，记为 Blocked（读屏太慢）。
 
 ### HK-36 [P1] Ctrl+Shift+F 简繁切换
 - **前提**：B0-实体，在拼音里，简体。
@@ -311,3 +293,21 @@ uat/tools/emu-keyboard.sh combo CTRL SPACE   # 按住前面的，按最后一个
 - **操作**：点工具栏的「显示屏幕键盘」，在屏幕 18 键上点 BN IO，按实体键盘的 2；清空，再点「显示屏幕键盘」（按了实体键屏幕键盘会收起），点 BN IO，按实体键盘的 d、`;`。
 - **预期**：第一次 2 选第 2 个候选上屏；第二次 BN IO 按编码行的读音留下（字母，没有私用区字符），d ; 按全键盘微软双拼读成 ding（小窗里有「定」之类）。Esc 和空格的路由见 HK-44 和 JVM。
 - **JVM**：`EnginesShuangpinKeysTest.aSemicolonTheSchemeTypesIsFullShuangpins`、`KeyboardPairTest.twoKeyedSessionsTurnByTheCodeAndAKeyFullTypesIsFulls`、`KeyRouterCodesTest.aHardwareMarkReachesShuangpinAsAHardwareChar`。
+
+### HK-46 [P1] 编码行在输入框里：实体键盘打的拼音也在框里
+- **前提**：B-IF，接上实体键盘（`uat/tools/emu-keyboard.sh up`），点「普通文本」框。
+- **操作**：按 n i h a o，看框和光标旁的悬浮候选窗；按空格。
+- **预期**：拼音带下划线在框里，悬浮候选窗里只有候选，没有拼音那一行；空格后框里是「你好」。
+- **JVM**：`HardwareKeyUatTest.theCodeInTheFieldIsNotInTheFloatingWindowToo`（对照：编码行在键盘上方时悬浮窗里有拼音）；设备上接实体键盘手工看。
+
+### HK-47 [P1] 实体键盘候选窗长按：读音行、词卡、字卡都一列，横屏也是
+- **前提**：B0，接实体键盘，「普通文本」框。
+- **操作**：按 y i n h a n g，长按悬浮候选窗里的「银行」，点读音行，点「行」；横屏再做一遍。
+- **预期**：候选窗的菜单最上面是读音行，词卡、字卡都是一列，横屏也是。
+- **JVM**：app `HardwareKeyUatTest.theFloatingWindowsCardsAreOneColumn`；ime-core `CardNavTest`（分页候选窗一列）；设备上不跑。
+
+### HK-48 [P1] 手写开着写了字，按实体键：先上屏写好的再打
+- **前提**：B0-实体，点「普通文本」框，叫出屏幕键盘，打开手写；在字母区写「中」，停笔（没上屏）。
+- **操作**：按实体键盘的 n；点光标旁小窗上的键盘图标。
+- **预期**：「中」上屏，接着编码处是 n；屏幕键盘回来时手写还开着。
+- **JVM**：`HardwareKeysUatTest.aHardwareKeyPutsTheWrittenInThenTypes`（:lib:ime-eval:uatTest，真数据）；设备上不跑。

@@ -6,7 +6,6 @@
 package org.fcitx.fcitx5.android.input
 
 import android.annotation.SuppressLint
-import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffColorFilter
@@ -46,10 +45,13 @@ import org.fcitx.fcitx5.android.data.punctuation.PunctuationStartKeys
 import org.fcitx.fcitx5.android.data.theme.Theme
 import org.fcitx.fcitx5.android.data.theme.ThemeManager
 import org.fcitx.fcitx5.android.host.HostEvent
+import org.fcitx.fcitx5.android.input.bar.BarIconDrawables
+import org.fcitx.fcitx5.android.input.bar.BarIcons
 import org.fcitx.fcitx5.android.input.bar.Calculation
 import org.fcitx.fcitx5.android.input.bar.KawaiiBarComponent
 import org.fcitx.fcitx5.android.input.bar.KawaiiBarStateMachine
 import org.fcitx.fcitx5.android.input.bar.ToolbarButton
+import org.fcitx.fcitx5.android.input.bar.ToolbarButtonLooks
 import org.fcitx.fcitx5.android.input.broadcast.InputBroadcastReceiver
 import org.fcitx.fcitx5.android.input.broadcast.InputBroadcaster
 import org.fcitx.fcitx5.android.input.broadcast.PreeditEmptyStateComponent
@@ -72,11 +74,13 @@ import org.fcitx.fcitx5.android.input.keyboard.CommonKeyActionListener
 import org.fcitx.fcitx5.android.input.keyboard.KeyboardArea
 import org.fcitx.fcitx5.android.input.keyboard.KeyboardHeightPercentBase.DisplayMetrics
 import org.fcitx.fcitx5.android.input.keyboard.KeyboardHeightPercentBase.RealSize
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardStyles
 import org.fcitx.fcitx5.android.input.keyboard.KeyboardWindow
 import org.fcitx.fcitx5.android.input.keyboard.OneHanded
 import org.fcitx.fcitx5.android.input.keyboard.SplitDock
 import org.fcitx.fcitx5.android.input.keyboard.SplitKeyboard
 import org.fcitx.fcitx5.android.input.keyboard.TextKeyboard
+import org.fcitx.fcitx5.android.input.keyboard.canvas.PackIcons
 import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneTrace
 import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneWindow
 import org.fcitx.fcitx5.android.input.picker.PickerData
@@ -120,6 +124,14 @@ import timber.log.Timber
 
 // a button in the room beside a board at a side, square
 private const val SIDE_BUTTON_DP = SplitKeyboard.ONE_HANDED_MIN_FREE_DP
+
+// the side buttons' icon: a vector's own
+private const val SIDE_ICON_DP = 24
+
+// one-handed's way back to the whole width in the side buttons' colour: a theme's `one-handed-exit` where it has one,
+// [again] once its file is read
+private fun showFullWidthIcon(b: ImageView, theme: Theme, tint: Int, again: () -> Unit) =
+    BarIconDrawables.show(b, PackIcons.of(theme), BarIcons.ONE_HANDED_EXIT, tint, b.dp(SIDE_ICON_DP), again)
 
 @SuppressLint("ViewConstructor")
 class InputView(
@@ -167,16 +179,18 @@ class InputView(
 
     // the empty side of a board put at the other (SplitKeyboard.Dock): a button moves it across
     private fun moveButton(to: SplitKeyboard.Dock, icon: Int, description: Int) = sideButton(icon, description) {
-        if (oneHandedPlaced) ThemeManager.prefs.oneHanded.setValue(OneHanded.entries.first { it.dock == to })
+        if (oneHandedPlaced) ThemeManager.prefs.oneHandedSide.setValue(OneHanded.entries.first { it.dock == to })
         else ThemeManager.prefs.splitDock.setValue(SplitDock.entries.first { it.dock == to })
     }
 
     private val moveLeft = moveButton(SplitKeyboard.Dock.LEFT, R.drawable.ic_baseline_arrow_back_24, R.string.split_dock_move_left)
     private val moveRight = moveButton(SplitKeyboard.Dock.RIGHT, R.drawable.ic_baseline_arrow_forward_24, R.string.split_dock_move_right)
 
-    // one-handed, the other button there: the whole width again, at either side
-    private fun fullWidthButton() = sideButton(R.drawable.ic_baseline_open_in_full_24, R.string.one_handed_exit) {
-        ThemeManager.prefs.oneHanded.setValue(OneHanded.Off)
+    // one-handed, the other button there: both hands again, at either side; 普通 opens out from the side, split is
+    // made anew (the service), the letters halved as the view is made; its icon a theme's `one-handed-exit` too
+    // (dressSideButtons)
+    private fun fullWidthButton() = sideButton(ToolbarButtonLooks.drawable(BarIcons.ONE_HANDED_EXIT.fallback), R.string.one_handed_exit) {
+        KeyboardStyles.oneHandedOff(floatingController.screenBuilt)
     }
 
     private val fullWidthLeft = fullWidthButton()
@@ -198,6 +212,9 @@ class InputView(
         // bottomMargin as WindowInsets (Navigation Bar) offset
         setOnClickListener(placeholderOnClickListener)
     }
+
+    // the room the docked keys are worked out in: the window's, as laid out, each layout and insets checked again
+    private val dockedRoom = DockedRoom(this, bottomPaddingSpace, { !floating }) { updateKeyboardSize() }
 
     private val scope = DynamicScope()
     private val broadcaster = InputBroadcaster()
@@ -362,8 +379,6 @@ class InputView(
         keyboardHeightPercentBase,
     )
 
-    private val keyboardHeightPx: Int get() = KeyboardArea.requestedHeight(context)
-
     private val keyboardSidePaddingPx: Int get() = KeyboardArea.sidePadding(context)
 
     private val keyboardBottomPaddingPx: Int get() = KeyboardArea.bottomPadding(context)
@@ -383,8 +398,10 @@ class InputView(
     }
 
     @Keep
-    private val onOneHandedChangeListener = ManagedPreference.OnChangeListener<OneHanded> { _, _ ->
-        updateKeyboardSize(slide = true)
+    // 普通 and 单手 of the shape it was made for slid between, and 单手's side; another style the service makes the
+    // view anew for (ViewRebuild.STYLE), so this one, about to go, is left as it is
+    private val onStyleChangeListener = ManagedPreference.OnChangeListener<Any> { _, _ ->
+        if (KeyboardStyles.of(floatingController.screenBuilt).let { it.floating == floating && it.splits == floatingController.splitsBuilt }) updateKeyboardSize(slide = true)
     }
 
     val keyboardView: View
@@ -392,6 +409,7 @@ class InputView(
     // the floating keyboard, or the docked one's handle (始终显示悬浮条): read once, the view made anew as they change
     private val floatingController: FloatingController = FloatingController(this, theme) { (it as? InputView)?.floatingController }
     private val floating = floatingController.floating
+
     private val floatingPlacer: FloatingPlacer? get() = floatingController.placer
     private val floatingHandle = floatingController.handle
     private val handleAtBottom = floatingController.handleAtBottom
@@ -435,7 +453,7 @@ class InputView(
         val look = ThemeManager.shownLook(theme)
         customBackground.background = ThemePictureDrawable.board(look)
         val pictureHost = look.picture?.let {
-            PictureHost(look, customBackground, resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE)
+            PictureHost(look, customBackground, KeyboardArea.landscape(context))
         }
         // an animated one played where it fits the limits (A4): read and decoded off the main thread, the
         // still picture till then; stopped as the keyboard hides or the view goes
@@ -527,7 +545,9 @@ class InputView(
             centerHorizontally()
             bottomOfParent()
         })
-        floatingController.setUp(keyboardView)
+        // resized (061-floating-resize), its keys laid out as tall in place, the input view kept (what is typed stays)
+        floatingController.setUp(keyboardView, ::updateKeyboardSize)
+        if (codeFloats) preedit.onShown = ::showCodeStrip
         codeStrip = if (!codeFloats) null else FloatingCodeStrip(context, theme, preedit.ui.root).also {
             // under the key previews, as the embedded row is
             add(it, lParams(wrapContent, dp(KawaiiBarComponent.stripHeight(fcitx.runImmediately { inputMethodEntryCached }.uniqueName))) {
@@ -552,7 +572,8 @@ class InputView(
         keyboardPrefs.registerOnChangeListener(onKeyboardSizeChangeListener)
         advancedPrefs.registerOnChangeListener(onKeyboardSizeChangeListener)
         ThemeManager.prefs.splitDock.registerOnChangeListener(onSplitDockChangeListener)
-        ThemeManager.prefs.oneHanded.registerOnChangeListener(onOneHandedChangeListener)
+        KeyboardStyles.styleKey(floatingController.screenBuilt.landscape).registerOnChangeListener(onStyleChangeListener)
+        ThemeManager.prefs.oneHandedSide.registerOnChangeListener(onStyleChangeListener)
     }
 
     // told each window attached, by the broadcaster: added once the views it places are laid out
@@ -569,17 +590,18 @@ class InputView(
         val sidePadding = if (floating) 0 else keyboardSidePaddingPx
         val placement = if (floating) null else placement()
         val boardHeight = if (floating) {
-            FloatingKeyboard.height(keyboardHeightPx, TextKeyboard.widthDp(context), resources.configuration.screenWidthDp)
+            // floating's keys from 0.6.0's, a share of the screen (061-landscape-height §5.4), as its width cuts them and the
+            // user resized it (061-floating-resize)
+            KeyboardArea.floatingSize(KeyboardArea.screen(context)).keysHeightPx
         } else {
-            // the whole docked area stays under ~70% of the screen, so the field shows in landscape.
-            // A docked handle (始终显示悬浮条) is added to the keyboard, the keys keeping their height,
-            // but counted in the cap: where it binds, the cap wins (the user, 2026-10-22)
+            // the app keeps 120 dp over the docked keyboard, the keys' rows 36 dp each, the rows winning (the user,
+            // 2026-11-14; KeyboardHeightCap). A docked handle (始终显示悬浮条) is added to the keyboard and counted
             val handle = if (floatingHandle != null) dp(FloatingHandle.HEIGHT_DP) else 0
-            KeyboardArea.keysHeight(context, codeRowDp, handle)
+            KeyboardArea.keysHeight(context, codeRowDp, handle, dockedRoom.take(), keyboardWindow.rowUnits())
         }
         val bottomPadding = if (floating) 0 else keyboardBottomPaddingPx
-        oneHandedPlaced = placement != null && !TextKeyboard.splits(context)
-        placeScenes(if (floating) emptySet() else SceneWindow.placement(oneHandedPlaced, TextKeyboard.splits(context)))
+        oneHandedPlaced = placement != null && !floatingController.splitsBuilt
+        placeScenes(if (floating) emptySet() else SceneWindow.placement(oneHandedPlaced, floatingController.splitsBuilt))
         val placing = listOf(boardHeight, bottomPadding, sidePadding, placement?.side?.ordinal, placement?.widthDp, if (oneHandedPlaced) 1 else 0)
         if (placing == placed) return
         boardMover.move(BoardMove.kind(slide, placed != null, placedSide, placement?.side))
@@ -674,8 +696,10 @@ class InputView(
         if (scenes == sideButtonsDressed) return
         sideButtonsDressed = scenes
         val look = SceneWindow.sideButton(theme, scenes)
+        for (b in listOf(moveLeft, moveRight)) b.colorFilter = PorterDuffColorFilter(look.iconColor.value, PorterDuff.Mode.SRC_IN)
+        // read late: dressed again (in the scenes then)
+        for (b in listOf(fullWidthLeft, fullWidthRight)) showFullWidthIcon(b, theme, look.iconColor.value) { sideButtonsDressed = null; dressSideButtons() }
         for (b in listOf(moveLeft, moveRight, fullWidthLeft, fullWidthRight)) {
-            b.colorFilter = PorterDuffColorFilter(look.iconColor.value, PorterDuff.Mode.SRC_IN)
             b.background = SceneWindow.sideButtonBackground(context, look, dp(SIDE_BUTTON_DP))
         }
     }
@@ -692,8 +716,7 @@ class InputView(
         }
         val docks = SplitKeyboard.docks(kind, lettersLast = letters)
         val dock = ThemeManager.prefs.splitDock.getValue().dock
-        val oneHanded = ThemeManager.prefs.oneHanded.getValue().dock
-        return SplitKeyboard.placement(oneHanded, dock, TextKeyboard.splits(context), lettersShown = !docks, TextKeyboard.widthDp(context))
+        return SplitKeyboard.placement(KeyboardStyles.oneHandedDock(floatingController.screenBuilt), dock, floatingController.splitsBuilt, lettersShown = !docks, TextKeyboard.widthDp(context))
     }
 
     override fun onApplyWindowInsets(insets: WindowInsets): WindowInsets {
@@ -708,6 +731,7 @@ class InputView(
             // 贴底: no room for the bar, for ROMs whose hidden gesture line still takes it
             bottomMargin = if (floating || KeyboardArea.bottomFlush()) 0 else navBar
         }
+        dockedRoom.check()
         paintNavbar()
         return insets
     }
@@ -827,15 +851,6 @@ class InputView(
             is HostEvent.InputPanel -> {
                 preeditEmptyState.updatePreeditEmptyState(preedit = it.preedit)
                 broadcaster.onInputPanelUpdate(it)
-                // floating, there only while there is a code: from the first key till it goes up or is cleared
-                codeStrip?.let { strip ->
-                    if (preedit.ui.visible != (strip.visibility != GONE)) {
-                        strip.isVisible = preedit.ui.visible
-                        // at once, not on the next frame: the touchable region of this one is worked out first
-                        placeCodeStrip()
-                        if (!strip.isVisible) undoStripMoved()
-                    }
-                }
             }
             is HostEvent.InputMethodChanged -> {
                 updateCodeRow(it.im)
@@ -856,6 +871,19 @@ class InputView(
             else -> {}
         }
     }
+
+    // floating, there only while there is something on it: from the first key till the code goes up or is
+    // cleared; with the code in the field (编码行 输入框里), while aux or the syllables are there
+    private fun showCodeStrip() {
+        val strip = codeStrip?.takeIf { (it.visibility == GONE) == (preedit.ui.visible || preedit.ui.syllables.isVisible) } ?: return
+        strip.isVisible = strip.visibility == GONE
+        // at once, not on the next frame: the touchable region of this one is worked out first
+        placeCodeStrip()
+        if (!strip.isVisible) undoStripMoved()
+    }
+
+    /** The code moved into the app's field or out of it (FcitxInputMethodService.codeInFieldNow): the strip drawn anew. */
+    fun codePlaceChanged() = preedit.codePlaceChanged()
 
     // the code row tall or thin for input method [im]; the keys keep their height (the cap aside)
     private fun updateCodeRow(im: String) {
@@ -905,7 +933,8 @@ class InputView(
         advancedPrefs.unregisterOnChangeListener(onKeyboardSizeChangeListener)
         keyboardPrefs.unregisterOnChangeListener(onKeyboardSizeChangeListener)
         ThemeManager.prefs.splitDock.unregisterOnChangeListener(onSplitDockChangeListener)
-        ThemeManager.prefs.oneHanded.unregisterOnChangeListener(onOneHandedChangeListener)
+        KeyboardStyles.styleKey(floatingController.screenBuilt.landscape).unregisterOnChangeListener(onStyleChangeListener)
+        ThemeManager.prefs.oneHandedSide.unregisterOnChangeListener(onStyleChangeListener)
         // replaced (a rotation, a theme) its windows are never detached: what they had going,
         // the microphone above all, stops here
         broadcaster.onFinishInput()

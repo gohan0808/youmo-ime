@@ -88,7 +88,7 @@ class ContentTest {
         assertEquals(Fixtures.materialLight.colors["keyHint"], one.color)
     }
 
-    // [box] in [at]'s part of the face [f]: its side (the middle for 底部) and its half
+    // [box] in [at]'s part of the face [f]: its side (the middle for 底部 and 顶部) and its half
     private fun assertAt(at: KeyMarks.At, box: Box, f: Box, what: String) {
         val x = (box.left + box.right) / 2 - (f.left + f.right) / 2
         val y = (box.top + box.bottom) / 2 - (f.top + f.bottom) / 2
@@ -97,6 +97,7 @@ class ContentTest {
             KeyMarks.At.TopRight -> 1 to false
             KeyMarks.At.BottomLeft -> -1 to true
             KeyMarks.At.BottomRight -> 1 to true
+            KeyMarks.At.Top -> 0 to false
             else -> 0 to true
         }
         assertEquals(wantBottom, y > 0, "$what at $at, $box in $f")
@@ -106,7 +107,7 @@ class ContentTest {
     @Test
     fun aFunctionKeysMarksEachWhereItsWaysSettingSays() {
         // beta2: 上滑 右上, 下滑 右下 drew ⌫'s 恢复 (down) top right and 清除 (up) bottom right. Every 上滑 × 下滑, on
-        // tall keys and low ones (横屏, 紧凑: a 底部 the first of 右上 右下 左上 左下 the other way's is not), and
+        // tall keys and low ones (横屏, 紧凑: a 底部 the first of 右上 右下 左上 左下 the other way's is not, a 顶部 of 右上 左上 右下 左下), and
         // 翻转上下滑 (the two places, the long press's way and every key's two swipes swapped): the marks stay
         val places = KeyMarks.At.entries.filter { it != KeyMarks.At.None }
         val seen = mutableSetOf<Triple<String, Boolean, KeyMarks.At>>()
@@ -115,13 +116,20 @@ class ContentTest {
         val flippedPreset = Fixtures.presetMarks.mapKeys { (k, _) -> if (k.endsWith(":up")) k.dropLast(3) + ":down" else k.dropLast(5) + ":up" }
         for ((form, base) in forms) for ((up, down) in combos) {
             val low = form != "tall"
-            fun shown(at: KeyMarks.At, other: KeyMarks.At) = if (low && at == KeyMarks.At.Bottom) KeyMarks.LowOrder.first { it != other } else at
+            // each the first corner the other way's setting is not; a 顶部 and a 底部 each its own edge's right corner
+            fun shown(at: KeyMarks.At, other: KeyMarks.At) = when {
+                !low || !at.middle -> at
+                other.middle -> if (at == KeyMarks.At.Top) KeyMarks.At.TopRight else KeyMarks.At.BottomRight
+                else -> KeyMarks.lowOrder(at).first { it != other }
+            }
+            val upShown = shown(up, down)
+            val downShown = shown(down, up)
             val s = Fixtures.scene(base.copy(marks = MarkSettings(upAt = up, downAt = down, shortcuts = Fixtures.presetMarks)))
             val flipped = Fixtures.scene(base.copy(marks = MarkSettings(upAt = down, downAt = up, firstUp = false, shortcuts = flippedPreset)))
             val f = face(s, "backspace")
             val icons = icons(s, "backspace").associate { it.name to it.box }
             assertEquals(icons, icons(flipped, "backspace").associate { it.name to it.box }, "$form $up $down: 翻转 leaves them")
-            for ((name, at) in listOf("delete-sweep" to shown(up, down), "restore" to shown(down, up))) {
+            for ((name, at) in listOf("delete-sweep" to upShown, "restore" to downShown)) {
                 val box = icons[name]
                 if (at == KeyMarks.At.None) assertEquals(null, box, "$form $up $down: $name not drawn")
                 // drawn wherever set, on every form: no pair of places the yield drops one of on these keys
@@ -252,7 +260,7 @@ class ContentTest {
         // icon's whole px: a px of it, 2.2% of a 46 px one), and every shortcut and ⌫ icon within its face's
         // arcs (060-render-p2 S4e); some against them (within the half px the yields keep off the face's edges,
         // the most a pixel's rounding moves them), or the arcs were never in play
-        val boards = listOf("qwerty", "k14", "k18", "zhuyin", "handwriting").map { it to false } + ("zhuyin-nine" to true)
+        val boards = listOf("qwerty", "k14", "k18", "zhuyin").map { it to false } + ("zhuyin-nine" to true)
         var against = 0
         for (d in listOf(1.5, 2.0, 2.75, 3.5)) for ((board, compact) in boards) against += sweepSmoothly(d, board, Forms.floating.copy(compact = compact))
         assertTrue(against >= 10, "against the arcs: $against")
@@ -260,13 +268,13 @@ class ContentTest {
 
     @Test
     fun theFloatingBoardsTheSweepLeavesOutKeepTheirIconsWithinTheArcs() {
-        // what the sweep above does not run: floating compact qwerty, k14, zhuyin and handwriting at every density,
+        // what the sweep above does not run: floating compact qwerty, k14 and zhuyin at every density,
         // and every floating board at 2.625 and 3.0 px a dp; from their height down to 55% of it, and a px or two
         // less, every shortcut's and ⌫'s icon within its face's arcs (R20 F6519: the check F5911 merged away)
         val heights = listOf(1.0, 0.9, 0.8, 0.7, 0.65, 0.6, 0.55).flatMap { part -> listOf(0.0, 1.0, 2.0).map { px -> part to px } }
-        val compactBoards = listOf("qwerty", "k14", "zhuyin", "handwriting")
+        val compactBoards = listOf("qwerty", "k14", "zhuyin")
         val runs = listOf(2.0, 2.625, 2.75, 3.0, 3.5).flatMap { d -> compactBoards.map { Triple(d, it, true) } } +
-            listOf(2.625, 3.0).flatMap { d -> listOf("qwerty", "k14", "k18", "zhuyin", "handwriting").map { Triple(d, it, false) } + Triple(d, "zhuyin-nine", true) }
+            listOf(2.625, 3.0).flatMap { d -> listOf("qwerty", "k14", "k18", "zhuyin").map { Triple(d, it, false) } + Triple(d, "zhuyin-nine", true) }
         var against = 0
         for ((d, board, compact) in runs) {
             val k = d / Forms.DENSITY
@@ -356,7 +364,7 @@ class ContentTest {
         val small = Forms.compact.copy(width = SMALL_COMPACT_WIDTH, height = 407.0 * 2.625 / 2.75)
         for (form in listOf(Forms.compact, small)) for ((d, h) in listOf(3.5 to 409.2, 3.5 to 414.2, 2.75 to 322.8, 2.75 to 325.8, 2.75 to 326.8)) {
             val k = d / Forms.DENSITY
-            for (board in listOf("zhuyin", "zhuyin-nine", "handwriting")) {
+            for (board in listOf("zhuyin", "zhuyin-nine")) {
                 val e = Forms.env(board, form.copy(width = form.width * k, height = h, density = d))
                 Forms.scene(board, e).keys.forEach { iconsWithinArcs(it, "at $d, ${form.width} $board $h px") }
             }

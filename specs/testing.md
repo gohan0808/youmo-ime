@@ -41,7 +41,7 @@ that leaves a preference, a file or a static set where the next test in its JVM 
 in some orders: `KeyboardHarness.close` puts back what a harness test may change, and a test
 that moves the floating keyboard puts its place back in its own teardown (`FloatingUatTest`, `FloatingCodeStripUatTest`, `FloatingPlacerTest`,
 `FloatingControllerTest`; `KeyboardHarness.close` cannot, `FloatingUatTest` reads the place a closed
-harness left), and a screenshot of the floating keyboard pins the place it is drawn at. Memory the same way: a JVM runs 40 classes in one 3 GB heap, so a harness's
+harness left; `PrefsRule` sets the place, the 竖屏 and 横屏 places and widths back to never kept at each test's start), and a screenshot of the floating keyboard pins the place it is drawn at. Memory the same way: a JVM runs 40 classes in one 3 GB heap, so a harness's
 close lets go of every Android object it made (the input method's window, its field's activity, a
 `SettingsHarness`'s MainActivity destroyed: one alive keeps its views in the main thread's GapWorker
 list for the rest of the JVM), held by `HarnessLeakTest`; an OOM ends the JVM and leaves its heap in
@@ -64,7 +64,14 @@ change to how keys are laid out or marked (not with `-PskipExhaustive`: the excl
   (`*SceneGesturesTest`, `SceneTouchTest`, `SceneSpeechTest`).
 - New logic gets a test in the same change, in ime-core where the logic is.
 - Prefer fakes over mockk. `FakeEditor` (ime-core `testFixtures`) stands in for an
-  `InputConnection` and is held to the real `BaseInputConnection` by a contract test.
+  `InputConnection` and is held to the real `BaseInputConnection` by a contract test. Its app-side
+  actions (`appSetsText`, `appReplace`, `appDropSpan`, `appSelect`: an app's own edits, a `TextWatcher`'s,
+  a selection): `appReplace` and `appDropSpan` are held there too (`InputEditorContractTest.appEdits`),
+  `appSetsText` and `appSelect` not yet; its `rewriter` (an `InputFilter`
+  upper-casing or cutting the whole text) and `isAvailable = false` (a connection the framework closed
+  after the app finished the text) are the fake's alone: a closed connection's dropped calls are the
+  framework's wrapper, not `BaseInputConnection`'s, and were measured on devices (061-code-in-field M2, M3).
+  `CodeInFieldPropertyTest` drives them at random against the code in the field.
   `FakeHostApi` (app test sources) cannot be held to the real engine (JNI), so keep it dumb:
   store config, record calls, simulate no input.
 - The engine's user files: `MemoryFiles` (ime-core testFixtures), a `UserFiles` in memory that
@@ -92,11 +99,36 @@ change to how keys are laid out or marked (not with `-PskipExhaustive`: the excl
   CI's instrumented tests run at API 29 and 35.
 - A class reading `AppPrefs` in its initialiser needs `AppPrefs.init(sharedPreferences)` in the test
   (a relaxed mock is enough); the error message says so.
+- 键盘样式 in an app test: `PrefsRule.setStyle(style, landscape = null /* both */, side)` and
+  `setStyleDefault()` (each shape's default by its width), or `TestStyles` (uat/) outside the rule, which
+  writes what is under before the style, as the service and the input view are told of the style. Put
+  back with the store after the test.
 - Test the behaviour a user would notice, named so ("a coarse word the user typed is not lowered"),
   with the case that bit as the example. A test that only restates the implementation is not worth
   its maintenance.
 - Engine tests build small data in memory (`PinyinDataBuilder`, text tables) rather than loading the
   real model (`pinyin.data`); the evaluation is where the real data is judged.
+- 生僻字屏蔽's tests, what each covers (`./gradlew verify` runs the first two, not the third):
+  - `RareCharContractTest` (ime-core, small data): 全拼, 双拼, the nine keys, the pinyin glide,
+    strokes (`u`), parts (`u`), 五笔 typed and glided, predictions, handwriting over pinyin's keys, the user's own word;
+    hold → let through → hold on one `Engines`, with a gate made directly (so even 的 is held) and one
+    through the default choice, a character of the basic plane and one beyond it (a surrogate pair).
+    Not every `LISTED` method: the other tables, 注音 and the 14/18 keys go through the same session
+    code as 五笔 and 全拼. A new place a candidate comes from is added here.
+  - `HeldWordsTest` (ime-core): the gate by code point, the dictionary's words by id, the user's,
+    imported words and learned whole phrases (continuations) by text.
+  - `RareCharsUatTest` (ime-eval `uatTest`, the real data, minutes): every `LISTED` Chinese method
+    with every group held (注音, 双拼, the 14/18 keys, every table, handwriting over their keys), the real table's edges, 五笔's
+    auto-commit, 借手机.
+  The levels in tests are `TestCharLevels` (ime-core testFixtures); the app's JVM tests have no APK
+  assets and pass them to `RareCharsManager.useLevels`.
+  The page itself: `RareCharsPageUatTest`, `RareCharsCardsUatTest` (over `RarePageUat`'s grid), `GroupCardTest`.
+- The card pages laid out (061-settings-cards §8.1): `SettingsCardsLayoutTest` opens 生僻字屏蔽, 按键字符和快捷键,
+  its multi-select and a key's editor on the phones and font sizes that matter (360×640 and its 360×568 window,
+  393×851 at 1.3, on the side; Chinese and English) and asserts what must show unscrolled is in the window, no
+  name or count cut, the badge clear of the picture and the name, the editor's titles and OK in view with its
+  buttons stacked or not. Robolectric has no status or navigation bar: a window is given as the screen's
+  qualifiers. A change to a card's size or a page's top keeps it green.
 - No `@Ignore`, `.only`, skipped or placeholder tests left behind.
 - Kover: 90% lines overall in ime-core, 60% per package. A new package needs its tests.
 
@@ -161,7 +193,7 @@ as they were for the full keyboard to be scored on, read with `--scheme <scheme>
 take is a usage error, exit 2), `english-glide` (glide
 typing on simulated paths, `--wobble` the key-width noise), `pinyin-glide` (the same per dictionary word
 of a pinyin set; `--shuangpin <scheme>`, `--keys nine`, `--table <table.data>`, `--word <pinyin>` one
-clean path's readings), `tune` (penalties); `pinyin --typos off` reads no common slip (`zhagn`, 双拼's `jv`), as with 纠错 off, `score` (compare a result with a baseline), `handwriting` (handwriting's sentence reading), `table` (a table's codes, optionally with pinyin and the models), `sentences` (each sample's sentences written out), `predict-learn` (联想 after learning; `--continuations off`: without the whole phrases, U-73), `learn-log-bench` (a heavy year's learning record opened, folded and opened again; `--counts <pinyin.data>`: what the ranking's counts cost on that record, attached, made anew and per key typed), `predict-set` (a 联想 set made from a set), `shuangpin` (a set turned into a 双拼 scheme's keys), `slips` (a set with slips put in; `--scheme <双拼 scheme>`: typed in that scheme, its fuzzy partners, ü typed with its own key and a key slipped onto its neighbour), `chars` (the data's characters), `lm` (a sentence model's scores of texts);
+clean path's readings), `tune` (penalties); `pinyin --typos off` reads no common slip (`zhagn`, 双拼's `jv`), as with 纠错 off; `pinyin --touch <keyboard>:<hand>:<clean|slip>[:<seed>]` taps each key with a place (`TouchSim`: qwerty, qwerty-ms, nine, k14, k18 (laid out as GroupedKeyboard lays the 18 keys); a hand `s<σ>[down]` or `s<σ>/<dx>/<dy>/<halves>` in key widths), `clean` each in its own key, `slip` one key a sample landed on a neighbour, and `--touched <set.tsv>` writes the set so tapped, each key's `Touch.text` in a fifth column, for `run-on-device.sh` to type the same (061-neighbour-correction); on k14 and k18 every tap goes with where across its key it fell, to the nearest of the app's 17 places (`TouchSim.placed`, as the app sends it, a key of one letter's for a slip from it; 061-neighbour-18key), in a sixth column of `--touched` for `run-on-device.sh` to send as the keys do, and `--taps <hand>:<α>[:<seed>]` taps the 14 or the 18 keys aiming at the letter meant (`Taps`, k14-tap-position); a slip floor is picked by the clean gate (the user's 2026-11-16): typed on target is a tap in the key's middle, not by its edge, so `clean` at the hand `s0.15` (95% of taps in the middle 60% of the key), seeds 1–3, both halves, must turn no sentence or word wrong with the slips read against without, while recovery is measured on `slip` at `s0.2` and `s0.3` (061-neighbour-correction's amendment), `score` (compare a result with a baseline), `handwriting` (handwriting's sentence reading), `table` (a table's codes, optionally with pinyin and the models), `table-slips` (a table's codes tapped as `TouchSim` taps QWERTY, clean and with one key slipped, each word in a fresh session, with the slips read and without: what was typed on target and changed (0 at σ 0.15 at the topping floor −1, the loosest so, by the user's 2026-11-16 rule; 9 of 315 000 at σ 0.2 and 0.3), the slips that made an empty code and how they went off → on, right / wrong / none; each word's code then the next word's first key, as a typist types on over a code that waits; `--floor` the `SlipCost` floor, `--topping-floor` the floor where the key would commit what is shown (顶字, or a code read so that waits), `--plan prefix` each word typed by the shortest part of a code that shows it first (a whole code too) then the next word's first key, as one who watches the candidates types, `--words <pinyin.data>` the app's word model for the tables that have one (as the app ranks and weighs a topped key's neighbour; without it no word is weighed), `--touched` the taps as a set for `run-on-device.sh`; 061-neighbour-table), `sentences` (each sample's sentences written out), `predict-learn` (联想 after learning; `--continuations off`: without the whole phrases, U-73), `learn-log-bench` (a heavy year's learning record opened, folded and opened again; `--counts <pinyin.data>`: what the ranking's counts cost on that record, attached, made anew and per key typed), `predict-set` (a 联想 set made from a set), `history` (a history of the dictionary's likeliest words, for `pinyin --history` and `run-on-device.sh`'s `HISTORY`), `shuangpin` (a set turned into a 双拼 scheme's keys), `slips` (a set with slips put in; `--scheme <双拼 scheme>`: typed in that scheme, its fuzzy partners, ü typed with its own key and a key slipped onto its neighbour), `chars` (the data's characters), `lm` (a sentence model's scores of texts);
 run `ime-eval` with no arguments for the full usage.
 
 A change to `merged.ymd`'s layout or reader is gated per key: `ime-eval pinyin <pinyin.data> <set.tsv>
@@ -178,9 +210,16 @@ with the default reading (neighbouring keys on, both models). `release-report.sh
 used for a data release: against a baseline, no gate set may lose significantly more samples than it
 wins (McNemar, Bonferroni-corrected), learning must bring back what was typed, and the candidate readings (候选词注音) must read
 `data/readings/chat.tsv` right at `ReadingsRun.GATE` (98%; `readings --gate`).
+A held candidate's card reads it as the bar does: `EnginesWordCardTest` (each keyboard's way to 银行, on the
+fixture) and `WordCardUatTest` (`:lib:ime-eval:uatTest`: the first 100 of `pinyin-chat.tsv` and every
+`misreadings.tsv` word, both styles) hold the card's readings to `Snapshot.readings`, a code point at a time.
 
 `run-on-device.sh` runs a set through the APK's own engine on a device, for checking that the app
-decodes as the tool does.
+decodes as the tool does (`NINE=1`: a set of digits typed as pinyin's nine keys send them; `GROUPED=14` or `18`: a
+set of pinyin's 14 or 18 keys' codes as those keys send them; `sp18`, `sp14`, `sp9`, `zy9`, `zy`: 双拼's 18, 14 and nine
+keys' and 注音九键's and 大千's alike; `HISTORY=<words.txt>`: typed on that history, pushed to the app and put in
+place of its learning record, as `pinyin --history` counts it, `HistoryLines` in ime-core for both, for timing what
+hangs on words typed; a history from the tree is `ime-eval history <pinyin.data> <n> <words.txt>`).
 
 Roborazzi goldens (`app/src/test/screenshots/`) show the bar with its microphone and the space's
 voice hint: since 0.6.0 there is one build, and voice is everyone's default (the voice pack's absence
@@ -306,13 +345,15 @@ is not measured yet: before taking a case that fails then passes for an app bug,
 `uat.py flakes` over a few two-emulator runs (and `UAT_SLOW=1`), and record the counts here.
 Details in `uat/README.md`.
 
-Release gates 2, 3 and 5 of the host replacement (0.4.0) (in-place upgrade from the `uat/fixtures/upgrade`
-releases, backups both ways with them, start/latency/memory side by side) are one command each,
-`uat/gates/gates.py upgrade|backups|perf`, on a redroid of their own (not ported to the emulator yet:
-they, `uat/parity/parity.py prepare|run`, `uat/parity/record.sh` and `uat/fixtures/upgrade/make.py` exit
-saying so; parity.py's other commands need no device); results in `uat/runs/`
-(`uat/gates/README.md`). A `.debug` build is upgraded by putting the fixture's files into its own
-directories and gets backups retargeted to its id; the release APK is upgraded with `install -r`.
+Release gates 2 and 3 of the host replacement (0.4.0) (in-place upgrade from the `uat/fixtures/upgrade`
+releases, backups both ways with them) are one command each, `uat/gates/gates.py upgrade|backups`, run
+before every release from 0.6.1 (DECISIONS.md B14), each on uat.py's emulator of its own (`--port`,
+default 5560, up from the clean snapshot and down after); the new build gets the text pack after the
+fixture's files are in place. Results in `uat/runs/` (`uat/gates/README.md`). A `.debug` build is
+upgraded by putting the fixture's files into its own directories and gets backups retargeted to its id;
+the release APK is upgraded with `install -r`. Gate 5 (start, latency, memory side by side) is gone:
+`uat/tools/perf.py` measures that. `uat/fixtures/upgrade/make.py` still exits (made for redroid): the
+fixtures are the ones it made on 0.3.x/0.4.0.
 
 ## The testbed app (`:testbed`)
 
@@ -369,7 +410,8 @@ and both `from-app` theme files, and builds `from-web.theme` from `theme.json` (
 export of it imports the same; and the pages' generated blocks (`youmo-format`: the
 file's version, every type's fields from `ThemeFileJson`'s descriptors, the limits, the defaults;
 `youmo-presets`: the eleven built-in palettes) are what the app has, through
-`ThemeMakerTestdata.block`, which `-PupdateThemeMaker` lets write them. `youmo-layout` and
+`ThemeMakerTestdata.block`, which `-PupdateThemeMaker` lets write them, each to
+`web/theme-maker/generated/<id>.json` (in git; the pages read them from there). `youmo-layout` and
 `youmo-icons` are `ThemeMakerLayoutTest`'s the same way, and the page's test holds them to what the
 preview reads (format 1: views of items, every key name one `KeyNames` knows, every colour a palette
 field, every icon there). The test task takes `web/theme-maker` as an
@@ -380,15 +422,17 @@ Two pages (060-render-p3 M1): `index.html`, the maker (`src/`: `page.html` with 
 `panels/*.js`: the editing's forms (M2: one file a tab, put in as one script in their names' order),
 held to the engine by `test/form.test.mjs`, `ui.js`: the page), and `classic/index.html`, the maker before 0.6.0, kept till 0.6.x ends (`src/classic/`: its
 `page.html`, `style.css`, `ui.js`), and `examples/` (`examples.json` and a folder of each example, put in the
-maker's `youmo-examples` block); both run `src/lib.js` (everything the tests hold to the app's
-3.0 rules and zip). Edit them, then `node web/theme-maker/tools/assemble.mjs`, which writes both: the
-sources put in, each page's generated blocks kept from that page as it is (each carries only the ones
-its `page.html` has a slot for: the maker `youmo-format`, `youmo-engine-icons` and `youmo-examples`, classic
-`youmo-format`, `youmo-presets`, `youmo-layout`, `youmo-icons` and no engine; `ThemeMakerTestdata.block`
-writes a block into every page that has it), and the Content-Security-Policy's `script-src` set to each script's SHA-256 (six on the maker,
-two on classic; nothing else runs, a script not hashed is refused, an edit by hand breaks them).
-The page's test fails when either page is not what assemble makes of its sources and the fonts, and
-when the CSP's hashes are not its scripts'. Commit `src/` and both pages together.
+maker's `youmo-examples` block); and `layout/index.html`, the layout maker (061-custom-layout §12; `src/layout/`: its `page.html`, `style.css`, `layout-maker.js`, `layout-edit.js`, `ui.js`, with the maker's engine, `lib.js`, the theme file's format, `form.js` and `maker.js`: a `.theme` opened is read as the maker reads it), its examples `examples/layouts/` (`layouts.json` and a `.layout` each, put in its `youmo-layout-examples` block as they are, with `name=` as the label; `ExampleLayoutsTest` in keyboard-scene checks each clean and holds its scenes, upright, turned, compact and split, the number one in each of its pads, to `src/commonTest/data/example-layouts/` on the JVM and in node). The maker, classic and the layout maker run `src/lib.js` (everything the tests hold to the app's
+3.0 rules and zip). None of the three pages is in git (R25 B12): `node web/theme-maker/tools/assemble.mjs` makes
+them from their sources (`web/theme-maker/.gitignore` keeps them out): the sources put in, each page's
+generated blocks read from `generated/<id>.json` (each carries only the ones its `page.html` has a slot
+for: the maker `youmo-format`, `youmo-engine-icons` and `youmo-examples` (from `examples/`), classic
+`youmo-format`, `youmo-presets`, `youmo-layout`, `youmo-icons` and no engine, the layout maker `youmo-layout-examples`, `youmo-format`,
+`youmo-engine-icons` and the engine), and the
+Content-Security-Policy's `script-src` set to each script's SHA-256 (six on the maker, two on classic, seven on the layout maker;
+nothing else runs, a script not hashed is refused). The pages' tests (`maker.test.mjs`, `layout-maker.test.mjs` for the layout page) assemble them in memory and fails
+when a generated block is missing or the CSP's hashes are not its scripts'. Commit `src/` and
+`generated/`; CI, the tests and `dev/serve.mjs` assemble the pages.
 `test/maker.test.mjs` (node, needs the built engine; CI runs it with the other two): a document
 saved opens the same (theme.xml first, files, `layouts/` kept as they are), 3.0 and 2.1 files open
 as 4.0 through the engine's `convert30`, undo and redo (at most 100 back), the draft kept and given
@@ -403,7 +447,8 @@ not know, comments and spacing kept), the engine reads every result, and the cas
 (`YoumoEngine.sources`, `Cascade.sources`) names the style each value comes from; the forms write numbers within the engine's bounds (`YoumoEngine.limits`), and an icon the app would refuse (a PNG, an SVG past `SvgSubset`, which the engine's `readIcon` runs) is named and blocks the save. `from-maker.theme` and `from-maker-picture.theme` (the panels' save: a real PNG cut for each orientation, see-through keys, a gradient, an SVG icon) are
 its saves, which `ThemePackImportTest` imports. `test/names-and-files.test.mjs` (the same): names and files as theme.xml has them: a name with XML's special characters, values with `>`, which files are still named, the effect images the app checks (≤ 256 px a side, size limit, .png/.webp only), theme.xml's size limit, the draft's files written once. The
 site is `index.html` with the engine put in: the Pages workflow leaves `src/`, `tools/`, `test/`,
-`fonts/`, `examples/`, `dev/` and `build/` out and writes its `index.html` (and `classic/index.html` beside it) with `assemble.mjs --engine <file>`.
+`fonts/`, `examples/`, `generated/`, `dev/` and `build/` out and writes its `index.html` (and `classic/index.html` and `layout/index.html` beside it) with `assemble.mjs --engine <file>`; the workflow fails where the layout page lacks its script, its examples or its engine.
+`test/layout-maker.test.mjs` (node, with the others) holds the layout page's document, editing and examples to the engine, a `.theme`'s boards offered as the app's import makes them (`themeBoards`), and its size to 2,100,000 bytes; `node web/theme-maker/test/layout-smoke.mjs` (CI's unit test job, Chrome as panels-smoke) drives the page in a browser in a 1400 px wide window (`cdp.mjs`) and at 360 px: new from a base and from each example, editing, save, help, a `.theme` opened (its theme the preview's, a board of it started from).
 
 ### The engine in the page (060-render-p3 W1)
 
@@ -417,16 +462,14 @@ property (`sources`: the line of the winning style, `Cascade.sources` laid over 
 the maker's cascade check)).
 `./gradlew :lib:keyboard-scene:youmoEngine` writes `build/youmo-engine/youmo-engine.js` (UMD, global
 `youmo-engine`; indents and the source map's line dropped, `<!--` and `</` escaped). The engine is not
-in git: the `index.html` committed has `NO_ENGINE` (a comment) in its `youmo-engine` script, so a
-change to the engine's code (any `commonMain` change of the scene's) never has to make the page again
-and no gate has to catch a stale one. `node web/theme-maker/tools/assemble.mjs --engine [out]` writes
+in git: the page assembled without `--engine` has `NO_ENGINE` (a comment) in its `youmo-engine` script. `node web/theme-maker/tools/assemble.mjs --engine [out]` writes
 the page with the build's engine in that script and the CSP's hash of it (`out`: `build/index.html`,
 not in git); the Pages workflow publishes that, and `dev/serve.mjs` serves it at `/page.html`. The
 four subset fonts (`fonts/`, `tools/subset-fonts.py`: Roboto and Noto Sans CJK SC from Robolectric's
 runtime, cut to what a keyboard shows, 160 KB) are in git, in a `youmo-fonts` style as data URLs: they
 depend on no engine code, as `youmo-engine-icons` depends on the app's drawables only. The page's test
-holds `index.html` to `NO_ENGINE`, and the page assembled with the build's engine (in memory) to the
-build, to 1.2 MB, to its scripts and their hashes, and to `index.html` but for that script; CI builds
+holds the page assembled without it to `NO_ENGINE`, and the page assembled with the build's engine (in
+memory) to the build, to 1.2 MB, to its scripts and their hashes, and to the other but for that script; CI builds
 the engine and assembles the page before the node tests, in the unit test job and the Pages workflow.
 A page that uses the engine needs it put in: opened straight from the repository, `index.html` has none.
 
@@ -467,9 +510,23 @@ What holds the library to the app:
   `CHROMIUM=`) draws six groups of shots in Chromium through `dev/engine.html` and compares them
   with `app/build/w1-pixel/`: under 2% of pixels off by more than 48, under 0.2% in 5x5 areas off by
   more than 16 (the plain board against the app's with q pressed must fail it, and does).
-- `node web/theme-maker/test/panels-smoke.mjs` (local, the same Chromium) drives the maker's 字和图标 tab by mouse and by touch: a field edited, then the next field typed into or a box tapped, both kept (a value edit updates the controls in place, never draws the tab anew); after undo with a field focused every field shows the document; a colour row after undoing a rename edits the colour it names, and the crop shows a picture replaced by one of its size (a row of another name, a box of another data-key is put in whole). After 用这个裁切 replaces its box the focus stays in the tab; the tabs 栏, 弹出, 面板和窗口, 尺寸, 动效 and 信息 each draw, an 信息 edit keeps the next field focused, 试一下 plays, and the environment's typing bar grows the preview.
+- `node web/theme-maker/test/panels-smoke.mjs` (CI's unit test job on every push and PR, with the runner's
+  Chrome, DECISIONS.md B13; locally the same Chromium as pixel-smoke) drives the maker's 字和图标 tab by mouse and by touch: a field edited, then the next field typed into or a box tapped, both kept (a value edit updates the controls in place, never draws the tab anew); after undo with a field focused every field shows the document; a colour row after undoing a rename edits the colour it names, and the crop shows a picture replaced by one of its size (a row of another name, a box of another data-key is put in whole). After 用这个裁切 replaces its box the focus stays in the tab; the tabs 栏, 弹出, 面板和窗口, 尺寸, 动效 and 信息 each draw, an 信息 edit keeps the next field focused, 试一下 plays, and the environment's typing bar grows the preview.
 - `node web/theme-maker/dev/serve.mjs` serves `dev/engine.html`, a preview of any board, theme,
   size and form drawn by the engine; development only, never published.
+
+## Custom layouts (061-custom-layout L1–L8)
+
+The `.layout` format and its check are keyboard-scene's, held alike on the JVM and in JS: `LayoutReaderTest`,
+`LayoutWriterTest`, `LayoutCheckTest` (every finding's key, by `LayoutCheck.KEYS`, said by the app's strings and the
+page's table), `LayoutCheckThreadsTest`, `ScaledRowsTest` (`split-scaled`), `PackConvertTest` (a theme pack's board made
+a layout of the user's), `ExampleLayoutsTest` (the page's examples). ime-core holds what the app decides with them:
+`LayoutImportTest` and `LayoutImportGroupedTest` (an import, its warnings and refusals), `LayoutCheckHeightsTest`,
+`CustomLayoutFilesTest`, `CustomLayoutChoicesTest`, `ImKeyboardsTest`, `PanelLayoutsTest`, `KeyShortcutPagesTest`,
+`RenamedKeysTest`, `ThemeLayoutSwitchTest`. The app's: `CustomLayoutsTest`, `CustomKeyboardTest`, `BackupLayoutsTest`,
+`PopupOverridesLayoutTabTest`, `SceneLayoutsTest`, `ThemeLayoutsToListTest`, `LayoutTextsTest`, `LayoutAddMenuTest`
+(and At29). The layout page: `test/layout-maker.test.mjs` (node: its edits, the page assembled and its budget), with
+`test/layout-smoke.mjs` driving it in a browser. Devices: uat ST-150–188, PY-153–155, SP-51.
 
 ## The keys' golden table (060-keys-unify)
 
@@ -477,8 +534,8 @@ Every key's long press, first and marks on every keyboard is one reviewed table,
 `lib/ime-core/src/test/resources/keys-golden.tsv`: columns `keyid board state items first up down`; in `items` a
 bare text is `AsKey`, a `=` suffix `AsIs`, `#N` `Keypad(N)`, `@action` an `Action`, the row and the symbols split by `|`.
 The boards (`board`, as `KeyResolverGoldenTest.boards` names them) are pinyin full, nine, 14, 18, 双拼 nine and 18 (微软),
-English full and nine, a theme's own groups (`theme-k18`: the k17-motion example's `layouts/k18.xml`), both 注音,
-handwriting, the number pad, the symbol picker, emoji, kaomoji, emoji search and the expanded candidates; the states
+English full and nine, a theme's own groups (`theme-k18`: 0.6.0's theme maker example 薄荷 17 键's `layouts/k18.xml`, keyboard-scene's test data `mint-k17` since L8), both 注音,
+the number pad, the symbol picker, emoji, kaomoji, emoji search and the expanded candidates; the states
 `default`, `shift`, `zh` (Chinese punctuation) and `roots` (a table's roots).
 
 - Made once: before the resolver, a throwaway export test on the old code wrote what each key did then,
@@ -491,8 +548,11 @@ handwriting, the number pad, the symbol picker, emoji, kaomoji, emoji search and
 - `GeneratorParityTest` (app test sources) held the long-press generators moved into keyboard-scene `keys/` to the old
   ones key by key while both existed; it went with the old code in S6.
 - The format and the migration: `KeyListsFormatTest` (every rule of the grammar), `KeyIdRoundTripTest` (every name the
-  built-in layouts and the k17-motion example give, and odd orphan names, through `serialize → parse`), `KeyListsWithTest`
-  (when a line is dropped), `KeyListsMigrationTest` (0.5.2, beta1, beta2 prefs in
+  built-in layouts and 0.6.0's 17 keys example pack (`mint-k17`) give, and odd orphan names, through `serialize → parse`), `KeyListsWithTest`
+  (when a line is dropped; the `@3` marks), `DowngradeTo060Test` (0.6.0's own reading of `key_lists` and `key_swipes`,
+  frozen: a marked list its defaults never written over, a `vtext:` slot its default, the rest kept), `KeyResolverMarksTest`
+  (an item of variables filled in and filled in again as picked, an item as it is only where punctuation converts it),
+  `KeyListsMigrationTest` (0.5.2, beta1, beta2 prefs in
   `lib/ime-core/src/test/resources/keys-migration/` to `@1`, twice the same; `upgrade`'s `@1` → `@2` cases), app `KeyListsUpgradeTest` (0.5.2, beta2 and
   beta3 `@1` backups built in memory, `v052()`, `beta2()`, imported through `UserDataManager.import`, restarted, reset, and
   before the first unlock; `uat/fixtures/upgrade/` holds only v0.3.x and v0.4.0 backups).
@@ -533,68 +593,16 @@ regenerate without a checkout of fcitx:
   (`ImportFiles.Scel.textDictionary`); `ScelGoldenTest` holds it to these byte for byte, the two broken files
   failing as `IOException`.
 
-## Parity of the two hosts (`uat/parity`)
+## Parity of the two hosts (history)
 
-The native fcitx host and the Kotlin one were run on the same key sequences and compared
-(fcitx-replacement §7.2) while both built. Only the Kotlin host builds now: the native side is a debug
-APK built at the tag `native-last`, or a recorded native run (`dev/parity-runs/r3`). Dev tooling only:
-nothing here is in an APK.
-
-- **Sequence files** (JSON lines): a header with the engine (below), the data releases
-  `EngineDataPlugin` names, the input methods enabled in order and the hash of the sequences; then one
-  sequence a line (start input method and field, steps: `type`, `space`, `enter`, `bksp`, `pick`,
-  `pickText`, `hw`, `ime`, `field`, `app`, `pause`, `toggle`, `quick`, `unicode`). `ime-eval parity-generate --seed --count` writes
-  random ones (`SequenceGenerator`); `uat/parity/parity.py uat-export` takes the uat scripts' key
-  sequences, sealed with `ime-eval parity-seal`. The header's engine (`Provenance`) is
-  `ENGINE_BEHAVIOUR` (`EngineBehaviour.VERSION` in ime-core) and a digest of the data and settings in the
-  tree (`Provenance.CONFIG_DIRS`: `app/src/main/host-assets`, `app/src/main/assets`, `lexicon` (only the files EngineDataPlugin reads),
-  `lib/ime-dict-tool/opencc`); the data releases beside it. Not the source tree: a comment or a rename would make
-  every recording stale, and the native host's (r3, recorded at `native-last`) can never be made again.
-  A JVM comparison against a recording of another engine still runs, its report headed "engine changed
-  since this recording: differences may be intended", exit 3 (0 a pass, 1 differences); `parity-check`
-  says so and passes. Outputs whose headers name other sequences, input methods or engine than the
-  sequence file (two device runs from different builds' files) are refused. A JVM replay's output also
-  names the engine it ran on (`engine-run`); `parity-compare --jvm` holds that to the recording, not the
-  checkout that compares. `parity-rehead` gives old files this checkout's fingerprint, the first one kept
-  as `engine-was` however often it runs.
-- **When to bump `ENGINE_BEHAVIOUR`**: any change that can change what a key sequence shows or writes:
-  ranking, decoding, segmentation, learning, refine scheduling, the host's key handling, settings
-  defaults. Not for comments, renames, refactors, tests or tooling. The review checks it: a behaviour
-  change with no bump makes the next JVM-vs-recording comparison count it as the host's.
-- **Device**: `parity.py` with uat.py's `Device`. The field is a test editor app outside the input
-  method (`uat/parity/editor`, built with the SDK's tools, installed as `io.github.sraw.parity.a` and
-  `.b` for two uids) that logs every `InputConnection` edit with the field after it; password fields
-  are logged masked. Keys are tapped where the Dumper reads them; hardware keys are `input keyevent`
-  (no uinput on redroid). Each sequence starts from a root snapshot of the app's data
-  (`prepare`), restored with `chown -R` to the current uid and `restorecon -R`; the builds are swapped
-  with `adb install -r -d`. The driver's input methods are those of the builds around `native-last`
-  (`ADDED`: 九键拼音 and 五笔, `engine-t9` in the profile): it compares those builds only. Since 0.5 the
-  nine keys are pinyin's keyboard, not an input method, and the device run is not ported to it; the
-  JVM replay below is what checks the host now.
-- **JVM**: `:lib:ime-eval:parityReplay` runs a file on `HostReplay` (about a second a sequence; `k/n`
-  shards). What the service does around the host is modelled too: the host's texts in the devices'
-  zh-CN, read from the app's `values-zh-rCN` (`ResourceHostStrings`); a tap on the bar picks the
-  candidate as shown (繁 with 简繁 on); an input method change tells the session the field
-  (`FieldPolicy.inputMethodChanged`); fields are named as the service names them for its memory of
-  what was written (`ContextMemory.field`: the editor's package and the kind of field); another app's
-  bar stays shown until the host updates it or the language key shows the overlay of a new input
-  method's name, and a hardware Return shows the floating window over it until the screen's keyboard
-  is used again. So is the driver's way around the keyboard: a single-line field's Enter (its editor
-  action) puts the keyboard away, and the next tap the driver needs brings it back with a tap on the
-  field that puts the cursor at the end, as after a hardware Return; a status toggle under next-word
-  suggestions puts the keyboard away and back first (`uat.py` `expand_toolbar`). A Backspace key event
-  from the screen tells the engine nothing (its cursor report is predicted, `EditingSession.backspace`);
-  a hardware one, or Enter and the arrows, does. The 符 and 123 keys
-  resolve what is typed and reset fcitx before quick input or Unicode, as `commitAndReset`. Keys typed in one step
-  are 200 ms apart on the replay's clock (`HostReplay.TAP_MILLIS`) and on the device (`parity.py`
-  `KEY_GAP`, Tapper's sleep between taps): the refine after each key runs out before the next on both, so
-  the tool makes no timing difference of its own. Keep the two equal.
-- **Comparison**: `ime-eval parity-compare` — device against device every step and call identical;
-  `--jvm` against a device allows one swap of neighbouring candidates whose sentence-model score
-  difference is under ε, listed apart, the rest of that sequence uncompared. A step read busy (the
-  recorder's idle wait ran out) is device timing, an allowed difference (DECISIONS.md 2026-10-25): it
-  is skipped and the next step's state compared, its calls held to the calls since the last idle step;
-  a busy last step's difference is listed apart as `TIMING` and does not fail, when both outputs ran the
-  whole sequence and an idle step before it was compared (busy throughout, or stopped short, still fails).
-  `uat/parity/record.sh` does a whole round: this checkout's APK, then `--native-apk <native-last APK>`
-  to run the native side too or `--native-out <native.jsonl>` to compare with a recorded one.
+While the native fcitx host and the Kotlin one both built (fcitx-replacement §7.2), a device tool
+(`uat/parity`: a test editor app, a recorder, `ime-eval parity-*` to generate, seal and compare key
+sequences, with the engine's fingerprint `ENGINE_BEHAVIOUR` in each file's header) ran the same
+sequences on both and compared what the user saw, call by call. The native host is gone (the tag
+`native-last`), its recording can never be made again, and the device side was made for redroid; it
+was deleted in 0.6.1 (the user decided on 2026-11-13 not to keep a device tool no device can run; git history before that has it). What is left is the JVM side's
+model of a device run: `ParityReplay` (`lib/ime-eval/src/uatTest`, with `Step`, `Sequence`, `State`
+and `Output` of `eval/parity/ParityFile.kt`, given the input methods as a list) runs a sequence on `HostReplay` as the driver did
+(the editor apps' uids and fields, the bar kept over another app, the keyboard put away by a single-line
+field's Enter, keys 200 ms apart on the replay's clock, `HostReplay.TAP_MILLIS`), and
+`HostReplayUatTest` holds the host to what the devices showed.

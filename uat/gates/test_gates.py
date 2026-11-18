@@ -1,6 +1,7 @@
 """The gate scripts' device-free parts: python3 -m unittest test_gates (in uat/gates)."""
 import json
 import os
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -41,9 +42,12 @@ class FileChecksTest(unittest.TestCase):
     class FakeDevice:
         """the files restore-files left, the first start's move into host-config/host-data made"""
 
-        def __init__(self, tars, de_left=(), ext_left=(), moved=True):
-            """moved False: a v0.3.x build installed, nothing moved (gate 3's new → v0.3.x)"""
+        def __init__(self, tars, de_left=(), ext_left=(), moved=True, punc_kept=False):
+            """moved False: a v0.3.x build installed, nothing moved (gate 3's new → v0.3.x).
+            punc_kept: the fixture's edited punctuation table still there; by default gone, as 0.6.1's first
+            start deletes it and its backup has none for an old build to restore (ST-145)"""
             self.tars, self.de_left, self.ext_left, self.moved = tars, de_left, ext_left, moved
+            self.punc_kept = punc_kept
 
         def root(self, cmd):
             if cmd.startswith("ls -d "):   # what of the old copies is left on the external storage
@@ -51,6 +55,8 @@ class FileChecksTest(unittest.TestCase):
             if cmd.startswith("ls "):   # what of the old native data is left in user_de
                 return " ".join(self.de_left)
             path = cmd.split()[1]
+            if path.endswith("/punctuation/punc.mb.zh_CN") and not self.punc_kept:
+                return ""
             # external.tar has config/ and data/: the move put them here
             if self.moved:
                 path = path.replace(phase.HOST_CONFIG, phase.EXTERNAL + "/config").replace(
@@ -66,13 +72,21 @@ class FileChecksTest(unittest.TestCase):
                         return ""
             return ""
 
-    def test_the_fixtures_files_pass_every_item(self):
+    def test_the_fixtures_files_pass_every_item_but_an_edited_punctuation_table_left(self):
         import tarfile
         v = os.path.join(gates.FIXTURES, "v0.3.2")
-        with tarfile.open(os.path.join(v, "data.tar")) as data, tarfile.open(os.path.join(v, "external.tar")) as ext:
-            res = phase.file_checks(self.FakeDevice({phase.DATA: data, phase.EXTERNAL: ext}))
-        self.assertEqual(7, len(res))
-        self.assertEqual([], [r for r in res if not r["ok"]])
+        rows = [
+            # the first start's moves made, the edited table deleted (ST-145): every item passes
+            (False, []),
+            # the fixture's edited punctuation table still there: 0.6.1 deletes it, so its item fails
+            (True, ["中文标点"]),
+        ]
+        for punc_kept, failed in rows:
+            with self.subTest(punc_kept=punc_kept), tarfile.open(os.path.join(v, "data.tar")) as data, \
+                    tarfile.open(os.path.join(v, "external.tar")) as ext:
+                res = phase.file_checks(self.FakeDevice({phase.DATA: data, phase.EXTERNAL: ext}, punc_kept=punc_kept))
+                self.assertEqual(7, len(res))
+                self.assertEqual(failed, [r["item"].split()[0] for r in res if not r["ok"]])
 
     def test_an_old_build_s_files_are_read_where_it_keeps_them(self):
         import tarfile
@@ -81,7 +95,8 @@ class FileChecksTest(unittest.TestCase):
             # a v0.3.x build (gate 3's new → v0.3.x) keeps config/ and data/ on the external storage (F4975)
             (True, []),
             # read where this build keeps them, the old build's files are not found: every host item fails
-            (False, ["性能档位", "输入法", "繁体", "中文标点", "自定义短语"]),
+            # (but 中文标点, which passes on no edited table)
+            (False, ["性能档位", "输入法", "繁体", "自定义短语"]),
         ]
         for old, failed in rows:
             with self.subTest(old=old), tarfile.open(os.path.join(v, "data.tar")) as data, \
@@ -131,9 +146,10 @@ class FileChecksTest(unittest.TestCase):
             finally:
                 phase.FIXTURES = saved
 
-    def test_a_missing_file_fails_its_items(self):
+    def test_a_missing_file_fails_every_item_but_the_punctuation_table(self):
         res = phase.file_checks(self.FakeDevice({}))
-        self.assertEqual([], [r["item"] for r in res if r["ok"]])
+        # but 中文标点: no table at all is the stock punctuation, what 0.6.1 leaves
+        self.assertEqual(["中文标点"], [r["item"].split()[0] for r in res if r["ok"]])
 
     def test_the_input_methods_out_of_order_fail(self):
         import io
@@ -257,25 +273,178 @@ class NotCheckedTest(unittest.TestCase):
         self.assertEqual("1/3 ok; failed: ['c']; not checked: ['b']", line)
 
 
-class PerfTest(unittest.TestCase):
-    def test_a_column_without_a_reading_is_none(self):
-        cold = [{"keyboard": 300, "ready": 0}, {"keyboard": 500}, {"keyboard": 400, "ready": 900}]
-        mem = [{"pss_total": 1}, {"pss_total": 102400}, {"pss_total": 153600}]
-        for rows, key, scale, want in (
-            (cold, "keyboard", None, 400),   # the median of those that have one
-            (cold, "ready", None, 900),      # a 0 is a missing reading, not a measurement
-            (cold, "candidate", None, None),  # none: None, shown n/a
-            (mem[1:], "pss_total", 1024, 125.0),  # kB to MB, one decimal
-            ([], "keyboard", None, None),
-        ):
-            self.assertEqual(want, gates.median_of(rows, key, scale), (key, rows))
+class EmulatorTest(unittest.TestCase):
+    """the gates on uat.py's emulator (B14): its snapshot up and down, the text pack before a new build's first start"""
 
-    def test_a_build_with_no_key_reading_is_incomplete(self):
-        r = {"cold_start_ms": [{"keyboard": 1, "ready": 2, "candidate": 3}], "key_ms": [],
-             "mem_kb": [{}, {"pss_total": 1024, "native_heap": 2048, "java_heap": 3072}]}
-        self.assertEqual([1, 2, 3, None, None, 1.0, 2.0, 3.0], gates.perf_cols(r))
-        r["key_ms"] = [30, 10, 20]
-        self.assertEqual([20, 30], gates.perf_cols(r)[3:5])
+    def test_the_gate_brings_up_and_down_uat_s_emulator(self):
+        calls = []
+        saved = gates.uat.up, gates.uat.down, gates.uat.avd_name, gates.uat.Device
+        gates.uat.up, gates.uat.down = (lambda p: calls.append(("up", p))), (lambda p: calls.append(("down", p)))
+
+        class Device:
+            mark = ""
+
+            def __init__(self, port):
+                pass
+
+            def sh(self, cmd):
+                if cmd.startswith(f"cat {gates.GATE_MARK}"):
+                    return Device.mark
+                calls.append(("sh", cmd))
+                return ""
+        gates.uat.Device = Device
+        marked = ("sh", f"echo gate > {gates.GATE_MARK}")
+        try:
+            for why, running, mark, keep, want in (
+                ("nothing on the port: started from the snapshot, marked, killed after", "", "", False,
+                 [("up", "5560"), marked, ("down", "5560")]),
+                ("--keep: left up", "", "", True, [("up", "5560"), marked]),
+                # uat.up keeps one already up as it is: a gate after --keep (or one that stopped before down)
+                # would start on the last gate's packages, pack marks and zips
+                ("a gate's emulator left up: killed and started again, a clean device", gates.uat.AVD, "gate\n", False,
+                 [("down", "5560"), ("up", "5560"), marked, ("down", "5560")]),
+                # uat.py --devices auto reaches 5560 too: its emulator was killed in the middle of its run
+                ("this AVD up without the gate's mark (a uat.py run's): the gate stops, nothing killed", gates.uat.AVD,
+                 "", False, SystemExit),
+            ):
+                with self.subTest(why):
+                    calls.clear()
+                    Device.mark = mark
+                    gates.uat.avd_name = lambda d, running=running: running
+                    g = object.__new__(gates.Gate)
+                    g.a = type("A", (), {"port": "5560", "keep": keep})()
+                    g.serial = "emulator-5560"
+                    if want is SystemExit:
+                        with self.assertRaises(SystemExit):
+                            g.up()
+                        self.assertEqual([], calls)
+                        continue
+                    g.up()
+                    g.down()
+                    self.assertEqual(want, calls)
+        finally:
+            gates.uat.up, gates.uat.down, gates.uat.avd_name, gates.uat.Device = saved
+
+    def test_main_runs_the_gate_asked_for(self):
+        # main used to exit before any gate (redroid's runner): the gate called with its arguments, its verdict the status
+        ran = []
+        saved = sys.argv, gates.cmd_upgrade
+        sys.argv = ["gates.py", "--port", "5560", "upgrade", "new.apk"]
+        gates.cmd_upgrade = lambda a: ran.append((a.port, a.new)) or True
+        try:
+            with self.assertRaises(SystemExit) as e:
+                gates.main()
+        finally:
+            sys.argv, gates.cmd_upgrade = saved
+        self.assertEqual([("5560", "new.apk")], ran)
+        self.assertEqual(0, e.exception.code)
+
+    def test_the_text_pack_is_imported_for_the_new_build_only(self):
+        imported = []
+        saved = phase.uat.import_packs, phase.ensure_ime, phase.with_page
+        phase.uat.import_packs = lambda d, voice=True: imported.append(voice)
+        phase.ensure_ime = lambda d: None
+        phase.with_page = lambda d, run: run() and []
+
+        class D:
+            def open_settings(self):
+                pass
+
+            def sh(self, cmd):
+                return ""
+        saved_typed, saved_files, saved_sleep = phase.typed_checks, phase.file_checks, phase.time.sleep
+        phase.typed_checks = phase.file_checks = lambda *a, **k: []
+        phase.time.sleep = lambda s: None
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                for old, want in ((False, [False]), (True, [])):
+                    imported.clear()
+                    phase.check(D(), os.path.join(tmp, "out.json"), old=old)
+                    self.assertEqual(want, imported, old)
+        finally:
+            phase.uat.import_packs, phase.ensure_ime, phase.with_page = saved
+            phase.typed_checks, phase.file_checks, phase.time.sleep = saved_typed, saved_files, saved_sleep
+
+    def test_a_backup_restored_into_a_released_build_imports_no_pack(self):
+        # gate 3's new → v0.3.x/0.4.0: those builds have no 资源包 page, so a pack import there is Blocked
+        imported = []
+        saved = (phase.uat.import_packs, phase.ensure_ime, phase.pushed, phase.script, phase.uat.check, phase.device,
+                 sys.argv)
+        phase.uat.import_packs = lambda d, voice=True: imported.append(voice)
+        phase.ensure_ime = lambda d: None
+        phase.pushed = lambda d, z: "gate.zip"
+        phase.script = lambda name: type("S15", (), {"restore": staticmethod(lambda d, name: (None, True))})
+        phase.uat.check = lambda ok, msg: None
+
+        class D:
+            def open_settings(self):
+                pass
+
+            def stop_dumper(self):
+                pass
+        phase.device = lambda port: D()
+        try:
+            for why, args, want in (
+                ("the new build: the text pack first", ["z.zip"], [False]),
+                ("a released build (gates.py passes --old)", ["z.zip", "--old"], []),
+            ):
+                with self.subTest(why):
+                    imported.clear()
+                    sys.argv = ["phase.py", "5560", "import", *args]
+                    phase.main()
+                    self.assertEqual(want, imported)
+        finally:
+            (phase.uat.import_packs, phase.ensure_ime, phase.pushed, phase.script, phase.uat.check, phase.device,
+             sys.argv) = saved
+
+    def test_gate_3_imports_into_the_released_builds_as_old(self):
+        calls = []
+
+        class G:
+            def __init__(self, a, name, new):
+                # dir: only joined into paths here (retarget and the steps faked)
+                self.a, self.dir, self.new, self.new_pkg, self.rows = a, "gate", new, "io.github.sraw.youmo.debug", []
+
+            def up(self):
+                pass
+
+            def down(self):
+                pass
+
+            def uninstall(self, *p):
+                pass
+
+            def phase(self, pkg, *args):
+                calls.append((pkg, args[0], "--old" in args))
+                return True, "ok"
+
+            def checked(self, scenario, pkg, version=None, old=False):
+                calls.append((pkg, "check", old))
+
+            def blocked(self, *a):
+                pass
+
+            def report(self, *a):
+                return True
+        saved = gates.Gate, gates.retarget, gates.old_apk, gates.upgrade_into, gates.VERSIONS, gates.REFUSED
+        gates.Gate, gates.retarget = G, (lambda src, dst, pkg: dst)
+        gates.old_apk, gates.upgrade_into = (lambda a, v: f"{v}.apk"), (lambda g, v: None)
+        try:
+            gates.cmd_backups(type("A", (), {"new": "new.apk"})())
+            imports = [(pkg, old) for pkg, step, old in calls if step == "import"]
+            self.assertEqual([(gates.RELEASED, True)] * len(gates.VERSIONS)
+                             + [("io.github.sraw.youmo.debug", False)] * (len(gates.VERSIONS) - len(gates.REFUSED)),
+                             imports)
+            # the next release's gate adds v0.6.0 (B14): a released build with the 资源包 page gets its text pack
+            # and is checked as this build is; --old for it skipped the pack and the gate was Blocked (F7836's mirror)
+            calls.clear()
+            gates.VERSIONS, gates.REFUSED = ("v0.4.0", "v0.6.0", "v0.10.0"), ()
+            gates.cmd_backups(type("A", (), {"new": "new.apk"})())
+            released = [(step, old) for pkg, step, old in calls if pkg == gates.RELEASED and step in ("import", "check")]
+            self.assertEqual([("import", True), ("check", True), ("import", False), ("check", False),
+                              ("import", False), ("check", False)], released)
+        finally:
+            gates.Gate, gates.retarget, gates.old_apk, gates.upgrade_into, gates.VERSIONS, gates.REFUSED = saved
 
 
 if __name__ == "__main__":

@@ -4,30 +4,39 @@
  */
 package org.fcitx.fcitx5.android.ui.main.settings.theme
 
+import android.content.Context
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.CheckBox
 import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.Keep
+import androidx.annotation.VisibleForTesting
 import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.RecyclerView
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.fcitx.fcitx5.android.R
+import org.fcitx.fcitx5.android.data.layout.ThemeLayoutsToList
 import org.fcitx.fcitx5.android.data.theme.Theme
 import org.fcitx.fcitx5.android.data.theme.ThemeFilesManager
 import org.fcitx.fcitx5.android.data.theme.ThemeManager
 import org.fcitx.fcitx5.android.input.theme.ThemeFileName
 import org.fcitx.fcitx5.android.ui.common.withLoadingDialog
+import org.fcitx.fcitx5.android.ui.main.settings.openInputStreamOrThrow
+import org.fcitx.fcitx5.android.ui.main.settings.openOutputStreamOrThrow
 import org.fcitx.fcitx5.android.utils.applyNavBarInsetsBottomPadding
 import org.fcitx.fcitx5.android.utils.importErrorDialog
 import org.fcitx.fcitx5.android.utils.queryFileName
 import org.fcitx.fcitx5.android.utils.toast
+import timber.log.Timber
 
 class ThemeListFragment : Fragment() {
 
@@ -69,7 +78,10 @@ class ThemeListFragment : Fragment() {
                         // the list read here, where it is changed, not on the thread that imports
                         val themes = ThemeManager.getAllThemes()
                         val opened = withContext(Dispatchers.IO) {
-                            val inputStream = cr.openInputStream(uri)!!
+                            // not over the start's listing of the packs (ThemeLayoutsToList.atStart): the pack it reads
+                            // replaced, the layouts it would list told before it listed them
+                            ThemeLayoutsToList.awaitStart()
+                            val inputStream = cr.openInputStreamOrThrow(uri)
                             if (skin) {
                                 ThemeFilesManager.openSkin(inputStream, name!!, themes).getOrThrow()
                             } else {
@@ -90,11 +102,7 @@ class ThemeListFragment : Fragment() {
                         } else {
                             themeListAdapter.replaceTheme(theme)
                         }
-                        if (migrated) {
-                            ctx.toast(R.string.theme_migrated)
-                        }
-                        // its name another theme's (a built-in one's since 0.6.0): said under which it is
-                        opened.imported.renamedFrom?.let { ctx.toast(ctx.getString(R.string.theme_imported_renamed, it, theme.name), Toast.LENGTH_LONG) }
+                        importedNotice(ctx, migrated, opened.imported.renamedFrom, theme.name)?.let { (text, length) -> ctx.toast(text, length) }
                     } catch (e: Exception) {
                         ctx.importErrorDialog(e)
                     }
@@ -109,7 +117,7 @@ class ThemeListFragment : Fragment() {
                 lifecycleScope.withLoadingDialog(requireContext()) {
                     try {
                         withContext(Dispatchers.IO) {
-                            val outputStream = ctx.contentResolver.openOutputStream(uri)!!
+                            val outputStream = ctx.contentResolver.openOutputStreamOrThrow(uri)
                             ThemeFilesManager.exportTheme(exported, outputStream).getOrThrow()
                         }
                     } catch (e: Exception) {
@@ -138,6 +146,18 @@ class ThemeListFragment : Fragment() {
         return ResponsiveThemeListView(requireContext()).apply {
             adapter = themeListAdapter
             applyNavBarInsetsBottomPadding()
+        }
+    }
+
+    /** The built-in theme [file]'s card scrolled to and given to [found], once it is laid out. */
+    fun reveal(file: String, found: (View) -> Unit) {
+        val list = view as? RecyclerView ?: return
+        val at = themeListAdapter.entries.indexOfFirst { it is Theme.Builtin && it.file == file }.takeIf { it >= 0 } ?: return
+        val position = at + ThemeListAdapter.OFFSET
+        list.scrollToPosition(position)
+        list.post {
+            val holder = list.findViewHolderForAdapterPosition(position) as? ThemeListAdapter.ViewHolder ?: return@post
+            found((holder.ui as? ThemeThumbnailUi)?.card ?: holder.itemView)
         }
     }
 
@@ -191,9 +211,17 @@ class ThemeListFragment : Fragment() {
         // let go however the dialog closes but by 导入 (cancelled, dismissed); one left by a fragment destroyed
         // with it open is cleared by a later open (ThemeFilesManager.openTheme)
         var taken = false
-        ThemePackDialogs.builder(ctx, title, ThemePackDialogs.confirmText(ctx, pack), pack.staged.preview)
+        // its boards the user picks among their own put in 外观 → 布局 with it (061-custom-layout §11), ticked unless unticked
+        val withLayouts = pack.staged.layoutReport.listed.takeIf { it.isNotEmpty() }?.let {
+            CheckBox(ctx).apply {
+                setText(R.string.theme_pack_layouts_with)
+                isChecked = true
+            }
+        }
+        ThemePackDialogs.builder(ctx, title, ThemePackDialogs.confirmText(ctx, pack), pack.staged.preview, withLayouts)
             .setPositiveButton(R.string.theme_pack_import) { _, _ ->
                 taken = true
+                val listLayouts = withLayouts?.isChecked == true
                 lifecycleScope.withLoadingDialog(ctx) {
                     try {
                         withContext(Dispatchers.IO) { pack.commit().getOrThrow() }
@@ -203,12 +231,44 @@ class ThemeListFragment : Fragment() {
                         updateSelectedThemes()
                     } catch (e: Exception) {
                         ctx.importErrorDialog(e)
+                        return@withLoadingDialog
+                    }
+                    // the theme in, whatever becomes of its layouts: what fails listing them said as theirs, not as the
+                    // import's failure (R26 F8378: it was, the list not made again)
+                    if (withLayouts != null) {
+                        try {
+                            listLayouts(pack.staged.name, listLayouts, pack.staged.layoutReport.listed.size)
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+                            Timber.w(e, "theme pack %s: layouts not listed", pack.staged.name)
+                            context?.toast(R.string.theme_pack_layouts_not_listed, Toast.LENGTH_LONG)
+                        }
                     }
                 }
             }
             .setNegativeButton(android.R.string.cancel, null)
             .setOnDismissListener { if (!taken) lifecycleScope.launch(Dispatchers.IO) { pack.discard() } }
             .show()
+    }
+
+    // the pack [name] just imported, its boards put in 外观 → 布局 ([listed], none chosen), told where fewer than the
+    // confirmation listed ([expected]: the list full, one failed); or, unticked, recorded not to be listed by a restore.
+    // The theme imported whatever becomes of them
+    private suspend fun listLayouts(name: String, listed: Boolean, expected: Int) {
+        val pack = ThemeManager.Packs.firstOrNull { it.file == name } ?: return
+        if (!listed) {
+            withContext(Dispatchers.IO) {
+                runCatching { ThemeLayoutsToList.notListed(pack) }.onFailure { Timber.w(it, "theme pack %s: not recorded unlisted", name) }
+            }
+            return
+        }
+        val made = withContext(Dispatchers.IO) {
+            runCatching { ThemeLayoutsToList.run(pack) }.onFailure { Timber.w(it, "theme pack %s: layouts not listed", name) }.getOrNull()
+        }
+        // here, on the main thread, where the settings pages change them too
+        made?.forEach { ThemeLayoutsToList.copySettings(it.done.renames) }
+        context?.let { ctx -> layoutsNotListedNotice(ctx, made, expected)?.let { ctx.toast(it, Toast.LENGTH_LONG) } }
     }
 
     private fun themeInfo(theme: Theme) {
@@ -233,5 +293,32 @@ class ThemeListFragment : Fragment() {
     override fun onDestroy() {
         ThemeManager.removeOnChangedListener(onThemeChangeListener)
         super.onDestroy()
+    }
+
+    companion object {
+        /**
+         * What a theme imported says, one toast and its length: [migrated] (an older format's, made anew), and where its
+         * name was another theme's (a built-in one's since 0.6.0) [renamedFrom], the name it is under now, [name]. One
+         * toast: the newest takes the place of one shown (showBriefly), so a second would hide the first (R26 F8137).
+         * Null, nothing to say.
+         */
+        @VisibleForTesting
+        internal fun importedNotice(ctx: Context, migrated: Boolean, renamedFrom: String?, name: String): Pair<String, Int>? {
+            val lines = listOfNotNull(
+                ctx.getString(R.string.theme_migrated).takeIf { migrated },
+                renamedFrom?.let { ctx.getString(R.string.theme_imported_renamed, it, name) },
+            )
+            if (lines.isEmpty()) return null
+            return lines.joinToString("\n") to if (renamedFrom != null) Toast.LENGTH_LONG else Toast.LENGTH_SHORT
+        }
+
+        /**
+         * What an import with 「一起导入」 says of its boards: [made] (null: the listing failed) fewer than the [expected]
+         * the confirmation listed (the list full, one failed), that not all were put in 外观 → 布局 (ST-72, ST-84). Null,
+         * all listed (R26 F8518).
+         */
+        @VisibleForTesting
+        internal fun layoutsNotListedNotice(ctx: Context, made: List<ThemeLayoutsToList.Listed>?, expected: Int): String? =
+            ctx.getString(R.string.theme_pack_layouts_not_listed).takeIf { made == null || made.size < expected }
     }
 }

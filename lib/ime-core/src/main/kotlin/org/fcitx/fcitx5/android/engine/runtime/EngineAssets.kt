@@ -6,12 +6,14 @@ package org.fcitx.fcitx5.android.engine.runtime
 
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog.CHAIZI_DATA
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog.CHAR_INFO_DATA
+import org.fcitx.fcitx5.android.engine.InputMethodCatalog.CHAR_LEVELS_DATA
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog.EMOJI_DATA
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog.ENGLISH_DATA
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog.PINYIN_DATA
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog.REFINING_MODEL
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog.SENTENCE_MODEL
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog.STROKE_DATA
+import org.fcitx.fcitx5.android.engine.data.CharLevels
 import org.fcitx.fcitx5.android.engine.data.CodeTable
 import org.fcitx.fcitx5.android.engine.data.DataFormatException
 import org.fcitx.fcitx5.android.engine.data.NgramModel
@@ -34,7 +36,6 @@ import org.fcitx.fcitx5.android.engine.stroke.Strokes
 import org.fcitx.fcitx5.android.engine.user.UserModel
 import org.fcitx.fcitx5.android.engine.user.imports.WordText
 import org.fcitx.fcitx5.android.input.voice.VoiceHomophones
-import java.io.FileNotFoundException
 import java.io.IOException
 
 /**
@@ -140,19 +141,9 @@ internal class EngineAssets(
         fun get(): SentenceModel? {
             if (tried) return model
             tried = true
-            model = try {
+            // a pack without it, or one that does not read: pinyin reads by the decoder alone, as before models were added
+            model = readOr(null, "cannot read $path: pinyin reads by the decoder alone") {
                 SentenceModel.load(blobs.load(path), unpack, kernel ?: MatrixKernel.JVM)
-            } catch (e: FileNotFoundException) {
-                // a build without them (EngineDataPlugin fetches them): pinyin reads by the decoder alone
-                onError(IOException("cannot open $path: pinyin reads by the decoder alone", e))
-                null
-            } catch (e: IOException) {
-                onError(e)
-                null
-            } catch (e: IllegalArgumentException) {
-                // pinyin reads as well without it as before it was added
-                onError(IOException("cannot read $path", e))
-                null
             }
             return model
         }
@@ -266,23 +257,29 @@ internal class EngineAssets(
         val data = pinyinData
         return VoiceHomophones.of(
             words,
-            readingsOf = { w ->
-                val syllables = w.pinyin.split(' ', '\'').filter { it.isNotEmpty() }.map(Syllables::id).toIntArray()
-                if (syllables.size != w.text.length || syllables.any { it < 0 }) null else {
-                    val tones = data.tones.tones(w.text, syllables, textWords.id(w.text).takeIf { it != NgramModel.NO_WORD } ?: -1)
-                    syllables.indices.map { k ->
-                        val tone = tones?.get(k)?.toInt() ?: ToneMark.NONE
-                        if (tone != ToneMark.NONE) intArrayOf(VoiceHomophones.reading(syllables[k], tone))
-                        else data.charReadings.of(w.text[k].code).filter { it.syllable == syllables[k] }.map { VoiceHomophones.reading(it.syllable, it.tone) }.toIntArray()
-                    }
-                }
-            },
+            readingsOf = ::voiceWordReadings,
             // looked up in the mapped table as heard (its reads stateless, any thread's), not copied to the heap
-            charReadings = { c ->
-                val of = data.charReadings.of(c.code)
-                if (of.isEmpty()) null else IntArray(of.size) { VoiceHomophones.reading(of[it].syllable, of[it].tone) }
-            },
+            charReadings = ::voiceReadings,
         )
+    }
+
+    /** [w]'s readings, a character's each ([VoiceHomophones.reading], its tone where known), as voice reads the user's words; null if its pinyin does not spell it. */
+    fun voiceWordReadings(w: UserWord): List<IntArray>? {
+        val data = pinyinData
+        val syllables = w.pinyin.split(' ', '\'').filter { it.isNotEmpty() }.map(Syllables::id).toIntArray()
+        if (syllables.size != w.text.length || syllables.any { it < 0 }) return null
+        val tones = data.tones.tones(w.text, syllables, textWords.id(w.text).takeIf { it != NgramModel.NO_WORD } ?: -1)
+        return syllables.indices.map { k ->
+            val tone = tones?.get(k)?.toInt() ?: ToneMark.NONE
+            if (tone != ToneMark.NONE) intArrayOf(VoiceHomophones.reading(syllables[k], tone))
+            else data.charReadings.of(w.text[k].code).filter { it.syllable == syllables[k] }.map { VoiceHomophones.reading(it.syllable, it.tone) }.toIntArray()
+        }
+    }
+
+    /** [c]'s readings, all of them, as [VoiceHomophones.reading] packs them; null for none. */
+    fun voiceReadings(c: Char): IntArray? {
+        val of = pinyinData.charReadings.of(c.code)
+        return if (of.isEmpty()) null else IntArray(of.size) { VoiceHomophones.reading(of[it].syllable, of[it].tone) }
     }
 
     /** [VoiceHomophones.allowed] of each of [spans], by the dictionary's words and the model's counts. */
@@ -311,11 +308,8 @@ internal class EngineAssets(
 
     // the words emoji stand for; none if the app has not got them
     private val emoji: EmojiData by lazy {
-        try {
+        readOr(EmojiData.EMPTY, "cannot read $EMOJI_DATA: no emoji candidates") {
             EmojiData.read(Charsets.UTF_8.decode(blobs.load(EMOJI_DATA)))
-        } catch (e: IOException) {
-            onError(IOException("cannot read $EMOJI_DATA: no emoji candidates", e))
-            EmojiData.EMPTY
         }
     }
 
@@ -327,11 +321,8 @@ internal class EngineAssets(
 
     // characters by their parts' pinyin; none if the app has not got them
     private val chaizi: Chaizi by lazy {
-        try {
+        readOr(Chaizi.EMPTY, "cannot read $CHAIZI_DATA: no characters by their parts") {
             Chaizi.read(Charsets.UTF_8.decode(blobs.load(CHAIZI_DATA)))
-        } catch (e: IOException) {
-            onError(IOException("cannot read $CHAIZI_DATA: no characters by their parts", e))
-            Chaizi.EMPTY
         }
     }
 
@@ -342,13 +333,27 @@ internal class EngineAssets(
         }
     }
 
-    // what [read] reads, or [fallback] with [onError] told [message] when the file cannot be opened or read
+    /**
+     * Each listed character's group for 生僻字屏蔽 (APK's); null, told once, if it cannot be read: the
+     * blocking is then off, not guessed by ranges alone, which would hold back the table's 三级字 and
+     * traditional characters beyond the basic block (design §3.1).
+     */
+    val charLevels: CharLevels? by lazy(LazyThreadSafetyMode.NONE) {
+        readOr(null, "cannot read $CHAR_LEVELS_DATA: 生僻字屏蔽 off") { CharLevels.load(blobs.load(CHAR_LEVELS_DATA), verify = false) }
+    }
+
+    // what [read] reads, or [fallback] with [onError] told [message] when the file cannot be opened (not in
+    // the pack: FileNotFoundException), read (IOException) or makes no sense (DataFormatException,
+    // IllegalArgumentException): the one rule for every optional file here (0.6.1 audit engine-13)
     private inline fun <T> readOr(fallback: T, message: String, read: () -> T): T = try {
         read()
     } catch (e: IOException) {
         onError(IOException(message, e))
         fallback
     } catch (e: DataFormatException) {
+        onError(IOException(message, e))
+        fallback
+    } catch (e: IllegalArgumentException) {
         onError(IOException(message, e))
         fallback
     }
@@ -360,6 +365,9 @@ internal class EngineAssets(
     fun chaiziOf(letters: String): List<Pair<String, String>> =
         chaizi.of(letters).filter { drawn.getOrPut(it) { textShows(it) } }.map { it to charReading(it) }
 
+    /** Every character found by its parts ([Chaizi.all]), shown or not: what 生僻字屏蔽's grid asks can be typed. */
+    fun chaiziChars(): Sequence<String> = chaizi.all()
+
     // null till asked for; an app without the data has no lookup
     private var strokeTable: Strokes? = null
     private var strokesTried = false
@@ -367,22 +375,13 @@ internal class EngineAssets(
     fun strokes(): Strokes? {
         if (!strokesTried) {
             strokesTried = true
-            strokeTable = try {
+            strokeTable = readOr(null, "cannot read $STROKE_DATA: no lookup by strokes") {
                 val words = pinyinData.wordIndex
                 val model = pinyinData.model
                 Strokes(CodeTable.load(blobs.load(STROKE_DATA), verify = false)) { c ->
                     val id = words.find(c)
                     if (id < 0) Float.NEGATIVE_INFINITY else model.score(id)
                 }
-            } catch (e: FileNotFoundException) {
-                onError(IOException("cannot open $STROKE_DATA: no lookup by strokes", e))
-                null
-            } catch (e: IOException) {
-                onError(e)
-                null
-            } catch (e: DataFormatException) {
-                onError(IOException(e))
-                null
             }
         }
         return strokeTable

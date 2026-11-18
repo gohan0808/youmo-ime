@@ -5,12 +5,12 @@
 // Run: node web/theme-maker/test/pixel-smoke.mjs [chromium]   (default: Playwright's headless shell, the newest
 // in ~/Library/Caches/ms-playwright or ~/.cache/ms-playwright; CHROMIUM=<path> too)
 import { execFile } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inflateSync } from 'node:zlib';
 import { serve } from '../dev/serve.mjs';
+import { chromium } from './cdp.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const app = join(here, '..', '..', '..', 'app', 'build', 'w1-pixel');
@@ -30,21 +30,6 @@ const FAR = 48;
 const ROUGH = 0.02;
 const NEAR = 16;
 const SOLID = 0.002;
-
-export function chromium() {
-  const given = process.argv[2] || process.env.CHROMIUM;
-  if (given) return given;
-  for (const cache of [join(homedir(), 'Library', 'Caches', 'ms-playwright'), join(homedir(), '.cache', 'ms-playwright')]) {
-    if (!existsSync(cache)) continue;
-    const shells = readdirSync(cache).filter((d) => d.startsWith('chromium_headless_shell-')).sort().reverse();
-    for (const d of shells) {
-      for (const sub of ['chrome-mac/headless_shell', 'chrome-mac-arm64/headless_shell', 'chrome-linux/headless_shell', 'chrome-headless-shell-mac-arm64/chrome-headless-shell', 'chrome-headless-shell-linux64/chrome-headless-shell']) {
-        if (existsSync(join(cache, d, sub))) return join(cache, d, sub);
-      }
-    }
-  }
-  return null;
-}
 
 /** A PNG's pixels: {width, height, rgba} (8 bits a channel, RGB or RGBA, not interlaced: what both sides write). */
 export function decodePng(bytes) {

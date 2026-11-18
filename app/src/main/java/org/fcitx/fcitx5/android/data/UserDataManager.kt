@@ -18,10 +18,16 @@ import org.fcitx.fcitx5.android.core.HostConfigDir
 import org.fcitx.fcitx5.android.data.clipboard.CLIPBOARD_DATABASE
 import org.fcitx.fcitx5.android.data.clipboard.db.ClipboardEntry
 import org.fcitx.fcitx5.android.data.clipboard.importedClipboardMarker
+import org.fcitx.fcitx5.android.data.layout.CustomLayouts
+import org.fcitx.fcitx5.android.data.layout.ThemeLayoutsToList
 import org.fcitx.fcitx5.android.data.pinyin.CommonWordsManager
+import org.fcitx.fcitx5.android.data.pinyin.ImportedDictionaries
+import org.fcitx.fcitx5.android.data.pinyin.RareCharsManager
 import org.fcitx.fcitx5.android.data.pinyin.MergedDictionary
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
+import org.fcitx.fcitx5.android.data.punctuation.PunctuationMaps
 import org.fcitx.fcitx5.android.data.theme.ThemePackFiles
+import org.fcitx.fcitx5.android.data.theme.ThemeSeparators
 import org.fcitx.fcitx5.android.engine.english.EnglishBlocks
 import org.fcitx.fcitx5.android.engine.learn.LearnLog
 import org.fcitx.fcitx5.android.engine.learn.backup.Backups
@@ -31,6 +37,7 @@ import org.fcitx.fcitx5.android.engine.store.RecordStore
 import org.fcitx.fcitx5.android.engine.user.WordLists
 import org.fcitx.fcitx5.android.host.ConfigHome
 import org.fcitx.fcitx5.android.utils.Const
+import org.fcitx.fcitx5.android.utils.ZipEnd
 import org.fcitx.fcitx5.android.utils.appContext
 import org.fcitx.fcitx5.android.utils.errorRuntime
 import org.fcitx.fcitx5.android.utils.extract
@@ -113,6 +120,8 @@ object UserDataManager {
         // the three settled where they are written: if not, an export would take a stand-in and a restore
         // write where the next start does not read, so both refuse (user_data_not_settled)
         val settled: Boolean = true,
+        // the user's own layouts (CustomLayouts), beside the engine's store in the app's files
+        val layouts: File = File(engine.parentFile, CustomLayouts.DIR),
     ) {
         // each by its name in a backup's external/
         val moved get() = listOf(ConfigHome.CONFIG.old to config, ConfigHome.DATA.old to data, ConfigHome.THEME.old to theme)
@@ -133,6 +142,7 @@ object UserDataManager {
                 data.dir,
                 theme.dir,
                 settled = config.writable && data.writable && theme.writable,
+                layouts = CustomLayouts.dir(appContext),
             )
         }
 
@@ -216,9 +226,12 @@ object UserDataManager {
                 writeFileTree(dirs.engine, "engine", zipStream) { f ->
                     val path = f.relativeTo(dirs.engine).path
                     f.name.endsWith(".compacting") || path.substringBefore(File.separatorChar) in OWN_DIRS ||
-                        (learning != null && path in LEARNED_FROM) || ((learning != null || oldLogsRead) && isOldLog(path))
+                        (learning != null && (path in LEARNED_FROM || isKeptAside(path))) || ((learning != null || oldLogsRead) && isOldLog(path))
                 }
             }
+            // the user's own layouts and the record of the packs whose layouts were listed (061-custom-layout §4.5),
+            // not one half written; 0.6.0 restores what it knows of the backup and leaves this
+            if (dirs.layouts.isDirectory) writeFileTree(dirs.layouts, CustomLayouts.DIR, zipStream, skipDir = { true }) { !CustomLayouts.backedUp(it) }
             learning?.let {
                 zipStream.putNextEntry(ZipEntry(RestoreStash.BACKUP))
                 zipStream.write(it)
@@ -248,6 +261,52 @@ object UserDataManager {
         ThemePackFiles.dropStamps(from)
         ThemePackFiles.dropStamps(themes)
     }
+
+    // the packs of this app's backup ([own]; an upstream one has none) of before 0.6.1 ([from] its themes, laid over)
+    // given 分词 at the start after, as the phone's were (FB12); not recorded, they are left as they are (logged), the
+    // restore whole. The names of the packs [from] has, every backup's (their layouts listed: restoredPackLayouts)
+    private fun restoredPacks(name: String, from: File, own: Boolean, versionCode: Long): List<String> {
+        if (name != ConfigHome.THEME.old) return emptyList()
+        // the names of the theme 4.0 packs the backup brings (also listed in 外观 → 布局 at the next start)
+        val packs = ThemePackFiles.folder(from).listFiles(FileFilter { it.isDirectory && !it.name.startsWith(".") })
+            ?.map { it.name }.orEmpty()
+        if (own && versionCode < FIRST_WITH_SEPARATOR) {
+            runCatching { ThemeSeparators.restoredBeforeSeparator(packs) }
+                .onFailure { Timber.w(it, "Theme packs restored not recorded to be given 分词") }
+        }
+        return packs
+    }
+
+    // the packs this app's backup brought ([names], [own]; an upstream one has none) put in 外观 → 布局 at the next start
+    // (061-custom-layout §11): those its record ([layouts]' CONVERTED) has not, by name (a pack restored is stamped with the
+    // copy's time, not the backup's; one imported with 「一起导入」 unticked is recorded, not listed); their choices switched
+    // where the record is not 0.6.1's (no CURRENT line: 0.6.0's, a 0.6.1 beta's, none at all), as what it chose is then a
+    // board its packs stood for. Not by its version nor by whether it has layouts (L7 review NIT1: 0.6.1's with none
+    // would be switched, a beta's with some not)
+    private fun restoredPackLayouts(layouts: File, names: List<String>, own: Boolean) {
+        if (!own || names.isEmpty()) return
+        val record = CustomLayouts.record(layouts)
+        ThemeLayoutsToList.restored(names.filter { it !in record.packNames }, switch = !record.current)
+    }
+
+    // [from], the backup's directory of [name] (one of [Dirs.moved]), laid over the phone's [dir]
+    private fun layOver(name: String, from: File, dir: File) {
+        dir.mkdirs()
+        if (name == ConfigHome.THEME.old) dropRestoredPacks(from, dir)
+        // the data's pinyin dictionaries written under the sources lock, as by every other writer of
+        // them: a conversion on the compile thread commits after the copy, and finds a text it read
+        // half copied changed. Without it, one listed as the copy made it, not yet written to, was
+        // committed empty and deleted under the copy's write, its words gone. Nothing waits on the
+        // compile thread in here (ImportedDictionaries' rule)
+        if (name == ConfigHome.DATA.old) synchronized(ImportedDictionaries) { copyMoved(from, dir) } else copyMoved(from, dir)
+    }
+
+    /**
+     * How the backup's config, data and themes are laid over the phone's: [copyDir]. A test's stand-in
+     * stops in the middle of a file, as a copy stopped by the system would, for what runs meanwhile.
+     */
+    @VisibleForTesting
+    internal var copyMoved: (source: File, target: File) -> Unit = { source, target -> copyDir(source, target) }
 
     private fun copyDir(source: File, target: File) {
         val exists = source.exists()
@@ -284,16 +343,96 @@ object UserDataManager {
 
     fun import(src: InputStream) = import(src, appDirs)
 
-    // stopped as it is unpacked once it would fill the disk (a zip bomb), not after
+    // stopped as it is unpacked once it would fill the disk (a zip bomb), not after; nor more than [maxEntries]
+    // entries, empty directories counted too: a zip of millions of them fills no disk but takes minutes and inodes.
+    // The zip is copied beside [tempDir] first, so that its end record says how many entries it has: too many
+    // refused at once, not after each is written (R25 PR-52a: 100 001 empty directories, half a minute of 加载中).
+    // Counted again as they are unpacked: what is unpacked is the entries themselves, which an end record may not
+    // tell truly. The copy only of a zip (its first bytes a zip's: a 20 GB video picked is refused before a byte is
+    // written), of [maxBytes] at most, and of half the room at most: what it unpacks to takes as much again, a
+    // stored entry's bytes (review 061-small S2). A zip with no end record to read is none of ours either (S4)
     @VisibleForTesting
-    internal fun extractWithinRoom(src: InputStream, tempDir: File, room: Long = tempDir.usableSpace): List<File> {
-        return ZipInputStream(src).use {
-            it.extract(tempDir) { _, size, total -> if (total + size > room) errorRuntime(R.string.exception_user_data_no_room) }
+    internal fun extractWithinRoom(
+        src: InputStream,
+        tempDir: File,
+        room: Long = tempDir.usableSpace,
+        maxEntries: Int = MAX_BACKUP_ENTRIES,
+        maxBytes: Long = MAX_BACKUP_BYTES,
+    ): List<File> {
+        val copy = File(tempDir.parentFile, "${tempDir.name}$COPY_SUFFIX")
+        try {
+            dropStaleCopies(tempDir.parentFile)
+            val copied = src.use { input ->
+                val head = ByteArray(ZIP_HEAD.size).let { it.copyOf(readUpTo(input, it)) }
+                if (!head.contentEquals(ZIP_HEAD) && !head.contentEquals(EMPTY_ZIP_HEAD)) errorRuntime(R.string.exception_user_data_not_a_backup)
+                copy.outputStream().use { out ->
+                    out.write(head)
+                    copyWithin(input, out, head.size.toLong(), maxBytes, room / 2)
+                }
+            }
+            val entries = ZipEnd.entries(copy) ?: errorRuntime(R.string.exception_user_data_not_a_backup)
+            if (entries > maxEntries) errorRuntime(R.string.exception_user_data_too_many_entries)
+            return ZipInputStream(copy.inputStream()).use {
+                it.extract(tempDir) { count, size, total ->
+                    if (count > maxEntries) errorRuntime(R.string.exception_user_data_too_many_entries)
+                    if (copied + total + size > room) errorRuntime(R.string.exception_user_data_no_room)
+                }
+            }
+        } finally {
+            copy.delete()
         }
     }
 
+    // up to [into]'s size of [input]'s first bytes: how many there were
+    private fun readUpTo(input: InputStream, into: ByteArray): Int {
+        var n = 0
+        while (n < into.size) {
+            val read = input.read(into, n, into.size - n)
+            if (read < 0) break
+            n += read
+        }
+        return n
+    }
+
+    // [input] into [out] after [from] bytes already there, stopped on the chunk past [maxBytes] or [room], unwritten;
+    // how much there is in all
+    private fun copyWithin(input: InputStream, out: OutputStream, from: Long, maxBytes: Long, room: Long): Long {
+        var size = from
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        while (true) {
+            val n = input.read(buffer)
+            if (n < 0) return size
+            size += n
+            if (size > maxBytes) errorRuntime(R.string.exception_user_data_too_big)
+            if (size > room) errorRuntime(R.string.exception_user_data_no_room)
+            out.write(buffer, 0, n)
+        }
+    }
+
+    // the copies of restores killed midway (the app's process ended, the copy's finally never ran): an hour
+    // old, no restore of the moment's; the restore's folder beside it the cache's to clear, as ever
+    private fun dropStaleCopies(dir: File?) {
+        val before = System.currentTimeMillis() - STALE_COPY_MS
+        dir?.listFiles { f -> f.isFile && f.name.endsWith(COPY_SUFFIX) && f.lastModified() < before }?.forEach { it.delete() }
+    }
+
+    // a zip's first entry's local header; an empty zip's end record, its whole
+    private val ZIP_HEAD = byteArrayOf(0x50, 0x4b, 0x03, 0x04)
+    private val EMPTY_ZIP_HEAD = byteArrayOf(0x50, 0x4b, 0x05, 0x06)
+    private const val COPY_SUFFIX = ".restore.zip"
+    private const val STALE_COPY_MS = 60 * 60 * 1000L
+
+    // a phone's whole backup is some megabytes; a file this big is none, whatever it is
+    private const val MAX_BACKUP_BYTES = 2L shl 30
+
+    // a phone's whole backup is a few thousand files (the theme packs' images the most): ten times that and more is no backup
+    private const val MAX_BACKUP_ENTRIES = 100_000
+
     internal fun import(src: InputStream, dirs: Dirs) = runCatching {
         if (!dirs.settled) errorRuntime(R.string.user_data_not_settled)
+        // the start's listing of the packs ended first (ThemeLayoutsToList.atStart); its switch dropped below, once the
+        // backup passed its checks
+        ThemeLayoutsToList.awaitStart(restoring = true)
         withTempDir { tempDir ->
             // closed before anything is copied: nothing may fail the import once the engine's is in
             val extracted = extractWithinRoom(src, tempDir)
@@ -323,6 +462,9 @@ object UserDataManager {
             // the address bar's book the phone's, where the learning the zip brings carries the zip's: merged into it at
             // the next start, as a restore of a learning backup is, and the phone's kept for 退回恢复前
             keepAddressBook(tempDir)
+            // the start's switch, not yet made, dropped: made on the main thread after the settings copied in, it would
+            // write the phone's over the backup's. Not before the checks: a refused restore copies none in (R26 F8134)
+            ThemeLayoutsToList.dropStart()
             copyDir(File(tempDir, "shared_prefs"), dirs.sharedPrefs)
             val databases = File(tempDir, "databases")
             // only an import's own copy marks the clipboard's file the backup's: not a marker the backup brings, which
@@ -347,20 +489,33 @@ object UserDataManager {
             // files, ConfigHome: settled before, by appDirs, so an older build's is moved in first, never
             // passed over by a restore made before the move), the rest of external where it was
             val external = File(tempDir, "external")
+            // the theme packs the backup brings, by name
+            var packs = emptyList<String>()
             for ((name, dir) in dirs.moved) {
                 val from = File(tempDir, "external-$name")
                 if (File(external, name).renameTo(from)) {
-                    dir.mkdirs()
-                    if (name == ConfigHome.THEME.old) dropRestoredPacks(from, dir)
-                    copyDir(from, dir)
+                    layOver(name, from, dir)
+                    packs += restoredPacks(name, from, origin == UserDataOrigin.Own, metadata.versionCode)
                 }
             }
             if (external.isDirectory) copyDir(external, dirs.external)
             // the settings are the backup's (PR-10): a config file it has not was at its defaults when it was
             // made, fcitx writing only what is set, so the phone's is dropped, not left over the backup's
             pruneAbsent(File(tempDir, "external-${ConfigHome.CONFIG.old}"), File(tempDir, "external-${ConfigHome.DATA.old}"), dirs)
-            // keep importing recently_used for backwords compatibility
+            // a punctuation table the backup brings (this app's before 0.6.1, upstream Fcitx5's) is not used: no page
+            // edits one since, the built-in table everyone's (HostConfigDir.resetPunctuationOnce). Not AppPrefs' mark
+            // here, which would write its copy over the imported one: the next start clears it (resetHiddenSettings)
+            if (!PunctuationMaps.dropEdited(dirs.data)) Timber.w("a restored punctuation table not deleted: tried again at the next start")
+            // keep importing recently_used for backwards compatibility: an upstream Fcitx5 backup's recent symbols are
+            // still taken (DECISIONS B3)
             copyDir(File(tempDir, "recently_used"), dirs.recentlyUsed)
+            // the backup's layouts over the phone's, as theme packs: one of an id replaces the phone's, the others stay
+            // (an older backup has none, the phone's as they were). Best effort: what fails here is logged, not the
+            // restore's failure, which would leave the settings and themes above the backup's and the engine's not
+            runCatching { CustomLayouts.restore(File(tempDir, CustomLayouts.DIR), dirs.layouts, ThemePackFiles.minAppVersion(BuildConfig.VERSION_NAME)) }
+                .onFailure { Timber.w(it, "layouts not restored") }
+            runCatching { restoredPackLayouts(File(tempDir, CustomLayouts.DIR), packs, origin == UserDataOrigin.Own) }
+                .onFailure { Timber.w(it, "theme packs restored not recorded to have their layouts listed") }
             // last: an import failing after it would start fcitx again on the logs it replaced
             val learning = File(tempDir, RestoreStash.BACKUP).takeIf { it.isFile }
             if (File(tempDir, "engine").exists() || learning != null) {
@@ -432,7 +587,7 @@ object UserDataManager {
                 .forEach {
                     val path = it.toRelativeString(engine)
                     val target = File(staged, path)
-                    val phonesOwn = path in PHONES || path.substringBefore(File.separatorChar) in OWN_DIRS || isOldLog(path)
+                    val phonesOwn = path in PHONES || isKeptAside(path) || path.substringBefore(File.separatorChar) in OWN_DIRS || isOldLog(path)
                     if (it.isDirectory) target.mkdirs() else if (phonesOwn || !target.exists()) it.copyTo(target, overwrite = true)
                 }
         }
@@ -450,6 +605,7 @@ object UserDataManager {
         val stashed = STASHED + staged.list().orEmpty().filter(::isOldLog)
         for (name in stashed) File(staged, name).takeIf { it.isFile }?.let { it.copyTo(File(stash, name)); it.delete() }
         PHONES.forEach { File(staged, it).deleteRecursively() }
+        staged.list().orEmpty().filter(::isKeptAside).forEach { File(staged, it).deleteRecursively() }
         if (stash.list().isNullOrEmpty()) stash.parentFile?.let { if (stash.delete()) it.delete() }
     }
 
@@ -465,6 +621,10 @@ object UserDataManager {
     // ABI's): this app's zip of a version before has its learning in the old logs alone
     private const val FIRST_WITH_THE_RECORD = 2130L
 
+    // 0.6.1's code, an ABI's (Versions.calculateVersionCode: 5130 + the ABI's 1-4): the first whose packs were given 分词
+    @VisibleForTesting
+    internal const val FIRST_WITH_SEPARATOR = 5130L
+
     // an older build's log of learning (pinyin's, a table's, English's) or 0.4's mark beside a table's,
     // at the engine directory's top
     private fun isOldLog(path: String) = File.separatorChar !in path && (path.endsWith(".user") || path.endsWith(".user.told"))
@@ -474,9 +634,13 @@ object UserDataManager {
     private const val OLD_PINS_MOVED = "learn.pins-moved"
     private const val OLD_PINYIN = "pinyin.user"
 
+    // the learning record's copies kept aside, at the engine directory's top: .unreadable, .unreadable.1... (the
+    // engine's rule: 0.6.1 audit engine-07). The phone's learning, as PHONES; with the learning given, as LEARNED_FROM
+    private fun isKeptAside(path: String) = File.separatorChar !in path && RecordStore.isAside(LearnLog.FILE, path)
+
     // the files of the phone's learning: kept over a backup's, as the backup's learning is merged into them
     private val PHONES = setOf(
-        LearnLog.FILE, LearnLog.FILE + RecordStore.UNREADABLE, OLD_MARKER, "$OLD_MARKER.new",
+        LearnLog.FILE, OLD_MARKER, "$OLD_MARKER.new",
         OLD_PINS_MOVED, WordLists.ADDED, WordLists.BLOCKED, EnglishBlocks.FILE, OLD_PINYIN, Engines.TABLE_LOGS_READ,
     )
 
@@ -485,15 +649,15 @@ object UserDataManager {
     private val STASHED = listOf(LearnLog.FILE, WordLists.ADDED, WordLists.BLOCKED, EnglishBlocks.FILE, Engines.TABLE_LOGS_READ)
 
     // in fcitx's data, beside the settings (punctuation.conf, androidengine.conf, ..., in the config's own
-    // directory): the custom phrases, the quick phrases (fcitx's PkgData data/quickphrase.d) and the
-    // punctuation maps (PkgData punctuation/punc.mb.*)
-    private val FOLLOWED = listOf("pinyin/customphrase", CommonWordsManager.FILE, "data/quickphrase.d", "punctuation")
+    // directory): the custom phrases, 常用词 and 生僻字屏蔽's choice beside them and the quick phrases (fcitx's PkgData
+    // data/quickphrase.d); the punctuation maps (PkgData punctuation/punc.mb.*) are dropped whole after a restore
+    private val FOLLOWED = listOf("pinyin/customphrase", CommonWordsManager.FILE, RareCharsManager.FILE, "data/quickphrase.d")
 
     // the directories of the engine's that are the phone's alone, neither exported nor imported
     private val OWN_DIRS = setOf(Backups.DIR, RestoreStash.DIR, RestoreStash.UNREADABLE)
 
     // what the learning a zip carries as a backup is made of, with the old logs (isOldLog): not exported beside it
-    private val LEARNED_FROM = setOf(LearnLog.FILE, LearnLog.FILE + RecordStore.UNREADABLE, OLD_MARKER, OLD_PINS_MOVED, Engines.TABLE_LOGS_READ)
+    private val LEARNED_FROM = setOf(LearnLog.FILE, OLD_MARKER, OLD_PINS_MOVED, Engines.TABLE_LOGS_READ)
 }
 
 /**

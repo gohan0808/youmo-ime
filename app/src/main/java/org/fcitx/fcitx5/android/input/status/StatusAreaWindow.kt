@@ -5,14 +5,21 @@
 package org.fcitx.fcitx5.android.input.status
 
 import android.view.View
+import androidx.core.view.isVisible
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.daemon.HostConnection
 import org.fcitx.fcitx5.android.daemon.launchOnReady
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
 import org.fcitx.fcitx5.android.data.theme.ThemeManager
+import org.fcitx.fcitx5.android.engine.learn.control.LearningOp
+import org.fcitx.fcitx5.android.engine.learn.control.LearningResult
 import org.fcitx.fcitx5.android.host.StatusEntry
+import org.fcitx.fcitx5.android.input.bar.BarIcons
 import org.fcitx.fcitx5.android.input.bar.KawaiiBarComponent
+import org.fcitx.fcitx5.android.input.bar.ToolbarButton
+import org.fcitx.fcitx5.android.input.bar.ToolbarButtonLooks
 import org.fcitx.fcitx5.android.input.bar.ui.ToolButton
 import org.fcitx.fcitx5.android.input.broadcast.InputBroadcastReceiver
 import org.fcitx.fcitx5.android.input.dependency.fcitx
@@ -20,6 +27,7 @@ import org.fcitx.fcitx5.android.input.dependency.imeScope
 import org.fcitx.fcitx5.android.input.dependency.inputMethodService
 import org.fcitx.fcitx5.android.input.dependency.theme
 import org.fcitx.fcitx5.android.input.editorinfo.EditorInfoWindow
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardWindow
 import org.fcitx.fcitx5.android.input.status.StatusAreaEntry.Android.Type.ClearRecent
 import org.fcitx.fcitx5.android.input.status.StatusAreaEntry.Android.Type.FloatingToggle
 import org.fcitx.fcitx5.android.input.status.StatusAreaEntry.Android.Type.HabitsToggle
@@ -38,8 +46,13 @@ import splitties.views.backgroundColor
 import splitties.views.dsl.core.add
 import splitties.views.dsl.core.horizontalLayout
 import splitties.views.dsl.core.lParams
+import splitties.views.dsl.core.matchParent
+import splitties.views.dsl.core.textView
+import splitties.views.dsl.core.verticalLayout
+import splitties.views.dsl.core.wrapContent
 import splitties.views.dsl.recyclerview.recyclerView
 import splitties.views.recyclerview.gridLayoutManager
+import timber.log.Timber
 
 class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
     InputBroadcastReceiver {
@@ -48,6 +61,7 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
     private val fcitx: HostConnection by manager.fcitx()
     private val theme by manager.theme()
     private val windowManager: InputWindowManager by manager.must()
+    private val bar: KawaiiBarComponent by manager.must()
 
     private val editorInfoInspector by AppPrefs.getInstance().internal.editorInfoInspector
 
@@ -56,21 +70,21 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
     // what fcitx last offered, for the entries to be shown again as one of the app's changes
     private var hostEntries = emptyList<StatusEntry>()
 
+    // the host's statuses told so far (onStatusAreaUpdate): one told while the panel's own read was on its way is the newer
+    private var statusesTold = 0
+
     private val staticEntries by lazy {
         arrayOf(
             StatusAreaEntry.Android(
                 context.getString(R.string.theme),
-                R.drawable.ic_baseline_palette_24,
                 ThemeList
             ),
             StatusAreaEntry.Android(
                 context.getString(R.string.input_method_options),
-                R.drawable.ic_baseline_language_24,
                 InputMethod
             ),
             StatusAreaEntry.Android(
                 context.getString(R.string.virtual_keyboard),
-                R.drawable.ic_baseline_keyboard_24,
                 Keyboard
             )
         )
@@ -83,6 +97,11 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
             override fun onItemClick(view: View, entry: StatusAreaEntry) {
                 when (entry) {
                     is StatusAreaEntry.Host -> actions.activate(entry.action)
+                    // back on the letters, then as the bar's button: what it opens over them, what it types into the app
+                    is StatusAreaEntry.Bar -> {
+                        windowManager.attachWindow(KeyboardWindow)
+                        bar.press(entry.button, view)
+                    }
                     is StatusAreaEntry.Android -> when (entry.type) {
                         InputMethod -> actions.inputMethodSettings()
                         Keyboard -> actions.keys()
@@ -91,7 +110,7 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
                         FloatingToggle -> actions.toggleFloating()
                         HabitsToggle -> {
                             actions.toggleHabits()
-                            onStatusAreaUpdate(hostEntries)
+                            show(hostEntries)
                         }
                         ClearRecent -> actions.clearRecent(view)
                         KeyboardChoice -> actions.chooseKeyboard(view)
@@ -103,49 +122,78 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
         }
     }
 
+    // learning stopped reaching the disk (a write refused, the record not opened again): said on
+    // top of the panel while it lasts, as on top of 用户词库 (R25 decode-1)
+    private val notSaving by lazy {
+        context.textView {
+            setText(R.string.learning_not_saving)
+            textSize = 12f
+            setTextColor(theme.keyTextColor)
+            setPadding(dp(12), dp(8), dp(12), 0)
+            isVisible = false
+        }
+    }
+
     val view by lazy {
-        context.recyclerView {
+        context.verticalLayout {
             ThemeColors.panel(ThemeManager.shownLook(theme).palette, ThemeManager.shownLook(theme).keys)?.let { backgroundColor = it }
-            layoutManager = gridLayoutManager(4)
-            adapter = this@StatusAreaWindow.adapter
+            add(notSaving, lParams(matchParent, wrapContent))
+            add(
+                context.recyclerView {
+                    layoutManager = gridLayoutManager(4)
+                    adapter = this@StatusAreaWindow.adapter
+                },
+                lParams(matchParent, matchParent),
+            )
         }
     }
 
     override fun onStatusAreaUpdate(entries: List<StatusEntry>) {
+        statusesTold++
+        show(entries)
+    }
+
+    private fun show(entries: List<StatusEntry>) {
         hostEntries = entries
         val floating = actions.floating
         val oneHanded = if (!actions.oneHandedOffered) emptyArray() else arrayOf(
             StatusAreaEntry.Android(
                 context.getString(R.string.one_handed),
-                R.drawable.ic_baseline_pan_tool_24,
                 OneHandedToggle,
                 active = actions.oneHanded
             )
         )
         // where the input method on has keyboards to choose from (I1 Q1)
         val keyboards = if (!actions.keyboardsOffered) emptyArray() else arrayOf(
-            StatusAreaEntry.Android(context.getString(R.string.status_keyboard), R.drawable.ic_baseline_dialpad_24, KeyboardChoice)
+            StatusAreaEntry.Android(context.getString(R.string.status_keyboard), KeyboardChoice)
         )
+        // the toolbar's with no slot on the bar, first, in its order (the user's call, 2026-11-15: none scrolled); the
+        // panel's own already here below
+        val overflow = bar.overflow.filter { it !in PanelActions.OWN }.map {
+            val label = context.getString(ToolbarButtonLooks.of(it).label)
+            val available = bar.available(it)
+            // 手写 where it does not write greyed and said so, as on the bar
+            val said = if (available || it != ToolbarButton.Handwriting) label else context.getString(R.string.handwriting_unavailable, label)
+            StatusAreaEntry.Bar(it, said, active = bar.lit(it), available = available)
+        }
         adapter.entries = arrayOf(
+            *overflow.toTypedArray(),
             *staticEntries,
             *keyboards,
             *oneHanded,
             StatusAreaEntry.Android(
                 context.getString(R.string.floating_keyboard),
-                R.drawable.ic_baseline_open_with_24,
                 FloatingToggle,
                 active = floating
             ),
             // off, shown lit: the keyboard is not as the user left it
             StatusAreaEntry.Android(
                 context.getString(if (actions.habitsOn) R.string.learning_habits_off else R.string.learning_habits_on),
-                R.drawable.ic_view_private,
                 HabitsToggle,
                 active = !actions.habitsOn
             ),
             StatusAreaEntry.Android(
                 context.getString(R.string.learning_clear_recent),
-                R.drawable.ic_baseline_delete_sweep_24,
                 ClearRecent
             ),
             *Array(entries.size) { StatusAreaEntry.fromEntry(context, entries[it]) }
@@ -163,7 +211,7 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
     }
 
     private val settingsButton by lazy {
-        ToolButton(context, R.drawable.ic_baseline_settings_24, theme).apply {
+        ToolButton(context, BarIcons.APP_SETTINGS, theme).apply {
             contentDescription = context.getString(R.string.open_input_method_settings)
             fixIconSize(context.dp(KawaiiBarComponent.ICON_DP))
             setOnClickListener { AppUtil.launchMain(context) }
@@ -184,10 +232,20 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
     override fun onCreateBarExtension() = barExtension
 
     override fun onAttached() {
+        val told = statusesTold
         fcitx.launchOnReady {
             val data = it.statusArea()
+            // only whether it saves, not the overview (the record's state and every list of the user's words
+            // counted, on the fcitx thread, before the panel showed anything: R25r2 F7897); asked each time the
+            // panel opens. One that fails leaves the notice off, the panel shown
+            val saving = runCatching { (it.learning(LearningOp.Saving) as? LearningResult.Saving)?.saving }
+                .onFailure { e -> if (e is CancellationException) throw e else Timber.w(e, "status panel: whether learning saves not read") }
+                .getOrNull() ?: true
             imeScope.launch {
-                onStatusAreaUpdate(data)
+                notSaving.isVisible = !saving
+                // a status the host sent after this read (the field focused as the panel opened) came first: the read is
+                // the older, and shown last it stayed, the input method's toggles missing till the next status
+                show(if (statusesTold == told) data else hostEntries)
             }
         }
     }

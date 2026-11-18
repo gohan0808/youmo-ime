@@ -166,6 +166,32 @@ class HostCoreContractTest {
     }
 
     @Test
+    fun `the session's code is flagged as the code the app may write into the field, nothing else is`() {
+        // 061-code-in-field §4.2: only KeyRouter.show's preedit; a temp mode's and the punctuation marks' are
+        // covered where those are (ChineseModulesHostTest, KeyRouterPunctuationTest)
+        val core = core()
+        core.open()
+        fake.answer = { _, e, _ -> if (e == EngineEvent.CHAR) snap(preedit = "ni hao", candidates = listOf("你好")) else snap() }
+        val log = core.log()
+        core.press('n')
+        val code = log.filterIsInstance<HostEvent.InputPanel>().last()
+        fake.answer = { _, e, _ -> if (e == EngineEvent.CHAR) snap(commit = "你好") else snap() }
+        core.press('1')
+        val cleared = log.filterIsInstance<HostEvent.InputPanel>().last()
+        core.setCurrentInputMethod(ImGroup.KEYBOARD_US)
+        fake.answer = { _, e, _ -> if (e == EngineEvent.CHAR) snap(preedit = "he", candidates = listOf("hello")) else snap() }
+        log.clear()
+        core.press('h')
+        assertRows(
+            "pinyin's code on the panel is the code" to { assertTrue(code.code); assertEquals("ni hao", code.preedit.toString()) },
+            "nothing left to type: no code" to { assertFalse(cleared.code) },
+            "English's word is the app's preedit, never the code" to {
+                assertTrue(log.filterIsInstance<HostEvent.InputPanel>().none { it.code })
+            },
+        )
+    }
+
+    @Test
     fun `an untaken key is handed back, release too`() {
         // af:385-393
         val core = core()
@@ -281,7 +307,8 @@ class HostCoreContractTest {
             fake.throwOn = { true }
             assertFalse(core.press('i'))
             assertTrue(core.isEmpty())
-            assertEquals("engine-pinyin ${EngineEvent.RESET} 0", fake.calls.last())
+            // dropped, as the panel is: nothing put in (handwriting's written text with the rest)
+            assertEquals("engine-pinyin ${EngineEvent.RESET} ${EngineEvent.RESET_DROP}", fake.calls.last())
             val n = fake.calls.size
             core.press('i')
             // the reset failed too: this time only the key
@@ -524,18 +551,18 @@ class HostCoreContractTest {
     }
 
     @Test
-    fun `a tap no one takes in handwriting's composing text commits it, then resets`() {
+    fun `a tap no one takes in English's composing text commits it, then resets`() {
         // fcitx/inputmethodengine.cpp:46-54 (defaultInvokeActionBehavior), F3788
         val core = core()
         core.open()
-        core.setInputMethods(listOf(InputMethodCatalog.PINYIN, InputMethodCatalog.HANDWRITING, ImGroup.KEYBOARD_US))
-        core.setCurrentInputMethod(InputMethodCatalog.HANDWRITING)
+        core.setInputMethods(listOf(InputMethodCatalog.PINYIN, InputMethodCatalog.ENGLISH, ImGroup.KEYBOARD_US))
+        core.setCurrentInputMethod(InputMethodCatalog.ENGLISH)
         fake.answer = { _, e, _ -> if (e == EngineEvent.CHAR) snap(preedit = "你") else snap(handled = false) }
         core.press('a')
         val log = core.log()
         core.moveCursor(0)
         assertTrue("$log ${fake.calls}", HostEvent.Commit("你", -1) in log)
-        assertTrue(fake.calls.toString(), fake.calls.last().startsWith("${InputMethodCatalog.HANDWRITING} ${EngineEvent.RESET} 0"))
+        assertTrue(fake.calls.toString(), fake.calls.last().startsWith("${InputMethodCatalog.ENGLISH} ${EngineEvent.RESET} 0"))
     }
 
     @Test

@@ -178,6 +178,14 @@ tasks.withType<AbstractTestTask>().configureEach {
     inputs.dir(layout.projectDirectory.dir("src/commonMain/themes"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .withPropertyName("sceneThemes")
+    // and the layout page's examples (ExampleLayoutsTest, BasedOnStylesTest), from web/theme-maker/examples/layouts
+    inputs.dir(rootProject.file("web/theme-maker/examples/layouts"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+        .withPropertyName("layoutExamples")
+    // and ime-core's keys-golden.tsv, whose first column BuiltInKeyDataTest holds the boards' key names to
+    inputs.file(rootProject.file("lib/ime-core/src/test/resources/keys-golden.tsv"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+        .withPropertyName("keysGolden")
     if (recording) outputs.upToDateWhen { false }
 }
 

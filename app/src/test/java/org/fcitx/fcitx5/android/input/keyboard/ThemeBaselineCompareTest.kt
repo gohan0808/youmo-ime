@@ -21,12 +21,13 @@ import org.fcitx.fcitx5.android.data.theme.ThemeAssets
 import org.fcitx.fcitx5.android.data.theme.ThemeFilesManager
 import org.fcitx.fcitx5.android.data.theme.ThemeManager
 import org.fcitx.fcitx5.android.data.theme.ThemePrefs
-import org.fcitx.fcitx5.android.engine.InputMethodCatalog
+import org.fcitx.fcitx5.android.data.theme.importTheme
 import org.fcitx.fcitx5.android.input.KeyboardHarness
 import org.fcitx.fcitx5.android.input.ShownKey
 import org.fcitx.fcitx5.android.input.bar.ToolbarButton
 import org.fcitx.fcitx5.android.input.bar.ToolbarConfig
 import org.fcitx.fcitx5.android.uat.PrefsRule
+import org.fcitx.fcitx5.android.uat.TestStyles
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -82,10 +83,12 @@ class ThemeBaselineCompareTest {
         // the 注音 keyboards' 简繁 hint not said; no clipboard entry in the bar
         prefs.set(AppPrefs.getInstance().internal.zhuyinTraditionalTold, true)
         prefs.set(AppPrefs.getInstance().clipboard.clipboardSuggestion, false)
-        // drawn as the text build was when the record was made: no microphone on the bar, none on the space
+        // drawn as the text build was when the record was made: no microphone on the bar, none on the space; no
+        // handwriting button (0.6.1's) either
         prefs.set(AppPrefs.getInstance().keyboard.spaceKeyLongPressBehavior, SpaceLongPressBehavior.None)
         val noVoice = ToolbarConfig.DEFAULT.items.map {
-            if (it is ToolbarConfig.Item.Button && it.button == ToolbarButton.Voice) ToolbarConfig.Item.Button(it.button, shown = false) else it
+            val gone = it is ToolbarConfig.Item.Button && (it.button == ToolbarButton.Voice || it.button == ToolbarButton.Handwriting)
+            if (gone) ToolbarConfig.Item.Button((it as ToolbarConfig.Item.Button).button, shown = false) else it
         }
         prefs.set(AppPrefs.getInstance().internal.toolbarButtons, ToolbarConfig(noVoice).serialize())
         org.fcitx.fcitx5.android.data.clipboard.ClipboardManager.lastEntry = null
@@ -166,7 +169,6 @@ class ThemeBaselineCompareTest {
         Board("zhuyin_nine", keyboards = ImKeyboards.Chosen(pinyin = ImKeyboard.ZHUYIN_NINE)),
         Board("number", inputType = InputType.TYPE_CLASS_NUMBER),
         Board("symbols"),
-        Board("handwriting", im = HANDWRITING),
     )
 
     private fun <T : Any> ManagedPreference<T>.during(value: T): () -> Unit {
@@ -175,20 +177,32 @@ class ThemeBaselineCompareTest {
         return { setValue(was) }
     }
 
+    // 键盘样式 on both shapes, none stored again after
+    private fun style(style: KeyboardStyle): () -> Unit {
+        TestStyles.set(style)
+        return { TestStyles.clear() }
+    }
+
     private val theme get() = ThemeManager.prefs
+
+    // 横屏 as high as 0.6.0's (49% of the screen), not 0.6.1's rows of dp: the drawing compared, not the height
+    private fun heightAs060(): () -> Unit {
+        KeyboardArea.turnedAs060 = true
+        return { KeyboardArea.turnedAs060 = false }
+    }
 
     private val upright = Form("port")
 
     private val forms = listOf(
-        Form("land", LANDSCAPE) { listOf(theme.splitKeyboard.during(SplitKeyboardMode.Off)) },
+        Form("land", LANDSCAPE) { listOf(style(KeyboardStyle.NORMAL), heightAs060()) },
         Form("compact") {
             val compact = KeyboardHeightLevels.ALL[KeyboardHeightLevels.COMPACT]
             val keyboard = AppPrefs.getInstance().keyboard
-            listOf(keyboard.keyboardHeightPercent.during(compact.portrait), keyboard.keyboardHeightPercentLandscape.during(compact.landscape))
+            listOf(keyboard.keyboardHeightPercent.during(compact.portrait), keyboard.keyboardHeightPercentLandscape.during(compact.landscapeLevel))
         },
-        Form("floating") { listOf(theme.floatingKeyboard.during(true)) },
-        Form("one_handed_left") { listOf(theme.oneHanded.during(OneHanded.Left)) },
-        Form("split_land", LANDSCAPE) { listOf(theme.splitKeyboard.during(SplitKeyboardMode.Always)) },
+        Form("floating") { listOf(style(KeyboardStyle.FLOATING)) },
+        Form("one_handed_left") { listOf(theme.oneHandedSide.during(OneHanded.Left), style(KeyboardStyle.ONE_HANDED)) },
+        Form("split_land", LANDSCAPE) { listOf(style(KeyboardStyle.SPLIT), heightAs060()) },
         Form("flat") { listOf(theme.keyBorderChoice.during(ThemePrefs.KeyBorderChoice.Off)) },
     )
 
@@ -211,10 +225,6 @@ class ThemeBaselineCompareTest {
         if (s.form.qualifiers != PORTRAIT) RuntimeEnvironment.setQualifiers(s.form.qualifiers)
         try {
             return KeyboardHarness(s.look.make(), im = s.board.im, keyboards = s.board.keyboards).use { h ->
-                if (s.board.im === HANDWRITING) {
-                    h.api.availableIme = arrayOf(KeyboardHarness.PINYIN, KeyboardHarness.ENGLISH, HANDWRITING)
-                    h.api.enabledIme = h.api.availableIme
-                }
                 h.start(s.board.inputType)
                 // the record's 1 shows ，。？！ (the View's own): the scene's as the punctuation maps it (KB-76), Chinese's here
                 if (s.board.name == "nine") h.chinesePunctuation()
@@ -439,7 +449,7 @@ class ThemeBaselineCompareTest {
         private const val LANDSCAPE = "w851dp-h393dp-land-440dpi"
         private const val INDEX = "index.tsv"
         private const val LIMITS = "limits.tsv"
-        private const val RECORD_SIZE = 432
+        private const val RECORD_SIZE = 394
 
         /** A channel's difference that makes a pixel different (P2's). */
         private const val CHANNEL = 24
@@ -451,7 +461,6 @@ class ThemeBaselineCompareTest {
         private const val THRESHOLD = 1.5
         private const val THRESHOLD_ZHUYIN_FULL = 2.0
 
-        private val HANDWRITING = InputMethodEntry(InputMethodCatalog.HANDWRITING, "手写", "", "", "写", "zh_CN", "androidengine", false)
 
         private val FORMS_THEMES = setOf("PixelLight", "MaterialDark")
         private val SAMPLES = listOf("color", "glass", "cutout", "nine_slice_font", "each_key")

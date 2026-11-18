@@ -5,49 +5,44 @@
 package org.fcitx.fcitx5.android.input.bar.ui.idle
 
 import android.content.Context
-import android.widget.HorizontalScrollView
-import com.google.android.flexbox.AlignItems
-import com.google.android.flexbox.FlexboxLayout
-import com.google.android.flexbox.JustifyContent
+import android.view.Gravity
+import android.widget.LinearLayout
 import org.fcitx.fcitx5.android.data.theme.Theme
 import org.fcitx.fcitx5.android.input.bar.KawaiiBarComponent
 import org.fcitx.fcitx5.android.input.bar.ui.ToolButton
 import splitties.dimensions.dp
 import splitties.views.dsl.core.Ui
-import splitties.views.dsl.core.add
-import splitties.views.dsl.core.lParams
-import splitties.views.dsl.core.matchParent
-import splitties.views.dsl.core.view
-import splitties.views.dsl.core.wrapContent
 
+/**
+ * The open toolbar: its buttons in the bar's slots after the menu key, ⋯ last, none scrolled (the ones with no slot are
+ * in ⋯'s panel: ToolbarConfig.Layout.slots, IdleUi).
+ */
 class ButtonsBarUi(override val ctx: Context, private val theme: Theme) : Ui {
 
-    private val buttons = view(::FlexboxLayout) {
-        alignItems = AlignItems.CENTER
-        justifyContent = JustifyContent.SPACE_AROUND
-    }
-
-    // spread out where the bar has room; where it has not (a narrow screen, side padding, the
-    // emoji and voice beside it, the floating keyboard), squeezed to MIN_SIZE, then scrolled
-    override val root = view(::HorizontalScrollView) {
-        isFillViewport = true
-        isHorizontalScrollBarEnabled = false
-        add(buttons, lParams(wrapContent, matchParent))
-    }
-
-    // as tall as the bar (候选字号) and as wide as the other bar buttons; narrower where the bar is
-    // (the floating keyboard's), down to MIN_SIZE, then scrolled; the icon its size all the same
-    /** [toolButtons] in this order, none of them in another parent. */
-    fun show(toolButtons: List<ToolButton>) {
-        buttons.removeAllViews()
-        val width = ctx.dp(KawaiiBarComponent.buttonWidthDp(ctx))
-        val height = ctx.dp(KawaiiBarComponent.heightDp(ctx))
-        toolButtons.forEach {
-            buttons.addView(it, FlexboxLayout.LayoutParams(width, height).apply { minWidth = ctx.dp(MIN_SIZE) })
+    /** Each button's slot, px: the menu key's and the right's the same (IdleUi). */
+    var cellPx = 0
+        set(value) {
+            if (value == field) return
+            field = value
+            for (i in 0 until root.childCount) {
+                val cell = root.getChildAt(i)
+                if (cell.layoutParams.width != value) {
+                    cell.layoutParams.width = value
+                    cell.requestLayout()
+                }
+            }
         }
+
+    override val root = LinearLayout(ctx).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
     }
 
-    private companion object {
-        const val MIN_SIZE = 28
+    // as tall as the bar (候选字号), [cellPx] wide; the icon its size all the same
+    /** [toolButtons] in this order, ⋯ the last of them, none of them in another parent. */
+    fun show(toolButtons: List<ToolButton>) {
+        root.removeAllViews()
+        val height = ctx.dp(KawaiiBarComponent.heightDp(ctx))
+        toolButtons.forEach { root.addView(it, LinearLayout.LayoutParams(cellPx, height)) }
     }
 }

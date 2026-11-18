@@ -5,6 +5,8 @@
 package org.fcitx.fcitx5.android.host
 
 import org.fcitx.fcitx5.android.Uat
+import org.fcitx.fcitx5.android.assertRows
+import org.fcitx.fcitx5.android.engine.pinyin.NineKeyLetters
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog
 import org.fcitx.fcitx5.android.engine.handwriting.InkReading
 import org.fcitx.fcitx5.android.engine.runtime.EngineEvent
@@ -21,6 +23,7 @@ import org.fcitx.fcitx5.android.engine.session.Action
 import org.fcitx.fcitx5.android.engine.session.Snapshot
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -370,14 +373,14 @@ class HostCoreEnginesTest : EnginesFixture() {
         core.events += HostEvents { log += it }
         core.activate(1)
         core.focus(true)
-        core.setInputMethods(listOf(InputMethodCatalog.PINYIN, InputMethodCatalog.HANDWRITING, ImGroup.KEYBOARD_US))
-        core.setCurrentInputMethod(InputMethodCatalog.HANDWRITING)
+        core.setInputMethods(listOf(InputMethodCatalog.PINYIN, ImGroup.KEYBOARD_US))
+        core.setCurrentInputMethod(InputMethodCatalog.PINYIN)
         // what KotlinHost does with what the pad read (EngineBridge.sendInk): the ink, its key, then inkSent
         fun write(piece: Int, vararg chars: String) {
             val ink = Action.Ink(piece, InkReading(chars.toList(), DoubleArray(chars.size)))
-            engines.ink(ink, shown = true)
+            engines.ink(ink, shown = true, im = InputMethodCatalog.PINYIN)
             core.sendKey(Key(KeySyms.UNICODE_OFFSET + Keyboard.INK, KeyStates.VIRTUAL), virtual = true, payload = ink)
-            engines.inkSent(ink)
+            engines.inkSent(ink, im = InputMethodCatalog.PINYIN)
         }
         core.triggerQuickPhrase()
         write(0, "你")
@@ -385,6 +388,68 @@ class HostCoreEnginesTest : EnginesFixture() {
         core.sendKey(Key(KeySyms.ESCAPE))
         write(1, "好")
         assertEquals("你好", log.filterIsInstance<HostEvent.InputPanel>().last().preedit.toString())
+    }
+
+    // 清除 and the backspace swipe drop what handwriting wrote, nothing committed; the input ended
+    // otherwise (the cursor moved away, the keyboard hidden) puts it in (061-handwriting-toolbar LC-35)
+    @Test
+    fun `clearing handwriting commits nothing, the input ended commits it`() {
+        val engines = engines()
+        val core = core(engines)
+        val log = mutableListOf<HostEvent>()
+        core.events += HostEvents { log += it }
+        core.activate(1)
+        core.focus(true)
+        core.setCurrentInputMethod(InputMethodCatalog.PINYIN)
+        fun write(piece: Int, text: String) {
+            val ink = Action.Ink(piece, InkReading(listOf(text), DoubleArray(1)))
+            engines.ink(ink, shown = true, im = InputMethodCatalog.PINYIN)
+            core.sendKey(Key(KeySyms.UNICODE_OFFSET + Keyboard.INK, KeyStates.VIRTUAL), virtual = true, payload = ink)
+            engines.inkSent(ink, im = InputMethodCatalog.PINYIN)
+        }
+        fun commits() = log.filterIsInstance<HostEvent.Commit>().map { it.text }
+        write(0, "你")
+        assertEquals("你", log.filterIsInstance<HostEvent.InputPanel>().last().preedit.toString())
+        // the session's code as typed code is: 编码行 输入框里 writes it into the field, underlined as composing text
+        assertTrue(log.filterIsInstance<HostEvent.InputPanel>().last().code)
+        assertNotNull(core.clearTyped())
+        assertEquals(emptyList<String>(), commits())
+        assertEquals("", log.filterIsInstance<HostEvent.InputPanel>().last().preedit.toString())
+        write(1, "好")
+        core.reset(drop = true)
+        assertEquals(emptyList<String>(), commits())
+        write(2, "天")
+        core.reset()
+        assertEquals(listOf("天"), commits())
+    }
+
+    // 编码行 输入框里 writes the panel's code into the field (dev/design/061-code-in-field.md §4.2): each
+    // keyboard's own codes (private use, past the BMP) are keys, never the code's text
+    @Test
+    fun `the code each keyboard types is text, no private-use character in it`() {
+        val keyboards = listOf(
+            "14 keys, tapped" to "ni".map { Keyboard.tapKey(NineKeyLetters.G14.key(it), 0.5f) },
+            "14 keys, the code alone" to "ni".map { NineKeyLetters.G14.key(it).code },
+            "18 keys" to "ni".map { Keyboard.pinyin18Key(NineKeyLetters.G18.key(it)) },
+            "nine keys" to "64".map(Keyboard::pinyinNineKey),
+            "注音九键" to listOf(Keyboard.zhuyinNineKey(6), Keyboard.zhuyinNineKey(5)),
+        )
+        // each row's keys sent inside its own check: one keyboard that throws is that row's failure (review F8301)
+        val rows = keyboards.map { (name, keys) ->
+            "$name: a code, its characters no private use's" to {
+                val core = core(engines())
+                val panels = mutableListOf<HostEvent.InputPanel>()
+                core.events += HostEvents { if (it is HostEvent.InputPanel) panels += it }
+                core.activate(1)
+                core.setCapabilities(Capability.PREEDIT or Capability.CLIENT_UNFOCUS_COMMIT)
+                core.focus(true)
+                keys.forEach { core.sendKey(Key(KeySyms.fromUnicode(it)), virtual = true) }
+                val codes = panels.filter { it.code }.map { it.preedit.toString() }
+                assertTrue("$name ${panels.map { it.preedit }}", codes.isNotEmpty() && codes.last().isNotEmpty())
+                codes.forEach { code -> assertTrue("$name '$code'", code.codePoints().noneMatch(KeySyms::isPrivateUse)) }
+            }
+        }
+        assertRows(*rows.toTypedArray())
     }
 
     // a syllable taken off the nine keys' bar is a pick: the list it was taken from is one the

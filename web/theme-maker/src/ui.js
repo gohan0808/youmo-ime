@@ -12,13 +12,18 @@
   const FORMAT = json('youmo-format');
   const EXAMPLES = json('youmo-examples');
   const ICONS = json('youmo-engine-icons');
+  // the icon page's groups, the bar's own image of a name whose key's differs, the menu key's ⌄ turned (061-toolbar-icons)
+  const BAR_ICONS = json('youmo-bar-icons');
   // the theme's own icons as the engine reads them, by their files' bytes (M.iconsOf)
   const iconCache = new WeakMap();
   const iconsNow = () => M.iconsOf(E, ICONS, history.current, iconCache);
+  // the bar's: the app's there (hide-keyboard's ▾) under the theme's own
+  const BAR_BASE = Object.assign({}, ICONS, BAR_ICONS.toolbarFallback);
+  const barIconsNow = () => M.iconsOf(E, BAR_BASE, history.current, iconCache);
   const $ = (id) => document.getElementById(id);
 
   const THEME_LABEL = { material: 'Material', pixel: 'Pixel', nord: 'Nord', 'deep-blue': 'Deep Blue', monokai: 'Monokai', 'amoled-black': 'AMOLED', monet: '系统取色' };
-  const BOARD_LABEL = { qwerty: '26 键', nine: '九键', k14: '14 键', k18: '18 键', zhuyin: '注音', 'zhuyin-nine': '注音九键', number: '数字', symbols: '符号', handwriting: '手写' };
+  const BOARD_LABEL = { qwerty: '26 键', nine: '九键', k14: '14 键', k18: '18 键', zhuyin: '注音', 'zhuyin-nine': '注音九键', number: '数字', symbols: '符号' };
   const FORM_LABEL = { normal: '普通', compact: '紧凑', floating: '悬浮', left: '单手（左）', right: '单手（右）', split: '分体', flat: '平铺' };
   const IMAGE = /\.(png|jpe?g|webp)$/i;
   const FONT = /\.(ttf|otf)$/i;
@@ -27,7 +32,13 @@
   let env = Object.assign({}, M.ENV);
   let scene = null;
   let pressed = null;
-  let picked = null; // the key tapped last: {board, key}, the 按键 page's 选中的这个键
+  let picked = null; // the key tapped last: {board, key, layout}, the 按键 page's 选中的这个键 (layout: the one drawn, an id or own's)
+  // the layout 环境 › 键盘 › 打开 .layout opened (061-custom-layout §10): `{id, name, layout}`, drawn while 键盘 is OWN
+  let own = null;
+  const OWN = '@own';
+  const OPEN_LAYOUT = '@open';
+  const boardDrawn = () => (env.board === OWN && own ? own.layout : env.board);
+  const boardName = () => (env.board === OWN && own ? own.id : env.board);
   let theme = null; // the engine's reading of the document as the preview last drew it
   let tab = PANELS.length ? PANELS[0].id : 'source';
   let assets = { key: null, images: {}, fonts: {}, cuts: {} };
@@ -270,7 +281,8 @@
     const p = theme && theme.info(env.dark).picture;
     if (!p) return null;
     const cuts = p.cuts || {};
-    const file = cuts[env.landscape ? 'landscape' : 'portrait'] || cuts.portrait || cuts.landscape;
+    // the window's 横屏 (a tablet upright is), as the app picks the cut: not the device turned alone
+    const file = cuts[M.shape(E, env).landscape ? 'landscape' : 'portrait'] || cuts.portrait || cuts.landscape;
     const bmp = file && assets.cuts[file];
     if (!bmp || !scene) return null;
     // made once for a bitmap, a size and a blur and brightness: not blurred again on every preview (each tap)
@@ -341,8 +353,8 @@
   const PREEDIT_DP = 24;
   function barOf(m) {
     if (!env.bar || !theme) return null;
-    const r = E.buildBar(theme, M.envJson(env), m);
-    const l = E.looks(theme, M.envJson(env));
+    const r = E.buildBar(theme, M.envJson(E, env), m);
+    const l = E.looks(theme, M.envJson(E, env));
     if (!r.ok || !l.ok) return null;
     const pre = env.bar === 'typing' ? Math.round(PREEDIT_DP * env.density) : 0;
     return { scene: r.scene, looks: l.looks, pre, height: pre + r.scene.height };
@@ -382,14 +394,17 @@
     ctx.translate(0, bar.pre);
     if (env.bar === 'typing') E.paint(bar.scene, ctx, state);
     else {
-      // idle: the bar's base and five toolbar buttons (a circle, or the toolbar's radius), the second one on
+      // idle: the bar's base and five toolbar buttons (a circle, or the toolbar's radius), the third (the clipboard) on;
+      // each its icon as the app draws it, the theme's or the app's (the menu key's ⌄ turned where it is the app's)
       const h = bar.scene.height;
       if (lk.bar) { ctx.fillStyle = css(lk.bar); ctx.fillRect(0, 0, bar.scene.width, h); }
       const size = Math.min(h - 8 * dp, 36 * dp);
       const step = bar.scene.width / 6;
+      const icons = barIconsNow();
+      const names = ['toolbar-expand', 'undo', 'clipboard', 'emoji', 'voice'];
       for (let i = 0; i < 5; i++) {
         const cx = step * (i + 0.5) + step / 2;
-        const on = i === 1;
+        const on = i === 2;
         const fill = on ? lk.toolbar.onFill : lk.toolbar.fill;
         const r = lk.toolbar.radiusDp == null ? size / 2 : Math.min(size / 2, lk.toolbar.radiusDp * dp);
         if (fill) {
@@ -398,10 +413,10 @@
           ctx.roundRect(cx - size / 2, (h - size) / 2, size, size, r);
           ctx.fill();
         }
-        ctx.fillStyle = css(on ? lk.toolbar.onIcon : lk.toolbar.icon);
-        ctx.beginPath();
-        ctx.arc(cx, h / 2, size / 5, 0, Math.PI * 2);
-        ctx.fill();
+        const name = names[i];
+        const icon = 20 * dp;
+        const turned = icons[name] === BAR_BASE[name] ? BAR_ICONS.turned[name] || 0 : 0;
+        E.paintIcon(ctx, { icons }, name, cx - icon / 2, (h - icon) / 2, icon, on ? lk.toolbar.onIcon : lk.toolbar.icon, turned);
       }
     }
     ctx.restore();
@@ -456,7 +471,7 @@
   function popupOf(m) {
     if (!env.show || !scene || !theme) return null;
     const keys = scene.json().keys;
-    const k = (picked && picked.board === env.board && keys.find((x) => x.id === picked.key)) || keys[Math.floor(keys.length / 3)];
+    const k = (picked && picked.board === boardName() && keys.find((x) => x.id === picked.key)) || keys[Math.floor(keys.length / 3)];
     if (!k) return null;
     const [l, t, r] = k.bounds;
     const label = k.label || 'a';
@@ -464,7 +479,7 @@
     if (env.show === 'preview') req = { kind: 'preview', text: label, keyWidth: r - l };
     else if (env.show === 'keys') req = { kind: 'keys', labels: ['à', 'á', 'â', 'ä', 'ā'], rows: [[0, 1, 2, 3, 4]], columns: 5, selected: 1 };
     else req = { kind: 'menu', cells: [{ label: '剪贴板' }, { label: '表情' }, { label: '编辑' }, { label: '设置' }], order: [0, 1, 2, 3], selected: 0 };
-    const got = E.buildPopup(theme, M.envJson(env), req, m);
+    const got = E.buildPopup(theme, M.envJson(E, env), req, m);
     if (!got.ok) return null;
     const p = got.scene;
     const cx = (l + r) / 2;
@@ -483,6 +498,13 @@
   }
   let checked = null;
 
+  // a number board of the user's as the app shows it from 123 (a pad named, as exportCheck does for the app's): not the
+  // engine's warning of a pad not given
+  function ownEnv(board) {
+    const e = M.envJson(E, env);
+    if (typeof board === 'object' && board.family === 'number') e.input = Object.assign({ field: 'number', ime: 'pinyin' }, e.input, { pad: 'full' });
+    return e;
+  }
   function preview() {
     const d = history.current;
     const canvas = $('preview');
@@ -490,8 +512,9 @@
     const fonts = measured.fonts;
     // a tap changes only what is pressed: the theme read and the scene built as they were
     const envKey = JSON.stringify(env);
-    const r = checked && checked.d === d && checked.env === envKey && checked.m === m ? checked.r : M.check(E, d, env.board, M.envJson(env), m.ok ? m.measurer : null);
-    checked = { d, env: envKey, m, r };
+    const board = boardDrawn();
+    const r = checked && checked.d === d && checked.env === envKey && checked.board === board && checked.m === m ? checked.r : M.check(E, d, board, ownEnv(board), m.ok ? m.measurer : null);
+    checked = { d, env: envKey, board, m, r };
     scene = r.scene;
     theme = r.theme;
     showProblems(r.problems);
@@ -515,7 +538,7 @@
     if (bar) drawBar(ctx, bar, Object.assign({}, state, { pressed: null, picture: pictureAt(picture, 0, 0, scene.width, bar.height) }), fonts);
     ctx.save();
     ctx.translate(0, barH);
-    const looks = env.panel && theme ? E.looks(theme, M.envJson(env)) : null;
+    const looks = env.panel && theme ? E.looks(theme, M.envJson(E, env)) : null;
     if (looks && looks.ok) {
       E.paint(scene, ctx, Object.assign({}, state, { pressed: null }));
       drawPanel(ctx, looks.looks, scene.width, scene.height);
@@ -589,7 +612,7 @@
       E.paint(scene, o.getContext('2d'), Object.assign({}, state, { pressed: pressedKey }));
       return o;
     };
-    const got = E.buildPopup(theme, M.envJson(env), { kind: 'preview', text: k.label || 'a', keyWidth: k.bounds[2] - k.bounds[0] }, null);
+    const got = E.buildPopup(theme, M.envJson(E, env), { kind: 'preview', text: k.label || 'a', keyWidth: k.bounds[2] - k.bounds[0] }, null);
     const cache = { keys: layer(null), pressed: layer(k.id), bounds: k.bounds, bubble: got.ok ? got.scene : null, state };
     const canvas = $('preview');
     const ctx = canvas.getContext('2d');
@@ -662,6 +685,33 @@
     });
   }
 
+  /**
+   * 环境 › 键盘 › 打开 .layout… (061-custom-layout §10): a layout of the user's drawn with the theme, its keys picked by
+   * its own id (`<id>/<key>`, a style the app also gives the keys it keeps of its based-on board). Not kept in the draft:
+   * a draft restored draws 26 键.
+   */
+  async function openLayout() {
+    const f = await pick($('layout-input'));
+    if (!f) return;
+    try {
+      own = M.openLayout(E, new Uint8Array(await f.arrayBuffer()));
+    } catch (e) {
+      toast('打不开这个布局：' + (e.message || e));
+      return;
+    }
+    // a key picked on a layout of this id is of the one replaced: picked anew
+    if (picked && picked.board === own.id) picked = null;
+    const sel = $('env-board');
+    for (const o of [...sel.options]) if (o.value === OWN) o.remove();
+    sel.add(new Option(own.name + '（' + own.id + '.layout）', OWN), sel.querySelector('option[value="' + OPEN_LAYOUT + '"]'));
+    env.board = OWN;
+    fillEnvForm();
+    keep();
+    if (history) { preview(); showTab(); }
+    // a file of the layout maker before L8 is drawn, but the app's import still refuses it as it is
+    if (own.oldFaces) toast(own.oldFaces + ' 个分组键显示的字是旧版布局制作页写的 {group:…}（超过两个字母，App 读不了），这里按大写字母画；在布局制作页打开再保存一次，App 才能导入');
+  }
+
   async function openFile() {
     const f = await pick($('open-input'));
     if (!f) return;
@@ -678,22 +728,10 @@
       }
       if (said.length) toast(said.join('；'));
     } catch (e) {
-      toast('打不开这个文件：' + openError(e));
+      toast('打不开这个文件：' + M.openError(e));
     }
   }
 
-  // a file refused (youmo-lib's ThemeError codes) in words that say what to do
-  function openError(e) {
-    switch (e && e.code) {
-      case 'limit': return '文件太大或文件太多，超过了 App 的限制';
-      case 'newer': return '它是更新版本的幽默输入法做的（' + e.detail + '），先刷新这个网页再试';
-      case 'older': return '它是很旧的版本（' + e.detail + '），先导入 App 再从 App 导出';
-      case 'not-theme': return '这不是主题文件（.theme 或 theme.xml）';
-      case 'missing': return '主题里写到的文件 ' + e.detail + ' 包里没有';
-      case 'bad': return '主题文件有错：' + e.detail;
-      default: return (e && e.message) || String(e);
-    }
-  }
 
   // the picture decoded (upright, as its EXIF says), drawn at sizeOf its decoded sides and encoded: JPEG, or PNG
   // where any pixel is see-through
@@ -750,7 +788,7 @@
         const side = Math.min(M.PICTURE_SAVE.longSide, FORMAT.limits.pictureSide);
         const cuts = {};
         for (const o of ['portrait', 'landscape']) {
-          const rect = F.cropRect(size[0], size[1], bg.ratio(Object.assign({}, env, { landscape: o === 'landscape' })));
+          const rect = F.cropRect(size[0], size[1], bg.ratio(E, Object.assign({}, env, { landscape: o === 'landscape' })));
           const c = await encodePicture(bmp, (w, h) => L.resizeInside(w, h, side, side), M.PICTURE_SAVE.quality, rect.map((v) => v * scale), jpg);
           cuts[o] = { bytes: c.bytes, type: c.type, rect };
         }
@@ -810,7 +848,7 @@
     engine: E,
     doc: () => history.current,
     env: () => env,
-    envJson: (e = env) => M.envJson(e),
+    envJson: (e = env) => M.envJson(E, e),
     theme: () => theme,
     picked: () => picked,
     // an op that throws (a document it cannot change: no <theme>) says so instead of failing silently
@@ -855,7 +893,9 @@
     limits: () => FORMAT.limits,
     goToLine,
     bitmap: (name) => assets.cuts[name] || null,
-    iconNames: () => Object.keys(ICONS).sort(),
+    iconGroups: () => BAR_ICONS.groups,
+    // a name whose app's image on the bar is not the key's: a theme's icon of it makes the two alike
+    barOwnImage: (name) => name in BAR_ICONS.toolbarFallback,
     choosePicture,
     cutPicture: (src, rect) => cutOf(history.current.files[src], rect),
     async pickFile(accept) {
@@ -912,7 +952,7 @@
   async function save() {
     if (!history) return;
     const d = history.current;
-    const { errors, warnings } = M.exportCheck(E, L, FORMAT, d, E.layouts(), M.envJson(env));
+    const { errors, warnings } = M.exportCheck(E, L, FORMAT, d, E.layouts(), M.envJson(E, env));
     if (errors.length) {
       showProblems([...errors, ...warnings]);
       $('problems-area').scrollIntoView({ block: 'nearest' });
@@ -969,6 +1009,11 @@
       Object.assign(env, { w: num('env-w', env.w), h: num('env-h', env.h), density: num('env-density', env.density) });
       if (e && /env-(w|h|density)/.test(e.target.id)) env.device = 'custom';
     }
+    if ($('env-board').value === OPEN_LAYOUT) {
+      // 打开 .layout…: the board shown till one is opened
+      $('env-board').value = env.board;
+      openLayout();
+    }
     Object.assign(env, {
       landscape: $('env-landscape').checked, board: $('env-board').value, form: $('env-form-kind').value, shift: $('env-shift').value,
       field: $('env-field').value, ime: $('env-ime').value, show: $('env-show').value, bar: $('env-bar').value, panel: $('env-sheet').value,
@@ -988,6 +1033,7 @@
     $('env-device').add(new Option('自定义', 'custom'));
     const boards = new Set(E.layouts());
     for (const b of M.BOARDS) if (boards.has(b)) $('env-board').add(new Option(BOARD_LABEL[b] || b, b));
+    $('env-board').add(new Option('打开 .layout…', OPEN_LAYOUT));
     for (const f of M.FORMS) $('env-form-kind').add(new Option(FORM_LABEL[f], f));
     $('env-form').addEventListener('change', readEnvForm);
     $('env').addEventListener('click', () => $('env-panel').showModal());
@@ -1086,8 +1132,8 @@
       if (!history) return;
       pressed = keyAt(e);
       const before = picked;
-      if (pressed) picked = { board: env.board, key: pressed };
-      $('picked').textContent = picked ? '选中的键：' + picked.key + '（' + (BOARD_LABEL[picked.board] || picked.board) + '）' : '';
+      if (pressed) picked = { board: boardName(), key: pressed, layout: boardDrawn() };
+      $('picked').textContent = picked ? '选中的键：' + picked.key + '（' + (BOARD_LABEL[picked.board] || (own && own.id === picked.board ? own.name : picked.board)) + '）' : '';
       preview();
       // the tab follows another key picked, its values put in place (a field being typed in keeps its text)
       if (picked !== before && (!before || before.key !== picked.key || before.board !== picked.board)) refreshTab();
@@ -1118,7 +1164,15 @@
       const answer = await new Promise((ok) => $('restore-panel').addEventListener('close', () => ok($('restore-panel').returnValue), { once: true }));
       if (answer === 'restore') {
         try {
-          if (kept.env) env = Object.assign({}, M.ENV, kept.env);
+          // only what the form offers now (a board since gone: nothing drawn, an empty select); a layout opened is
+          // not kept (OWN, OPEN_LAYOUT not offered): its board the default's
+          const offered = (id) => [...$(id).options].map((o) => o.value).filter((v) => v !== OWN && v !== OPEN_LAYOUT);
+          if (kept.env) {
+            env = M.restoreEnv(kept.env, {
+              device: offered('env-device'), board: offered('env-board'), form: offered('env-form-kind'), shift: offered('env-shift'),
+              field: offered('env-field'), ime: offered('env-ime'), show: offered('env-show'), bar: offered('env-bar'), panel: offered('env-sheet'),
+            });
+          }
           fillEnvForm();
           history = new M.History(kept.doc);
           await changed(true);

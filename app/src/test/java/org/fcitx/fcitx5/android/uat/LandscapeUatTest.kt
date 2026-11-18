@@ -28,11 +28,11 @@ import org.fcitx.fcitx5.android.engine.pinyin.ShuangpinScheme
 import org.fcitx.fcitx5.android.host.HostEvent
 import org.fcitx.fcitx5.android.input.KeyboardHarness
 import org.fcitx.fcitx5.android.input.ShownKey
-import org.fcitx.fcitx5.android.input.handwriting.HandwritingPadView
 import org.fcitx.fcitx5.android.input.keyboard.GroupedKeyboard
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardHeightCap
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardStyle
 import org.fcitx.fcitx5.android.input.keyboard.OneHanded
 import org.fcitx.fcitx5.android.input.keyboard.SplitDock
-import org.fcitx.fcitx5.android.input.keyboard.SplitKeyboardMode
 import org.fcitx.fcitx5.android.input.keyboard.TextKeyboard
 import org.fcitx.fcitx5.android.input.preedit.CodeRowStyle
 import org.fcitx.fcitx5.android.ui.main.settings.SettingsRoute
@@ -158,7 +158,7 @@ class LandscapeUatTest {
     fun splitOffTakesAtOnce() {
         h.start()
         assertTrue(split())
-        prefs.set(ThemeManager.prefs.splitKeyboard, SplitKeyboardMode.Off)
+        prefs.setStyle(KeyboardStyle.NORMAL)
         h.start()
         assertFalse(h.texts().toString(), split())
         assertEquals(1, keys("g").size)
@@ -174,7 +174,7 @@ class LandscapeUatTest {
         fun gs() = KeyboardHarness.keysOf(st.activity.window.decorView) { it.isShown }.count { it.label == "g" }
         assertEquals(2, gs())
         st.capture("LandscapeUatTest/preview_split")
-        prefs.set(ThemeManager.prefs.splitKeyboard, SplitKeyboardMode.Off)
+        prefs.setStyle(KeyboardStyle.NORMAL)
         st.idle()
         assertEquals(1, gs())
     }
@@ -219,7 +219,7 @@ class LandscapeUatTest {
         val a = arrow()!!
         assertEquals(h.service.getString(R.string.split_dock_move_right), a.contentDescription)
         assertTrue(h.box(a).left >= b.right)
-        h.tap(h.key("ABC"))
+        h.tap(h.key(h.service.getString(R.string.picker_back)))
         // turned and back: a keyboard made anew
         h.close()
         harness = null
@@ -234,7 +234,7 @@ class LandscapeUatTest {
     fun lettersAgainFullAndSplit() {
         h.start()
         h.tap(h.key("123"))
-        h.tap(h.key("ABC"))
+        h.tap(h.key(h.service.getString(R.string.picker_back)))
         assertTrue(split())
         assertTrue("${bar()}", full(bar()))
         assertNull(arrow())
@@ -309,16 +309,6 @@ class LandscapeUatTest {
     }
 
     @Test
-    @Uat("LS-21")
-    fun handwritingAtTheSide() {
-        harness = KeyboardHarness(im = InputMethodEntry(InputMethodCatalog.HANDWRITING, "手写", "", "", "写", "zh_CN", "androidengine", false))
-        h.start()
-        val pad = KeyboardHarness.find<HandwritingPadView>(h.inputView)!!
-        assertTrue(h.shown(pad))
-        assertTrue("${h.box(pad)}", onRight(board()))
-    }
-
-    @Test
     @Uat("LS-22")
     fun fullWidthTakesTheWholeWidth() {
         prefs.set(ThemeManager.prefs.splitDock, SplitDock.Full)
@@ -331,7 +321,7 @@ class LandscapeUatTest {
     @Test
     @Uat("LS-23")
     fun dockGreyedWhenSplitIsOff() {
-        prefs.set(ThemeManager.prefs.splitKeyboard, SplitKeyboardMode.Off)
+        prefs.setStyle(KeyboardStyle.NORMAL)
         val st = SettingsHarness().also { settings = it }
         st.open(SettingsRoute.Theme)
         st.tab(1)
@@ -346,7 +336,7 @@ class LandscapeUatTest {
         h.tap(h.key("123"))
         assertTrue("${board()}", full(board()))
         assertNull(arrow())
-        h.tap(h.key("ABC"))
+        h.tap(h.key(h.service.getString(R.string.picker_back)))
         h.tap(h.key("符"))
         assertTrue("${board()}", full(board()))
         assertNull(arrow())
@@ -356,14 +346,14 @@ class LandscapeUatTest {
     @Uat("LS-24a")
     @Config(qualifiers = "w393dp-h851dp-port-440dpi")
     fun portraitAlwaysSplitPanelsFull() {
-        prefs.set(ThemeManager.prefs.splitKeyboard, SplitKeyboardMode.Always)
+        prefs.setStyle(KeyboardStyle.SPLIT)
         prefs.set(ThemeManager.prefs.splitDock, SplitDock.Right)
         h.start()
         assertTrue(h.texts().toString(), split())
         h.tap(h.key("123"))
         assertTrue("${board()}", full(board()))
         assertNull(arrow())
-        h.tap(h.key("ABC"))
+        h.tap(h.key(h.service.getString(R.string.picker_back)))
         h.tap(h.key("符"))
         assertTrue("${board()}", full(board()))
         assertNull(arrow())
@@ -379,16 +369,17 @@ class LandscapeUatTest {
     }
 
     @Test
-    @Uat("LS-27")
-    fun tallestIsCappedAtSevenTenths() {
-        // 很高
+    @Uat("LS-27", "LS-48")
+    fun tallestLeavesTheApp120dp() {
+        // 很高: 4 × 59 dp asked; the app keeps 120 dp of the input method's window over the bar (061-landscape-height §5.2)
         prefs.set(AppPrefs.getInstance().keyboard.keyboardHeightPercentLandscape, 60)
         h.start()
-        val screen = h.service.resources.displayMetrics.heightPixels
+        val density = h.service.resources.displayMetrics.density
         val top = KeyboardHarness.all(h.inputView).filter { h.shown(it) && it.contentDescription?.toString() in barButtons() }
             .minOf { h.box(it).top }
-        val bottom = h.box(h.keyboard).bottom
-        assertTrue("area ${bottom - top} of $screen", bottom - top <= 0.70 * screen + 8)
+        val app = top - h.box(h.inputView).top
+        assertTrue("app $app px", app >= KeyboardHeightCap.MIN_APP_DP * density - 2)
+        assertTrue("keys ${h.box(h.keyboard).height()}", h.box(h.keyboard).height() >= 4 * KeyboardHeightCap.MIN_ROW_DP * density - 2)
         h.capture("LandscapeUatTest/tallest")
     }
 
@@ -476,7 +467,7 @@ class LandscapeUatTest {
         // each its own start, so one that fails does not hide the others
         assertRows(
             "one-handed: narrower than the screen, the code row over it" to {
-                prefs.set(ThemeManager.prefs.oneHanded, OneHanded.Right)
+                prefs.setStyle(KeyboardStyle.ONE_HANDED, side = OneHanded.Right)
                 try {
                     h.start()
                     typing(InputMethodCatalog.PINYIN)
@@ -485,11 +476,11 @@ class LandscapeUatTest {
                 } finally {
                     harness?.close()
                     harness = null
-                    prefs.set(ThemeManager.prefs.oneHanded, OneHanded.Off)
+                    prefs.setStyleDefault()
                 }
             },
             "floating: narrower than the screen, the code row over it" to {
-                prefs.set(ThemeManager.prefs.floatingKeyboard, true)
+                prefs.setStyle(KeyboardStyle.FLOATING)
                 try {
                     h.start()
                     typing(InputMethodCatalog.PINYIN)
@@ -499,7 +490,7 @@ class LandscapeUatTest {
                     harness?.close()
                     harness = null
                     EngineState.syllablesState.value = EngineState.SyllableState()
-                    ThemeManager.prefs.floatingKeyboard.setValue(false)
+                    TestStyles.clear()
                 }
             },
             "the 外观 page's preview: the full keyboard, its keys as tall as the real ones at the 18 dp row" to {

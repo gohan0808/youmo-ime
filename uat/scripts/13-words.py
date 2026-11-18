@@ -7,8 +7,9 @@ import re
 import statistics
 import tempfile
 import time
+import unicodedata
 
-from uat import Blocked, PKG, case, check, first, home, sym_char, in_picker
+from uat import Blocked, PKG, case, check, ensure_ime, first, home, pinyin_keyboard, sym_char, in_picker, to_downloads
 
 FIXTURES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "fixtures")
 DOWNLOAD = "/sdcard/Download"
@@ -38,7 +39,11 @@ PIECES = {"蓝鲸花园": [("lanjinghuayuan", "蓝鲸花园")], "幽默": [("you
           "北京市海淀区": [("beijingshi", "北京市"), ("haidianqu", "海淀区")], "张三": [("zhangsan", "张三")],
           "上海市": [("shanghaishi", "上海市")], "年": [("nian", "年")], "月": [("yue", "月")],
           "日": [("ri", "日")], "鲸喵屿": [("jing", "鲸"), ("miao", "喵"), ("yu", "屿")],
-          "你好": [("nihao", "你好")], "您好呀": [("ninhao", "您好"), ("ya", "呀")]}
+          # VO-54: 竫 (jìng, 三级字) as 静 reads
+          "徐竫": [("xu", "徐"), ("jing", "竫")],
+          "你好": [("nihao", "你好")], "您好呀": [("ninhao", "您好"), ("ya", "呀")],
+          # VO-56 (12-voice.py) adds it through add_word, which types it by these pieces
+          "酒店式公寓": [("jiudian", "酒店"), ("shi", "式"), ("gongyu", "公寓")]}
 
 
 def words(cs):
@@ -203,13 +208,13 @@ def show_hidden(d):
         d.back()
 
 
-def pick_in_download(d, name):
-    """the file picker, open: name in 下载 tapped"""
+def pick_in_download(d, name, after=1.0):
+    """the file picker, open: name in 下载 tapped, then after seconds"""
     # a package the picker has not served yet opens in 最近 (the release build after the debug one
     # had used it): go to 下载 through the roots drawer
-    if d.screen().find(text="近期的文件"):
-        d.tap((77, 148), 1.0)
-        d.tap_text("下载", scroll=False, after=2.0)
+    s = d.screen()
+    if s.find(text="近期的文件"):
+        to_downloads(d, s)
     if name.startswith("."):
         show_hidden(d)
     # the exports of earlier runs pile up in 下载 (a grid of two columns): enough scrolls to pass them
@@ -220,7 +225,7 @@ def pick_in_download(d, name):
         d.swipe((540, 1900), (540, 900), 400)
     else:
         raise Blocked(f"下载里没有 {name}")
-    d.tap(n.c, 1.0)
+    d.tap(n.c, after)
 
 
 def import_file(d, name, target=None):
@@ -384,6 +389,7 @@ case("WD-14z", needs="jvm:LexiconUatTest.aScelFileIntoTheUserDictionaryIsImporte
 
 
 case("WD-14z2", needs="jvm:BaseDictionaryUpgradeUatTest.aScelFileIntoTheBaseIsConvertedAndMerged")(lambda d: None)
+case("WD-14z3", needs="jvm:PinyinDictManagerTest.aBinaryDictionaryPastItsCapIsRefusedAsItIsCopied")(lambda d: None)
 
 
 def title_of(s):
@@ -543,7 +549,7 @@ def wd14h(d):
     early = page_cands(d, "nihao")
     d.clear()
     # the idle bar says how far the upgrade is, typing going on meanwhile; then the notice. A
-    # release build compiles frost in ~20 s, done (the 2 s notice gone) before a slow dump looks:
+    # release build compiles frost in ~20 s, done (the 1 s notice gone) before a slow dump looks:
     # what was caught is reported, the end state is what is checked (the file, the compile's log, its words)
     d.open_page("text")
     caught = []
@@ -555,7 +561,7 @@ def wd14h(d):
         names = d.root(f"ls {dicts}").split()
         return ("merged.ymd" in names and "frost.txt" not in names) or None
 
-    # its own name, not merged.ymd.tmp being written, after the conversion; then the notice's 2 s
+    # its own name, not merged.ymd.tmp being written, after the conversion; then the notice's 1 s
     d.wait(look, timeout=300, step=0.5, what="merged.ymd")
     end = time.time() + 3
     while time.time() < end and "词库格式已升级" not in caught:
@@ -737,16 +743,34 @@ def wd37(d):
     push(d, "phrases.txt")
     d.step("导入")
     phrase_menu(d, "导入")
-    pick_in_download(d, "phrases.txt")
-    # a toast's window is not in uiautomator's dump: 导入了 1 条短语 is read off the pictures (its count
-    # asserted on the JVM)
-    for i in range(3):
-        time.sleep(0.6)
-        d.shot("full", f"导入后的提示（应为导入了 1 条短语）{i + 1}/3",
-               png=d.adb("exec-out", "screencap", "-p", binary=True))
-    shown = d.all_texts()
+    # since 13c01a731 the import says its count on the one undo bar (a Snackbar, in the dump), no
+    # 已添加 bar and no toast
+    pick_in_download(d, "phrases.txt", after=0.1)
+    bar = d.wait(lambda x: x if x.find(contains="导入了 1 条短语") else None, timeout=5, step=0.2,
+                 what="提示条「导入了 1 条短语」")
+    # the bar is up 2.75 s (LENGTH_LONG): the list read off the screen the wait returned (two phrases, one
+    # screen), 撤销 tapped at once; its picture is taken at the second import, raced by nothing (R27 F8547)
+    shown = bar.texts()
+    undo = bar.find(text="撤销")
+    check(not bar.find(contains="已添加"), f"没有「已添加」：{shown}")
+    check(undo, f"提示条带撤销：{shown}")
     check(sum("北京市海淀区" in t for t in shown) == 1, f"导入后 dz 只有一条：{shown}")
     check(any("上海" in t for t in shown), f"导入后有 sh →「上海」：{shown}")
+    d.step("撤销")
+    d.tap(undo.c, 0.8)
+    shown = d.all_texts()
+    check(not any("上海" in t for t in shown), f"撤销后 sh 没了：{shown}")
+    check(sum("北京市海淀区" in t for t in shown) == 1, f"撤销后 dz 还在：{shown}")
+    d.shot("full", "撤销后：只少了 sh")
+    d.step("再导入一次")
+    phrase_menu(d, "导入")
+    pick_in_download(d, "phrases.txt", after=0.1)
+    d.wait(lambda x: x if x.find(contains="导入了 1 条短语") else None, timeout=5, step=0.2,
+           what="再导入的提示条")
+    d.shot("full", "导入后页底一个提示条：导入了 1 条短语 / 撤销",
+           png=d.adb("exec-out", "screencap", "-p", binary=True))
+    shown = d.all_texts()
+    check(any("上海" in t for t in shown) and sum("北京市海淀区" in t for t in shown) == 1, f"再导入后列表 {shown}")
     d.step("离开再回来")
     d.back()
     home(d, "词库与短语", "自定义短语")
@@ -781,13 +805,18 @@ def wd37(d):
 
 # ---------------------------------------------------------------- R11: 清空学到的 / 全部清空
 
-case("WD-25", needs="jvm:LexiconUatTest.clearingTheLearnedKeepsYourWordsUnlessAll")(lambda d: None)
+case("WD-25", needs="jvm:LexiconUatTest.clearingTheLearnedKeepsYourWordsUnlessAll、WordListsTest.aClearEmptiesTheListsAndTheLinesThatDoNotRead、"
+     "EnginesLearningTest.aClearOfEverythingEmptiesTheWordListsOfTheLinesThisBuildDoesNotRead、WordListsTest.aClearDeletesAListThatDidNotRead")(lambda d: None)
 
 
 case("WD-30", needs="jvm:SettingsPagesUatTest.searchDeleteSeveralAndTakeThemBack")(lambda d: None)
 
 
 case("WD-38", needs="jvm:DictionaryFormatTest.aFewWordsAloneInAGbkFileWithPinyinRefuseNothing")(lambda d: None)
+
+
+case("WD-37a", needs="jvm:SettingsPagesUatTest.anImportFillsTheCustomPhrasesToTheirLimitAndSaysTheRest")(lambda d: None)
+case("WD-65", needs="jvm:ListPagesReadUatTest.openingTheCustomPhrasesOffersNoUndoOfThePhrasesRead、ListPagesReadUatTest.openingOrImportingTheCommonWordsOffersNoUndoThatDeletesThem")(lambda d: None)
 
 
 # ---------------------------------------------------------------- 常用词 (060-common-words)
@@ -880,3 +909,289 @@ def wd42(d):
 
 
 case("WD-45", needs="jvm:CommonWordsTest.replacementsAreKeptOnceNineAtMostTheWordItselfToo、CommonWordsInSessionTest.theWordItselfAsAReplacementGoesFirst")(lambda d: None)
+case("WD-46", needs="jvm:StatusAreaNotSavingTest.thePanelSaysLearningIsNotSavedOnlyWhileItIsNot、"
+     "StatusAreaNotSavingTest.thePanelAsksOnlyWhetherLearningSavesNotTheOverview、"
+     "UserWordsNotSavingTest.thePageSaysLearningIsNotSavedOnlyWhileItIsNot、"
+     "EnginesRecordFaultTest.aRecordThatStoppedTakingWritesIsNotSaving、"
+     "LearnLogTest.aRecordWhoseFileDidNotOpenTakesNoRewrite、"
+     "EnginesRecordFaultTest.aRecordWhoseWritesKeepFailingIsNotSavingUntilOneIsWritten、"
+     "RecordStoreTest.aStoreWhoseWritesKeepFailingIsNotWritingUntilOneIsWritten、"
+     "RecordStoreTest.aStoreAWriteWasRefusedIsWritingAgainOnceTheLogIsWrittenWhole、"
+     "EnginesRecordFaultTest.aRecordAWriteWasRefusedIsSavingAgainOnceAClearRewroteIt、"
+     "RecordStoreTest.aCompactionPutInPlaceAfterAWriteRefusedIsWritingOnlyIfWrittenSince、"
+     "LearningControlTest.aClearOfASpanTheDiskRefusedTakesItFromMemoryToo、LearningControlTest.aClearOfARecordThatStoppedTakingWritesFailsWithNothingCleared、EnginesRecordFaultTest.aClearOfARecordThatStoppedTakingWritesSaysItFailed、RecordStoreTest.aRewriteOfALogNotOpenedAgainBehindItsCompactionThrowsAndWritesNothing、LearningClearedTest.aFailedClearSaysToRestartOnlyWhenTheRecordTakesNoRewrite、"
+     "LearningControlTest.aForgetTheFileNeverTookIsTakenBackInMemoryAndOneItHoldsFailsWithItsRewrite、"
+     "LearningControlTest.anActTheFileRefusedIsTakenBackOnlyWhereNothingElseIsUnwritten、LearningControlTest.aForgetTakenBackFailsWhereTheFileDoesNotReadOrIsStillFull、"
+     "EnginesRecordFaultTest.aForgetTheDiskRefusedIsTakenBackInMemory、"
+     "EnginesRecordFaultTest.aForgetOnDiskWhoseRewriteFailsSaysItFailed、"
+     "BackupControlTest.aRecordThatStoppedTakingWritesIsNeitherRestoredToNorRevertedAndAStashWaits、"
+     "LearningClearedTest.aBackupActThatFailedSaysToRestartOnlyIfItRewritesTheRecord、"
+     "CandidateMenuUatTest.anUndoThatFailedSaysWhatToDo、"
+     "SettingsPagesUatTest.anUndoOfARemovalNotTakenBackSaysWhy、"
+     "UnwrittenLearningControlTest.aForgetOnARecordThatDidNotOpenIsNoLongerTakenBack、"
+     "UnwrittenLearningControlTest.aPinOrANoPredictIsTakenBackByItsOppositeWhateverIsUnwritten、"
+     "UnwrittenLearningControlTest.whatIsUnwrittenIsCountedARecordAndAnewOnceTheStateIsTheFiles、"
+     "EnginesRecordFaultTest.aDeleteRefusedAfterTheOneAlikeTakesItBackOnlyWhereNothingElseIsUnwritten")(lambda d: None)
+case("WD-47", needs="jvm:RecordStoreTest.recordsGarbledMidLogAreDroppedAndTheRestReadOn、"
+     "RecordStoreTest.aLogThatIsNotOneThisReadsIsKeptAsideAndSaidSo、"
+     "EnginesLearningTest.aClearTakesTheCopiesOfTheRecordKeptAside、"
+     "EngineBridgeTest$Made.aLearningRecordThatDoesNotReadIsSaidKeptAside、EngineBridgeTest$Made.whatTheEngineCouldNotReadOrWriteIsSaidInItsOwnWords")(lambda d: None)
+case("WD-48", needs="jvm:WordListsTest.aListThatCannotBeWrittenIsKeptInMemory、"
+     "EnglishBlocksTest.aBlockThatCannotBeKeptIsBlockedInMemoryAndToldAsUnsaved、"
+     "EngineBridgeTest$Made.whatTheEngineCouldNotReadOrWriteIsSaidInItsOwnWords、"
+     "EngineBridgeTest$Made.aPhraseOrCommonWordNotSavedIsSaidOnceInItsOwnWordsNotAsLearning、"
+     "EngineBridgeTest.aKeyboardChangeNotSavedIsSavedWithTheNext、EngineBridgeTest.aCommonWordsChangeNotSavedIsSavedWithTheNext")(lambda d: None)
+case("WD-49", needs="manual:「打开方式」是系统文件应用的界面（从设备存储的 Download 打开）；在真机或模拟器上手工跑")(lambda d: None)
+
+
+case("WD-58", needs="jvm:VoiceAskUatTest.theSwitchOffAsksNothing、SettingsPagesUatTest.theUsersWordsListsCountsAndDays")(lambda d: None)
+
+
+case("WD-59", needs="jvm:EnginesVoiceEditsTest.a word typed again is asked about, added on 记住 and taken off on its 撤销、"
+     "VoiceAskUatTest.aWordTypedAgainIsAskedAboutAndRememberedOnATap")(lambda d: None)
+
+
+# ---------------------------------------------------------------- 生僻字屏蔽 (061-rare-char-block)
+
+RARE = "生僻字屏蔽"
+RARE_SWITCH = "屏蔽生僻字"   # Android 10 reads a switch with its state after: 「屏蔽生僻字 关闭」
+GROUPS = ("三级字", "繁体字", "其它表外字", "扩展区")
+NO_BOX = type("NoBox", (), {"desc": ""})()
+
+
+def ext(cands):
+    """the candidates with a character of 扩展区 (U+20000 and on): what the default holds back"""
+    return [c for c in cands if any(ord(ch) >= 0x20000 for ch in c)]
+
+
+def rare_page(d):
+    """词库与短语 → 生僻字屏蔽, once its grid is read (the switch shown)"""
+    d.hide_keyboard()
+    home(d, "词库与短语", RARE)
+    # the switch is there (disabled) while the grid is read: a group's head says it is read
+    return d.wait(lambda s: rare_box(s, GROUPS[0]) and next((n for n in s.app() if n.text.startswith(RARE_SWITCH)), None),
+                  timeout=30, step=0.3, what="生僻字屏蔽页读好")
+
+
+def rare_switch(d, on):
+    """the page's switch turned to on, the page left (its changes saved, the engine told)"""
+    sw = rare_page(d)
+    if sw.checked != on:
+        d.tap(sw.c, 0.8)
+        d.wait(lambda s: next((n for n in s.app() if n.text.startswith(RARE_SWITCH) and n.checked == on), None), timeout=8,
+               step=0.3, what=f"开关{'打开' if on else '关上'}")
+    d.back(1.0)
+    return rare_row(d)
+
+
+def rare_row(d):
+    """词库与短语's 生僻字屏蔽 row, as its summary reads once read (「关」, 「已屏蔽 N 个字」)"""
+    def said(s):
+        texts = [n.text for n in s.app() if n.text]
+        if RARE not in texts:
+            d.scroll(s)   # the row is near the page's end
+            return None
+        after = texts[texts.index(RARE) + 1:texts.index(RARE) + 2]
+        return after[0] if after and (after[0] == "关" or re.fullmatch(r"已屏蔽 [\d,]+ 个字", after[0])) else None
+    return d.wait(said, timeout=15, step=0.3, what="生僻字屏蔽那一行的副标题")
+
+
+def rare_note(s):
+    return next((n.text for n in s.app() if n.text and "改动在离开本页后生效" in n.text), "")
+
+
+def rare_box(s, group):
+    """a group head's box: its description, 「三级字，1,605 个，全部放行」"""
+    return next((n for n in s.app() if n.cls == "CheckBox" and n.desc.startswith(group + "，")), None)
+
+
+def toneless(reading):
+    return "".join(c for c in unicodedata.normalize("NFD", reading) if not unicodedata.combining(c)).replace("ü", "v")
+
+
+@case("WD-50", base="B0-设置", mutates=True)
+def wd50(d):
+    d.step("关着")
+    home(d, "词库与短语")
+    row = rare_row(d)
+    check(row == "关", f"词库与短语那一行：{row!r}")
+    before = page_cands(d, "din")
+    d.clear()
+    if not ext(before):
+        raise Blocked(f"din 的候选栏里本来就没有扩展区的字：{before[:10]}")
+    d.step("打开")
+    row = rare_switch(d, True)
+    check(row.startswith("已屏蔽 "), f"打开后那一行：{row!r}")
+    on = page_cands(d, "din")
+    d.clear()
+    check(on and not ext(on), f"打开后 din：{on[:10]}，扩展区的 {ext(on)}")
+    da = words(page_cands(d, "da"))
+    d.clear()
+    check("大" in da and "打" in da, f"打开后 da：{da[:10]}")
+    d.step("关掉")
+    check(rare_switch(d, False) == "关", "关掉后那一行不是「关」")
+    off = page_cands(d, "din")
+    d.clear()
+    check(ext(off), f"关掉后 din 里没有扩展区的字：{off[:10]}")
+    return f"关 {len(ext(before))} 个扩展区的；{row}：0 个；再关 {len(ext(off))} 个"
+
+
+case("WD-51", needs="jvm:RareCharsUatTest.byDefaultOnlyExtensionBIsHeld")(lambda d: None)
+case("WD-52", needs="jvm:RareCharsUatTest.theOtherOutOfTableHeldThenOneLetThrough、RareCharsPageUatTest.thePageHoldsBackAndLetsThrough、"
+     "RareCharsPageUatTest.aDragHoldsBackARunAndOneUndoTakesItBack、RarePageTest.aDragSetsTheRangeToTheStartsOppositeAndLeavesTheRestAsTheyWere")(lambda d: None)
+case("WD-53", needs="jvm:RareCharsUatTest.wubiAutoCommitsTheOneLeftAndAgainChoosesOnceLetThrough、RareCharsUatTest.aWordWithAHeldCharacterIsNotOfferedNorPredicted、"
+     "RareCharContractTest.aGateMadeDirectlyHoldsBackEvenTheCommonest")(lambda d: None)
+case("WD-54", needs="jvm:RareCharsUatTest.handwritingStrokesPartsAndGlideOfferNoneHeld、RareCharsUatTest.withEveryGroupHeldNoListedChineseInputMethodOffersOne、"
+     "RareCharContractTest.theHandwritingPadReadsAroundWhatIsHeld")(lambda d: None)
+case("WD-55", needs="jvm:UserDataManagerTest.theConfigDataAndThemesAreBackedUpWhereBackupsHaveThemAndRestoredIntoTheirOwnDirectories、"
+     "UserDataManagerTest.theUsersTextFilesFollowTheBackupItsCollectionsAndDotEntriesStay、RareCharsUatTest.turnedOnExtensionBIsGoneTheRestStaysTurnedOffItIsBack")(lambda d: None)
+case("WD-56", needs="jvm:RareCharsPageUatTest.aUserWordWithACharacterHeldIsMarkedAndLetThrough、RareChoiceTest.theCharactersHeldInAWord、"
+     "HeldWordsTest.theUserModelAsksItsWordsAsTheDictionarysAndTheUsersByText")(lambda d: None)
+
+
+@case("WD-62", base="B0-设置", visual=True)
+def wd62(d):
+    rare_page(d)
+    s = d.screen()
+    strips = sorted((n for n in s.app() if n.cls == "CheckBox" and n.desc.startswith(GROUPS)), key=lambda n: (n.c[1], n.c[0]))
+    names = [n.desc.split("，")[0] for n in strips]
+    counts = [n.text for n in s.app() if re.fullmatch(r"已屏蔽 [\d,]+/[\d,]+", n.text)]
+    # a strip's box is a CheckBox of its own with nothing said (the strip says it): a cell says its character
+    cells = [n.desc for n in s.app() if n.cls == "CheckBox" and n.desc and not n.desc.startswith(GROUPS)]
+    samples = [n.text for n in s.app() if "犇" in n.text]
+    bottom = d.screen_h()
+    d.shot("app", "四张卡片两列两行都在屏幕里，每张有说明、样字和勾选条；没有格子、没有字母条")
+    check(names == ["扩展区", "三级字", "繁体字", "其它表外字"], f"卡片的顺序：{names}")
+    check(len({n.c[1] for n in strips}) == 2, f"勾选条不是两行：{[n.c for n in strips]}")
+    check(all(n.b[3] <= bottom for n in strips), f"勾选条超出屏幕：{[n.b for n in strips]}")
+    check(len(counts) == 4, f"「已屏蔽 N/总数」：{counts}")
+    check(not cells, f"卡片页上有格子：{cells[:5]}")
+    check(samples, "三级字卡片上没有样字（犇）")
+    return f"{names}；{counts}"
+
+
+case("WD-63", needs="jvm:RareCharsCardsUatTest.theTitleBarsUndoTakesBackTheLastStepTillASave、RareCharsPageUatTest.thePageHoldsBackAndLetsThrough")(lambda d: None)
+case("WD-64", needs="jvm:RareCharsPageUatTest.fourCardsAndOffOnlyToLookAt、GroupCardTest.unusable, only the strip fades and stops, the body still opens、"
+     "SettingsCardsTest.an unusable strip is dimmed and inert")(lambda d: None)
+
+
+@case("WD-60", base="B0-设置", mutates=True)
+def wd60(d):
+    sw = rare_page(d)
+
+    def heads(s):
+        # the groups' cards' strips in reading order (two rows of two): each one's name and box state, and the
+        # held of its 「已屏蔽 N/总数」
+        boxes = sorted((n for n in s.app() if n.cls == "CheckBox" and n.desc.startswith(GROUPS)), key=lambda n: (n.c[1], n.c[0]))
+        held = sorted(((n.c[1], n.c[0]), int(m.group(1).replace(",", ""))) for n in s.app() if n.text
+                      for m in [re.match(r"已屏蔽 ([\d,]+)/[\d,]+$", n.text)] if m)
+        return [(b.desc.split("，")[0], b.desc.rsplit("，", 1)[-1]) for b in boxes], [h for _, h in held]
+    off, _ = heads(d.screen())
+    d.tap(sw.c, 0.8)
+    on, held = d.wait(lambda s: (lambda h: h if h[0] and h[0][0][1] == "全部屏蔽" and h[1] else None)(heads(s)), timeout=8, step=0.3,
+                      what="开关打开、第一组勾上")
+    note = rare_note(d.screen())
+    total = re.match(r"已屏蔽 ([\d,]+) 个字", note)
+    d.shot("app", "打开后第一张卡片是扩展区，已屏蔽的字数和页顶一样")
+    d.back(1.0)
+    names = [n for n, _ in off]
+    check(names == ["扩展区", "三级字", "繁体字", "其它表外字"], f"卡片的顺序：{names}")
+    check(on[0][0] == "扩展区", f"打开后第一张：{on[:1]}")
+    check(total and held[0] > 0 and held[0] == int(total.group(1).replace(",", "")), f"第一组已屏蔽 {held[:2]}，页顶「{note}」")
+    check(len(held) >= 2 and held[1] == 0, f"第二组（三级字）已屏蔽 {held[1:2]}")
+    return f"组序 {names}；第一组已屏蔽 {held[0]}，页顶「{note.split(' · ')[0]}」"
+
+
+# the nine keys' letter keys by the digit they stand for (their keys are named by their letters)
+NINE_KEYS = dict(zip("23456789", ["abc", "def", "ghi", "jkl", "mno", "pqrs", "tuv", "wxyz"]))
+
+
+def nine_cands(d, digits):
+    d.open_page("text")
+    d.switch_im("拼音")
+    k = d.keys(refresh=True)
+    d.taps([k[NINE_KEYS[c]] for c in digits], gap=0.35, after=0.6)
+    got = d.cands()
+    d.clear()
+    return got
+
+
+@case("WD-61", base="B0-设置", mutates=True)
+def wd61(d):
+    rare_page(d)
+    s = d.screen()
+    note = rare_note(s)
+    held = (rare_box(s, "扩展区") or NO_BOX).desc
+    samples = [n.text for n in s.app() if "犇" in n.text]
+    d.back(1.0)
+    check("离开本页后生效" in note, f"开关下的说明：{note!r}")
+    check(held.endswith("全部屏蔽"), f"关着时扩展区的勾选条：{held!r}")
+    check(samples, "三级字卡片的样字里没有犇")
+    d.step("打开，九键")
+    row = rare_switch(d, True)
+    check(row.startswith("已屏蔽 "), f"打开后那一行：{row!r}")
+    pinyin_keyboard(d, "九键")
+    nine = nine_cands(d, "346")
+    check(nine and not ext(nine), f"九键 346：{nine[:10]}，扩展区的 {ext(nine)}")
+    d.step("开关还开着")
+    home(d, "词库与短语")
+    again = rare_row(d)
+    check(again == row, f"切到九键后那一行：{again!r}，原来 {row!r}")
+    sw = rare_page(d)
+    check(sw.checked, "切到九键后开关是关的")
+    d.back(1.0)
+    d.step("全键盘")
+    pinyin_keyboard(d, "全键盘")
+    full = page_cands(d, "din")
+    d.clear()
+    check(full and not ext(full), f"切回全键盘 din：{full[:10]}，扩展区的 {ext(full)}")
+    d.step("强制停止后")
+    d.sh(f"am force-stop {PKG}")
+    time.sleep(1)
+    ensure_ime(d)
+    after = page_cands(d, "din")
+    d.clear()
+    check(after and not ext(after), f"强制停止后 din：{after[:10]}，扩展区的 {ext(after)}")
+    return f"{row}；九键 346 首 {nine[:3]}，全键盘 din 首 {full[:3]}，重启后 {after[:3]}"
+
+
+@case("WD-57", base="B0-设置", mutates=True)
+def wd57(d):
+    rare_switch(d, True)
+    rare_page(d)
+    d.step("搜 da")
+    field = d.wait(lambda s: next((n for n in s.app() if n.cls == "EditText"), None), timeout=8, what="搜索框")
+    focus(d, field)
+    type_letters(d, "da")
+    d.hide_keyboard()
+
+    def cells(s):
+        got = [n.desc for n in s.app() if n.cls == "CheckBox" and "，" in n.desc and not n.desc.startswith(GROUPS)]
+        return got or None
+    found = d.wait(cells, timeout=10, step=0.3, what="搜到的格子")
+    readings = {c: [toneless(r) for r in c.split("，", 1)[1].split("、")] for c in found}
+    check(all("da" in r for r in readings.values()), f"搜 da 列出的：{found[:12]}")
+    d.step("恢复默认")
+    s = d.screen()
+    field = next((n for n in s.app() if n.cls == "EditText"), None)
+    focus(d, field)
+    d.press("bksp", 3, after=0.3)
+    d.hide_keyboard()
+    s = d.wait(lambda s: rare_box(s, "三级字") and s, timeout=8, step=0.3, what="三级字的组头")
+    first_note = rare_note(s)
+    d.tap(rare_box(s, "三级字").c, 0.8)
+    s = d.wait(lambda s: "全部屏蔽" in (rare_box(s, "三级字") or NO_BOX).desc and s, timeout=8, step=0.3, what="三级字整组屏蔽")
+    check(rare_note(s) != first_note, f"整组屏蔽后页顶没变：{rare_note(s)!r}")
+    more = d.screen().find(desc="更多选项", where="all")
+    if not more:
+        raise Blocked("生僻字屏蔽页没有 ⋮")
+    d.tap(more.c, 0.8)
+    d.tap_text("恢复默认", where="all", scroll=False, after=0.5)
+    said = "\n".join(messages(d.wait(lambda s: messages(s) and s, timeout=8, step=0.3, what="恢复默认的确认框")))
+    check("回到只屏蔽扩展区" in said, f"确认框：{said!r}")
+    ok(d)
+    s = d.wait(lambda s: "全部放行" in (rare_box(s, "三级字") or NO_BOX).desc and s, timeout=8, step=0.3, what="三级字回到放行")
+    check(rare_note(s) == first_note, f"恢复默认后页顶：{rare_note(s)!r}，原来 {first_note!r}")
+    check(any(n.text == "撤销" for n in s.app()), "恢复默认后底部没有「撤销」")
+    return f"搜 da {len(found)} 格；{first_note.split(' · ')[0]}"
+

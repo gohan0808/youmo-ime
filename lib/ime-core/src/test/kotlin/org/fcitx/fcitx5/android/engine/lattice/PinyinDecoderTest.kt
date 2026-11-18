@@ -10,9 +10,14 @@ import org.fcitx.fcitx5.android.engine.data.PinyinDataBuilder
 import org.fcitx.fcitx5.android.engine.learn.ImportedWords
 import org.fcitx.fcitx5.android.engine.learn.import
 import org.fcitx.fcitx5.android.engine.pinyin.Fuzzy
+import org.fcitx.fcitx5.android.engine.pinyin.Segmenter
 import org.fcitx.fcitx5.android.engine.pinyin.PinyinSegmenter
+import org.fcitx.fcitx5.android.engine.pinyin.ShuangpinScheme
+import org.fcitx.fcitx5.android.engine.pinyin.ShuangpinSegmenter
+import org.fcitx.fcitx5.android.engine.pinyin.SyllableGraph
 import org.fcitx.fcitx5.android.engine.pinyin.Syllables
 import org.fcitx.fcitx5.android.engine.pinyin.T9Segmenter
+import org.fcitx.fcitx5.android.engine.pinyin.ZhuyinKeys
 import org.fcitx.fcitx5.android.engine.platform.jvm.JvmFile
 import org.fcitx.fcitx5.android.engine.user.DictionaryCompiler
 import org.fcitx.fcitx5.android.engine.user.DictionaryFile
@@ -306,6 +311,7 @@ class PinyinDecoderTest {
         var input = ""
         var prev2 = NO_WORD
         var prev = NO_WORD
+        var on = 0
         repeat(4000) { step ->
             val at = random.nextInt(input.length + 1)
             val piece = pieces[random.nextInt(pieces.size)]
@@ -323,7 +329,140 @@ class PinyinDecoderTest {
             val graph = segmenter.segment(input)
             val fresh = decoder(beam = 3).decode(graph, prev2, prev)
             assertEquals("step $step: $input", describe(fresh), describe(kept.decode(graph, prev2, prev)))
+            on += kept.collectedOn
         }
+        // going on from the last decode's steps was among what was compared
+        assertTrue("went on $on times", on > 400)
+    }
+
+    // 简拼 in the middle reads every 双拼 key alone too: the words collected from where nothing changed
+    // are kept from key to key, and what the decoder reads is what it reads afresh, the user's words,
+    // those only imported and a key read alone each way among them
+    @Test
+    fun buildingOnTheLastDecodeChangesNothingIn双拼() {
+        // 自然码: ni hc(hao) ma zl(zai) jm(jian) wo vh(zhang) vs(zhong) hw(hua) rf(ren) mn(min), and keys alone
+        val pieces = listOf("ni", "hc", "ma", "zl", "jm", "wo", "vh", "vs", "hw", "rf", "mn", "re", "n", "h", "z", "j", "v", "r", "m", "'", ";")
+        buildsOnTheLast(ShuangpinSegmenter(ShuangpinScheme.ZIRANMA, abbreviations = true), pieces, Random(11), readsAlone = true)
+    }
+
+    // the tones typed after a syllable on the zhuyin keys weigh the words collected: kept with them
+    @Test
+    fun buildingOnTheLastDecodeChangesNothingInZhuyinWithTones() {
+        val allows = { cp: Int, syllable: Int, tone: Int -> (cp + syllable + tone) % 3 != 0 }
+        val segmenter = T9Segmenter(abbreviations = false, letters = ZhuyinKeys.DACHEN, toneAllows = allows)
+        // ni hao ma zai jian wo, symbol by symbol, and the five tones
+        val pieces = "ㄋㄧㄏㄠㄇㄚㄗㄞㄐㄢㄨㄛ".map { ZhuyinKeys.symbolCode(it).toString() } + (1..5).map { ZhuyinKeys.toneCode(it).toString() }
+        buildsOnTheLast(segmenter, pieces, Random(13), steps = 1500, toneAllows = allows)
+    }
+
+    // letters: a syllable is read more than one way (re n, ren), so a word only imported (热 of re) ends
+    // before the key that takes the dictionary's one word from the start (人民 of renm, none of renma)
+    @Test
+    fun buildingOnTheLastDecodeChangesNothingInLetters() {
+        // few pieces, so that ren, m, a come one after another from the start
+        // it goes on a good part of the steps, not a count one build and seed made (review F8350: 411, a quarter of 1645)
+        val steps = 6000
+        buildsOnTheLast(PinyinSegmenter(), listOf("ren", "m", "a", "re", "n", "i"), Random(19), steps = steps, atLeast = steps / 10)
+    }
+
+    // the nine keys with 简拼: a key is three or four letters, each a syllable begun, at every position
+    @Test
+    fun buildingOnTheLastDecodeChangesNothingOnTheNineKeys() {
+        // 64 ni, 426 hao, 62 ma, 924 zai, 5426 jian, 96 wo, 94664 zhong, 482 hua, 736 ren, 6466 min and a key, 73 re, and keys alone
+        val pieces = listOf("64", "426", "62", "924", "5426", "96", "94664", "482", "736", "6466", "73", "6", "4", "9", "5", "2", "7", "'")
+        // a tenth of the steps, as letters' (review F8350: 168, a quarter of 672)
+        val steps = 3000
+        buildsOnTheLast(T9Segmenter(abbreviations = true), pieces, Random(17), steps = steps, atLeast = steps / 10)
+    }
+
+    /**
+     * Types [pieces] at random with [segmenter] and checks, at each step, that a decoder building on
+     * the last decode reads what one made afresh does: the sentences, the words and the arcs between
+     * every two positions, as whole syllables or not. Every so often the user's words change (owned,
+     * blocked, unblocked) and the decoder is [PinyinDecoder.reset], as the session does.
+     */
+    private fun buildsOnTheLast(
+        segmenter: Segmenter,
+        pieces: List<String>,
+        random: Random,
+        steps: Int = 3000,
+        toneAllows: ((Int, Int, Int) -> Boolean)? = null,
+        atLeast: Int = steps / 4,
+        readsAlone: Boolean = false,
+    ) {
+        // the dictionaries the user merged among the tries walked
+        val user = mergedModel().also(::typeWords)
+        user.attachImports(ImportedWords().import("妮好" to "ni hao", "中人" to "zhong ren", "热" to "re", "仁" to "ren"))
+        val changes = listOf(
+            { user.own(UserModel.Entry("你中", syl("ni", "zhong"))) },
+            { user.block(UserModel.Entry("你好", syl("ni", "hao"))) },
+            { user.own(UserModel.Entry("好吗", syl("hao", "ma"))) },
+            { user.unblock(UserModel.Entry("你好", syl("ni", "hao"))) },
+            { user.block(UserModel.Entry("再", syl("zai"))) },
+            { user.own(UserModel.Entry("中人", syl("zhong", "ren"))) },
+            // 热 and 仁, only imported, are then all that starts re and ren: the input is kept as typed beside them
+            { user.block(UserModel.Entry("人民", syl("ren", "min"))) },
+            { user.unblock(UserModel.Entry("人民", syl("ren", "min"))) },
+        ) + typedChanges(user)
+        fun decoder() = PinyinDecoder(data.dictionary, data.vocabulary, UserScorer(data.model, user), user = user, toneAllows = toneAllows)
+        var typed = false // whether the last read's sentences keep some of the input as typed
+        fun read(d: PinyinDecoder, graph: SyllableGraph): List<Any?> {
+            val decoding = describe(d.decode(graph).also { r -> typed = r.sentences.any { s -> s.text.any { it in 'a'..'z' || it in '0'..'9' } } })
+            val between = (graph.start until graph.end).flatMap { a ->
+                (a + 1..graph.end).flatMap { b -> listOf(false, true).map { w -> d.arcsBetween(graph, a, b, w).map { "$a-$b $w ${it.text} ${it.score}" } } }
+            }
+            return decoding + between
+        }
+        val kept = decoder()
+        var input = ""
+        val went = WentOn()
+        repeat(steps) { step ->
+            if (step % 97 == 96) {
+                changes[step / 97 % changes.size]()
+                kept.reset()
+            }
+            val at = random.nextInt(input.length + 1)
+            val piece = pieces[random.nextInt(pieces.size)]
+            when (random.nextInt(20)) {
+                in 0..11 -> input += piece
+                in 12..15 -> input = input.dropLast(1 + random.nextInt(2))
+                16 -> input = input.substring(0, at) + piece + input.substring(at)
+                17 -> input = input.substring(0, at) + piece[0] + input.substring(minOf(at + 1, input.length))
+                18 -> input = input.drop(1)
+                else -> input = ""
+            }
+            val graph = segmenter.segment(input)
+            assertEquals("step $step: $input", read(decoder(), graph), read(kept, graph))
+            went.count(kept, graph, typed, if (readsAlone) decoder() else null)
+        }
+        assertTrue("went on over words read by a key alone ${went.alone} times", went.alone >= if (readsAlone) steps / 20 else 0)
+        // going on from the last decode's steps (collectOn) was among what was compared, where it may be:
+        // not while tones are typed, a word's asked of the whole path to it. And going on where input is
+        // kept as typed, which a start-only word kept from the last decode once hid
+        if (toneAllows == null) assertTrue("went on ${went.times} times, ${went.typed} with input kept as typed", went.times >= atLeast && went.typed > 0) else assertEquals(0, went.times)
+    }
+
+    @Test
+    fun aKeyAtTheEndCollectsWordsOnlyNearTheEnd() {
+        val segmenter = ShuangpinSegmenter(ShuangpinScheme.ZIRANMA, abbreviations = true)
+        val d = decoder()
+        val input = "nihcmazljmwo".repeat(6)
+        d.decode(segmenter.segment(input))
+        assertEquals(input.length, d.collectedAnew)
+        // the words over the last key or two, and those as long as the dictionary's from before them
+        d.decode(segmenter.segment(input + "v"))
+        assertTrue("${d.collectedAnew}", d.collectedAnew <= 6)
+        d.decode(segmenter.segment(input + "vs"))
+        assertTrue("${d.collectedAnew}", d.collectedAnew <= 6)
+        val steps = d.work.steps
+        val scored = d.work.scored
+        // and as many as before where it starts again
+        d.reset()
+        d.decode(segmenter.segment(input + "vs"))
+        assertEquals(input.length + 2, d.collectedAnew)
+        // the work counted says the same: a key took a small part of the steps and the scoring of it all
+        assertTrue("$steps of ${d.work.steps} steps", steps * 10 <= d.work.steps)
+        assertTrue("$scored of ${d.work.scored} scored", scored * 10 <= d.work.scored)
     }
 
     @Test
@@ -619,5 +758,37 @@ class PinyinDecoderTest {
         assertEquals(0, sentencesWith("尼"))
         user.listByHand(UserModel.Entry("尼", syl("ni")))
         assertEquals(1, sentencesWith("尼"))
+    }
+}
+
+// words typed, of the dictionary's and a merged one's: a 双拼 key alone reads these only
+private fun typeWords(user: UserModel) {
+    for ((text, reading) in listOf("你好" to "ni hao", "再" to "zai", "见" to "jian", "中华" to "zhong hua", "人民" to "ren min", "吗" to "ma", "妮" to "ni")) {
+        UserModel.Entry(text, reading.split(' ').map { Syllables.id(it) }.toIntArray()).let { user.setCount(user.id(it), 1f, it) }
+    }
+}
+
+// a word typed no more, and again: what a 双拼 key alone reads changes
+private fun typedChanges(user: UserModel): List<() -> Unit> {
+    val nihao = UserModel.Entry("你好", intArrayOf(Syllables.id("ni"), Syllables.id("hao")))
+    return listOf({ user.setCount(user.id(nihao), 0f, nihao) }, { user.setCount(user.id(nihao), 2f, nihao) })
+}
+
+// what going on from the last decode was compared on: how often, with input kept as typed, with words over a key read alone
+private class WentOn {
+    var times = 0
+    var typed = 0
+    var alone = 0
+
+    // [whole], a decoder to read [graph] without its keys read alone on, when those are counted
+    fun count(d: PinyinDecoder, graph: SyllableGraph, keptTyped: Boolean, whole: PinyinDecoder?) {
+        times += d.collectedOn
+        if (d.collectedOn == 0) return
+        if (keptTyped) typed++
+        if (whole == null || !graph.hasAbbreviations) return
+        // between two positions the whole syllables reach, more words than in whole syllables
+        val w = graph.withoutOtherReadings().also { whole.decode(it) }
+        val reached = (graph.start until graph.end).filter { a -> a == w.start || (w.start until a).any { p -> w.edges(p).any { w.to(it) == a } } }
+        if (reached.any { a -> (a + 1..graph.end).any { b -> d.arcsBetween(graph, a, b).size > whole.arcsBetween(w, a, b).size } }) alone++
     }
 }

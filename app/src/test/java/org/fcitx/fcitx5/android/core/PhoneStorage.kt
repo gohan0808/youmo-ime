@@ -40,8 +40,9 @@ internal fun dirsUnder(
     data: File = File(external, ConfigHome.DATA.old),
     theme: File = File(external, ConfigHome.THEME.old),
     settled: Boolean = true,
+    sharedPrefs: File = File(root, "shared_prefs"),
 ) = UserDataManager.Dirs(
-    sharedPrefs = File(root, "shared_prefs"),
+    sharedPrefs = sharedPrefs,
     dataBases = File(root, "databases"),
     external = external,
     recentlyUsed = File(root, "recently_used"),
@@ -50,13 +51,20 @@ internal fun dirsUnder(
     data = data,
     theme = theme,
     settled = settled,
+    // beside host-config in the app's files, as CustomLayouts.dir is on a phone
+    layouts = File(root, "files/layouts"),
 )
 
-// a backup as the app writes one: its metadata, then entries (a path in the zip to its text)
-internal fun backupZip(vararg entries: Pair<String, String>) = ByteArrayOutputStream().also { bytes ->
+// a backup as the app writes one ([versionCode]: this build's, or the release's that wrote it; [packageName] the app's,
+// or upstream's of a backup of it): its metadata, then entries (a path in the zip to its text)
+internal fun backupZip(
+    vararg entries: Pair<String, String>,
+    versionCode: Long = BuildConfig.VERSION_CODE.toLong(),
+    packageName: String = BuildConfig.APPLICATION_ID,
+) = ByteArrayOutputStream().also { bytes ->
     ZipOutputStream(bytes).use { zip ->
         zip.putNextEntry(ZipEntry("metadata.json"))
-        zip.write("""{"packageName":"${BuildConfig.APPLICATION_ID}","versionCode":${BuildConfig.VERSION_CODE},"versionName":"1","exportTime":0}""".encodeToByteArray())
+        zip.write("""{"packageName":"$packageName","versionCode":$versionCode,"versionName":"1","exportTime":0}""".encodeToByteArray())
         for ((name, text) in entries) {
             zip.putNextEntry(ZipEntry(name))
             zip.write(text.encodeToByteArray())

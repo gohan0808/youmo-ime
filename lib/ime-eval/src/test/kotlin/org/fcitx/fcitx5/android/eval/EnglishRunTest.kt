@@ -48,6 +48,17 @@ class EnglishRunTest {
         assertEquals("zzz", result.misses.single().substringBefore('\t'))
     }
 
+    // review F8255: a digit of the text is typed as one, not as the nine keys' key of that digit (3 as d, e or f)
+    @Test
+    fun aDigitOfTheTextIsTypedAsADigitOnTheNineKeys() {
+        val result = EnglishRun(data, nineKeys = true).run(listOf("the 3 cat"), noise = 0.0, seed = 1, threads = 1)
+        // what 3 put in, not how the count reads it (R26 F8503): its commit is its own key's, before the space, so
+        // counted a miss now, a hit once the count reads it; either way no letter. The words around it as meant
+        val three = result.misses.map { it.split('\t') }.partition { it[0] == "3" }
+        assertEquals(emptyList<List<String>>(), three.second)
+        three.first.forEach { (_, _, committed) -> assertTrue(committed, committed.none(Char::isLetter)) }
+    }
+
     @Test
     fun cleanWordsAreCommittedAsMeantThoughPunctuationEndsThem() {
         // dont typed for don't, put back by the session; the comma and the full stop are no part of the word
@@ -94,6 +105,28 @@ class EnglishRunTest {
             listOf(one.right, one.top3, one.predicted, one.slipped, one.fixed),
             listOf(three.right, three.top3, three.predicted, three.slipped, three.fixed),
         )
+    }
+
+    // taps with a place (TouchSim's s0.2): typed as meant, every key in its own box, the words as without; a key of each
+    // word slipped to the next, read through the place where the session reads it, as typed where it does not
+    @Test
+    fun tapsWithAPlaceSlipAKeyAWordWhereAsked() {
+        val sentences = List(20) { "the cat and the cat." }
+        val hand = TouchSim.hand("s0.2")
+        val clean = EnglishRun(data, hand = hand).run(sentences, noise = 0.0, seed = 3, threads = 1)
+        assertEquals(clean.words, clean.right)
+        assertEquals(0, clean.slipped)
+        val read = EnglishRun(data, hand = hand).run(sentences, noise = 0.0, seed = 3, threads = 2, oneSlip = true)
+        val unread = EnglishRun(data, hand = hand, readsTouch = false).run(sentences, noise = 0.0, seed = 3, threads = 1, oneSlip = true)
+        // every word typed with one key off, the same taps for both (of each sentence's seed, whatever the threads)
+        assertEquals(read.words, read.slipped)
+        assertEquals(read.words, unread.slipped)
+        assertTrue(read.misses.all { m -> m.split('\t').let { it[0] != it[1] } })
+        assertTrue("${read.fixed} ${unread.fixed}", read.fixed > 0 && unread.fixed > 0)
+        // on the nine keys the slipped key is the digit it landed on
+        val nine = EnglishRun(data, nineKeys = true, hand = hand).run(sentences, noise = 0.0, seed = 3, threads = 1, oneSlip = true)
+        assertEquals(nine.words, nine.slipped)
+        assertTrue(nine.misses.all { m -> m.split('\t')[1].any { it in '2'..'9' } })
     }
 
     @Test

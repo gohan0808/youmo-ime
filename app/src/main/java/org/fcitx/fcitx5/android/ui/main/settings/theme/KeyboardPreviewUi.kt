@@ -29,7 +29,9 @@ import org.fcitx.fcitx5.android.input.keyboard.CodeRowHeight
 import org.fcitx.fcitx5.android.input.keyboard.KeyboardArea
 import org.fcitx.fcitx5.android.input.keyboard.KeyboardHeightCap
 import org.fcitx.fcitx5.android.input.keyboard.TextKeyboard
+import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneLayout
 import org.fcitx.fcitx5.android.input.keyboard.keyboardCompact
+import org.fcitx.fcitx5.android.ui.main.settings.layout.LayoutBoards
 import org.fcitx.fcitx5.android.utils.navbarFrameHeight
 import splitties.dimensions.dp
 import splitties.views.backgroundColor
@@ -55,16 +57,23 @@ class KeyboardPreviewUi(override val ctx: Context, val theme: Theme) : Ui {
         private set
 
     private val keyboardPrefs = AppPrefs.getInstance().keyboard
-    // as the keyboard's: the settings, and the theme in use where they follow it (KeyboardArea)
-    private val keyboardSidePaddingPx: Int get() = KeyboardArea.sidePadding(ctx)
+    // as the keyboard's: the settings, and the theme in use where they follow it (KeyboardArea), on the display
+    // as held (横屏 or not as the keyboard is there), not this page's window
+    private val keyboardSidePaddingPx: Int get() = KeyboardArea.sidePadding(KeyboardArea.displayScreen(ctx))
 
-    private val keyboardBottomPaddingPx: Int get() = KeyboardArea.bottomPadding(ctx)
+    private val keyboardBottomPaddingPx: Int get() = KeyboardArea.bottomPadding(KeyboardArea.displayScreen(ctx))
 
     private val navbarBackground = ThemeManager.prefs.navbarBackground
     private val keyboardBottomFlush = keyboardPrefs.keyboardBottomFlush
 
     private val sizeChangeListener = ManagedPreference.OnChangeListener<Any> { _, _ ->
         recalculateSize()
+    }
+
+    // the letters split or not as the held shape's 键盘样式 is (TextKeyboard.Split), picked on this page or on the
+    // keyboard: no theme's change any more (ThemeManager), so made anew here
+    private val styleChangeListener = ManagedPreference.OnChangeListener<String> { _, _ ->
+        makeKeyboard()
     }
 
     private val bkg = imageView {
@@ -75,15 +84,23 @@ class KeyboardPreviewUi(override val ctx: Context, val theme: Theme) : Ui {
     // (where the cap binds, a 14 键 user's real keys are the tall row's 14 dp shorter); read each time,
     // as 候选字号 can change on this page
     // the keyboard with nothing typed: floating over the app (编码行), the code row is no part of it
-    private val barHeight get() = ctx.dp(KawaiiBarComponent.heightDp(ctx, barPercent()) + if (KawaiiBarComponent.codeRowFloats()) 0 else CodeRowHeight.THIN_DP)
+    private val barHeight get() = ctx.dp(KawaiiBarComponent.heightDp(displayCtx, barPercent()) + if (KawaiiBarComponent.codeRowFloats()) 0 else CodeRowHeight.THIN_DP)
     private val fakeKawaiiBar = view(::View)
 
     // the shown theme's `bar height=` (060-render-p3 T6b), the one made with before setTheme
-    private fun barPercent(): Double = SceneBar.of(ctx, if (::shownTheme.isInitialized) shownTheme else theme).heightPercent
+    private fun barPercent(): Double = SceneBar.of(displayCtx, if (::shownTheme.isInitialized) shownTheme else theme).heightPercent
+
+    // the keys and the bar read their 横屏, split and width from their context: the display's as held, as the input
+    // method's window has it, not this page's (KeyboardArea.displayContext); made anew as it turns
+    private var displayCtx: Context = KeyboardArea.displayContext(ctx)
 
     private var keyboardWidth = -1
     private var keyboardHeight = -1
-    private lateinit var fakeKeyboardWindow: TextKeyboard
+    // the keyboard's letters, or the layout shown in their place ([showLayout])
+    private lateinit var fakeKeyboardWindow: View
+
+    // the layout a card of 外观 → 布局 shows in the letters' place (061-custom-layout §4.3), none: the keyboard's
+    private var shownLayout: SceneLayout? = null
 
     private val fakeInputView = constraintLayout {
         add(bkg, lParams {
@@ -109,9 +126,12 @@ class KeyboardPreviewUi(override val ctx: Context, val theme: Theme) : Ui {
             ThemeManager.prefs.codeRow.registerOnChangeListener(sizeChangeListener)
             // the bar's height follows the candidate text size (KawaiiBarComponent.heightDp)
             ThemeManager.prefs.candidateTextSize.registerOnChangeListener(sizeChangeListener)
+            ThemeManager.prefs.keyboardStylePortrait.registerOnChangeListener(styleChangeListener)
+            ThemeManager.prefs.keyboardStyleLandscape.registerOnChangeListener(styleChangeListener)
         }
 
         override fun onConfigurationChanged(newConfig: Configuration?) {
+            displayCtx = KeyboardArea.displayContext(ctx)
             recalculateSize()
             // the letters split or not as the screen turned (TextKeyboard.Split): made anew, as the input view is
             makeKeyboard()
@@ -123,20 +143,23 @@ class KeyboardPreviewUi(override val ctx: Context, val theme: Theme) : Ui {
             ThemeManager.prefs.alwaysShowHandle.unregisterOnChangeListener(sizeChangeListener)
             ThemeManager.prefs.codeRow.unregisterOnChangeListener(sizeChangeListener)
             ThemeManager.prefs.candidateTextSize.unregisterOnChangeListener(sizeChangeListener)
+            ThemeManager.prefs.keyboardStylePortrait.unregisterOnChangeListener(styleChangeListener)
+            ThemeManager.prefs.keyboardStyleLandscape.unregisterOnChangeListener(styleChangeListener)
             super.onDetachedFromWindow()
         }
     }
 
     private fun keyboardWindowAspectRatio(): Pair<Int, Int> {
-        val resources = ctx.resources
-        val displayMetrics = resources.displayMetrics
-        val w = displayMetrics.widthPixels
-        val h = displayMetrics.heightPixels
-        // capped as the real keyboard is (InputView), or a landscape 很高 preview stands taller than it;
-        // the docked handle (始终显示悬浮条) counted in the cap there too, though not drawn here
+        // the display as held, the keyboard's screen: not this page's window, half of it in a split screen
+        val screen = KeyboardArea.displayScreen(ctx)
+        val w = screen.widthPx
+        // the app's 120 dp kept as the real keyboard keeps it (InputView), in the room it predicts for that screen
+        // (ImeRoom: the status bar, the input method's navigation bar, the background), or a landscape 很高 preview
+        // stands taller than it; the docked handle (始终显示悬浮条) counted there too, though not drawn here
         val handle = if (ThemeManager.prefs.alwaysShowHandle.getValue()) ctx.dp(FloatingHandle.HEIGHT_DP) else 0
-        val requested = KeyboardArea.sizes().heightPx(h, resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE)
-        return w to KeyboardHeightCap.keysHeight(requested, h, barHeight, keyboardBottomPaddingPx, handle)
+        val requested = KeyboardArea.requestedHeight(screen)
+        val room = KeyboardArea.predictedRoom(screen)
+        return w to KeyboardHeightCap.keysHeight(requested, room, barHeight, keyboardBottomPaddingPx, handle, density = screen.density)
     }
 
     // 紧凑 as the keys were last made (makeKeyboard): its text and marks are set as they are made.
@@ -191,10 +214,10 @@ class KeyboardPreviewUi(override val ctx: Context, val theme: Theme) : Ui {
         val look = ThemeManager.shownLook(theme)
         // as the input view draws it: the keys over the picture find it here (PictureHost)
         bkg.background = ThemePictureDrawable.board(look)
-        val landscape = ctx.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val landscape = KeyboardArea.displayScreen(ctx).landscape
         PictureHost.install(fakeInputView, look.picture?.let { PictureHost(look, bkg, landscape) })
         // the bar as the input view has it, the theme's `bar` (SceneBar)
-        fakeKawaiiBar.background = SceneBar.background(SceneBar.of(ctx, theme))
+        fakeKawaiiBar.background = SceneBar.background(SceneBar.of(displayCtx, theme))
         shownTheme = theme
         if (!switched) return makeKeyboard()
         // another theme's keyboard size where the settings follow it (KeyboardArea.sizes), measured first: a
@@ -202,6 +225,13 @@ class KeyboardPreviewUi(override val ctx: Context, val theme: Theme) : Ui {
         val compact = compactShown
         recalculateSize()
         if (compactShown == compact) makeKeyboard()
+    }
+
+    /** [layout] drawn where the keyboard's letters are, nothing set by it; null, the keyboard's again. */
+    fun showLayout(layout: SceneLayout?) {
+        if (layout === shownLayout) return
+        shownLayout = layout
+        makeKeyboard()
     }
 
     // what setTheme was last given: lateinit, as the init block above sets it
@@ -213,9 +243,8 @@ class KeyboardPreviewUi(override val ctx: Context, val theme: Theme) : Ui {
             fakeInputView.removeView(fakeKeyboardWindow)
         }
         compactShown = keyboardCompact()
-        fakeKeyboardWindow = TextKeyboard(ctx, shownTheme).also {
-            it.onAttach()
-        }
+        fakeKeyboardWindow = shownLayout?.let { LayoutBoards.view(displayCtx, shownTheme, it) }
+            ?: TextKeyboard(displayCtx, shownTheme).also { it.onAttach() }
         fakeInputView.apply {
             add(fakeKeyboardWindow, lParams(matchConstraints, keyboardHeight) {
                 below(fakeKawaiiBar)

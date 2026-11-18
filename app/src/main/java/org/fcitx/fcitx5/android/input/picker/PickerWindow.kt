@@ -24,6 +24,7 @@ import org.fcitx.fcitx5.android.input.dependency.inputMethodService
 import org.fcitx.fcitx5.android.input.dependency.theme
 import org.fcitx.fcitx5.android.input.keyboard.CommonKeyActionListener
 import org.fcitx.fcitx5.android.input.keyboard.KeyAction
+import org.fcitx.fcitx5.android.input.keyboard.PanelLayouts
 import org.fcitx.fcitx5.android.input.keyboard.KeyActionListener
 import org.fcitx.fcitx5.android.input.keyboard.KeyDef
 import org.fcitx.fcitx5.android.input.keyboard.KeyboardWindow
@@ -74,7 +75,10 @@ class PickerWindow(
 
     private var locked by AppPrefs.getInstance().internal.symbolPanelLocked
 
-    private val sidePanel by lazy { SymbolPanel(adapter.categories.size, FirstCategory) }
+    // the category picked last kept by its id, not its place or its label, which change between versions
+    private var pickedCategory by AppPrefs.getInstance().internal.symbolPanelCategory
+
+    private val sidePanel by lazy { SymbolPanel(adapter.categories.size, FirstCategory, categoryOf(adapter.categories, pickedCategory)) }
 
     private lateinit var pickerLayout: PickerLayout
 
@@ -244,7 +248,12 @@ class PickerWindow(
         }
     }
 
-    override fun onCreateView() = PickerLayout(context, theme, switchKey, density, panel, if (search) SearchKey else null).apply {
+    // the user's symbols board as its file is now (one stat), `id@stamp`; null, the app's (061-custom-layout §8): asked as the
+    // panel is made and each time it opens, so a choice changed or a file replaced is drawn the next time it is shown
+    private fun customBoard(): String? =
+        if (panel) AppPrefs.getInstance().keyboard.drawnPanelLayout(PanelLayouts.Panel.SYMBOLS)?.let { "${it.id}@${it.stamp}" } else null
+
+    override fun onCreateView() = PickerLayout(context, theme, switchKey, density, panel, if (search) SearchKey else null, customBoard()).apply {
         pickerLayout = this
         val bordered = followKeyBorder && ThemeManager.shownLook(theme).keys.blocks
         adapter = PickerGridAdapter(grid, keyActionListener, popupActionListener, data(), key.name, bordered, policy)
@@ -283,9 +292,15 @@ class PickerWindow(
         pickerLayout.grid.gridLayoutManager.scrollToPositionWithOffset(adapter.startOf(category), 0)
     }
 
-    /** The panel's [category], alone beside the side, from its top. */
+    /** The panel's [category] picked on the side. */
     private fun select(category: Int) {
         sidePanel.select(category)
+        adapter.categories[category].id.takeIf { it.isNotEmpty() }?.let { pickedCategory = it }
+        showOnly(category)
+    }
+
+    /** The panel's [category], alone beside the side, from its top. */
+    private fun showOnly(category: Int) {
         adapter.only = category
         adapter.rebuild()
         pickerLayout.side?.activate(category)
@@ -299,6 +314,8 @@ class PickerWindow(
     override val title: String get() = if (panel) context.getString(R.string.picker_title) else ""
 
     override fun onAttached() {
+        // first, so what follows is told to the board shown
+        pickerLayout.drawKeys(customBoard())
         // the punctuation as it is now: changed while another window was shown, not told here
         pickerLayout.embeddedKeyboard.onPunctuationUpdate(punctuation.mapping)
         adapter.habits = habits.getValue()
@@ -309,7 +326,7 @@ class PickerWindow(
         if (panel) {
             sidePanel.open(adapter.recentEmpty)
             updateRecentTab()
-            select(sidePanel.selected)
+            showOnly(sidePanel.selected)
             pickerLayout.embeddedKeyboard.showLocked(locked)
         } else {
             search(false)
@@ -341,6 +358,10 @@ class PickerWindow(
 
         /** The category a picker of [count] opens on: no emoji (the app without their data), the recently used, the only one there is. */
         internal fun firstShown(count: Int) = minOf(FirstCategory, count - 1)
+
+        /** Where the category of [id] is among [categories]; null for none (an id no longer listed, none kept). */
+        internal fun categoryOf(categories: List<PickerData.Category>, id: String): Int? =
+            categories.indexOfFirst { it.id.isNotEmpty() && it.id == id }.takeIf { it >= 0 }
 
         internal val SearchKey = KeyDef(
             KeyDef.Appearance.Image(

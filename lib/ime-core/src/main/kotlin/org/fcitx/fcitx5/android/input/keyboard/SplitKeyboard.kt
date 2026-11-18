@@ -5,23 +5,14 @@
 package org.fcitx.fcitx5.android.input.keyboard
 
 /**
- * The letters keyboard split in two for the thumbs, as Gboard splits it on a wide screen: when it
- * splits, and how wide its keys and the room between the halves are.
+ * The letters keyboard split in two for the thumbs, as Gboard splits it on a wide screen: how wide
+ * its keys and the room between the halves are. Whether it splits is the shape's 键盘样式 (KeyboardStyle).
  *
  * Widths are shares of the keyboard's width, as the app's key definitions have them: a letter is
  * 0.1 unsplit, and 0 is the key that fills what is left (the space, which spans the room between
  * the halves).
  */
 object SplitKeyboard {
-
-    /** The setting: split where the screen is wide, always, or never. */
-    enum class Mode { AUTO, ALWAYS, OFF }
-
-    /**
-     * Narrowest screen [Mode.AUTO] splits on, in dp, and only held sideways: a phone on its side
-     * (some 700 to 930 dp), a tablet's landscape; not a tablet upright, typed on as a phone is.
-     */
-    const val AUTO_MIN_WIDTH_DP = 600
 
     /** Keys a half has, each row: Gboard's five, G and V on both halves to make the rows so. */
     const val HALF_KEYS = 5
@@ -36,15 +27,9 @@ object SplitKeyboard {
     // a letter's width unsplit
     private const val LETTER = 0.1f
 
-    fun splits(mode: Mode, landscape: Boolean, widthDp: Int): Boolean = when (mode) {
-        Mode.ALWAYS -> true
-        Mode.OFF -> false
-        Mode.AUTO -> landscape && widthDp >= AUTO_MIN_WIDTH_DP
-    }
-
     /**
      * Where the boards other than the letters go while they are split: the number pad, the nine
-     * keys, handwriting, the symbols and emoji, the clipboard. Across the whole of a wide screen the
+     * keys, the symbols and emoji, the clipboard. Across the whole of a wide screen the
      * keys at its middle are out of either thumb's reach; one thumb's width at a side, as Gboard's
      * one-handed mode has its keyboard, they are under it.
      */
@@ -66,7 +51,7 @@ object SplitKeyboard {
      * The side the board shown goes to, as [dock] says, or null for the whole width: the letters
      * themselves ([lettersShown]) take it, split, as everything does when they are not ([splitting]),
      * and on a keyboard [widthDp] wide that a board at a side would all but fill (a phone upright
-     * split all the same, [Mode.ALWAYS]: 320 of 360 dp, a strip of nothing beside it).
+     * split all the same, 分体: 320 of 360 dp, a strip of nothing beside it).
      */
     fun side(dock: Dock, splitting: Boolean, lettersShown: Boolean, widthDp: Int): Dock? {
         if (!splitting || lettersShown || dock == Dock.FULL) return null

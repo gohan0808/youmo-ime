@@ -28,8 +28,11 @@ object KeyboardVariants {
      * [layout] shown for the input method [im] (its unique name, `engine-shuangpin#keys18`) under [scheme];
      * [nineLetters] the nine keys' letters as the keyboard has them (a user's t9_letters), else the language's.
      */
-    fun of(layout: Layout, im: String, scheme: ShuangpinScheme, nineLetters: Map<Char, String>? = null): KeyboardVariant =
-        of(DefaultMarks.variantOf(layout).form, im, scheme, nineLetters)
+    fun of(layout: Layout, im: String, scheme: ShuangpinScheme, nineLetters: Map<Char, String>? = null, shape: String = layout.id): KeyboardVariant =
+        // the 14 or 18 keys by [shape]: the app's and a theme pack's layouts (SceneLayouts) by their own ids, whatever
+        // based-on= a pack writes; a layout of the user's by its own family's board (SceneLayout.fallback: a grouped one
+        // on qwerty is k18's, R26 F8437), not its based-on=, whose styles and shortcuts it has
+        of(DefaultMarks.variantOf(layout, shape).form, im, scheme, nineLetters)
 
     /** A keyboard of [form] (its layout's family's) shown for [im]: [of]. */
     fun of(form: Form, im: String, scheme: ShuangpinScheme, nineLetters: Map<Char, String>? = null): KeyboardVariant {
@@ -43,5 +46,5 @@ object KeyboardVariants {
 
     /** Whether [im] on a keyboard of [form] is 双拼's: 注音's and 手写's keyboards are theirs whatever types. */
     fun isShuangpin(form: Form, im: String): Boolean =
-        form != Form.ZhuyinFull && form != Form.ZhuyinNine && form != Form.Handwriting && im.substringBefore('#') == InputMethodCatalog.SHUANGPIN
+        form != Form.ZhuyinFull && form != Form.ZhuyinNine && im.substringBefore('#') == InputMethodCatalog.SHUANGPIN
 }

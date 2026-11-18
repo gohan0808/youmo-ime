@@ -29,7 +29,7 @@ data class Env(
     val compact: Boolean = false,
     /** Floating: the keys' text scale there (FloatingKeyboard.textScale); null docked, or a settings preview. */
     val floating: Double? = null,
-    /** The letters split (SplitKeyboard.splits, never floating); the other boards then go to [dock]'s side. */
+    /** The letters split (键盘样式 分体, never floating); the other boards then go to [dock]'s side. */
     val split: Boolean = false,
     /** 单手: the side the board goes to ([SplitKeyboard.Dock.FULL]: off). */
     val oneHanded: SplitKeyboard.Dock = SplitKeyboard.Dock.FULL,
@@ -57,6 +57,12 @@ data class Env(
     val typed: Set<String>? = null,
     /** The app's 按键样式 over a 4.0 theme's own keys, key by key after its cascade; null: the theme's alone (a 3.0 look has them in it, the theme maker none). */
     val keyStyle: KeyStyleOver? = null,
+    /**
+     * A layout of the user's: the app's board it is `based-on` (061-custom-layout §10), which the theme's names of keys
+     * (`k18/r1c1`, every key of `k18`) and `@keyboard=k18` select too, as they do [board]. Null: none (the app's boards, a
+     * theme pack's).
+     */
+    val base: String? = null,
 ) {
     /** The keyboard's width in dp as Android's configuration has it (a whole number, rounded down). */
     val widthDp: Int get() = (width / density + DP_EPSILON).toInt()
@@ -88,6 +94,7 @@ data class Env(
                 input.field?.takeIf { it in Selector.FIELDS }?.let { add("field=$it") }
             }
             board?.let { add("keyboard=$it") }
+            base?.let { add("keyboard=$it") }
         }
 
     /** What a `when=` asks of, answered here. */
@@ -172,7 +179,7 @@ data class Texts(
     val returnIcon: String = "enter",
     /** The key a table's code is confirmed by, in Return's place (key_confirm: 确定, OK in English). */
     val confirm: String = "确定",
-    /** The symbol panel's way back to the keys (picker_back: 返回, Back in English). */
+    /** The way back of the number pad and the panels (picker_back: 返回, Back in English; 0.6.1, no longer ABC). */
     val back: String = "返回",
     val keepUppercase: Boolean = false,
     /** 拼音键字母大小写 as it holds for this input method (LetterCaseRule.forIme: English's always [LetterCase.Shift]). */

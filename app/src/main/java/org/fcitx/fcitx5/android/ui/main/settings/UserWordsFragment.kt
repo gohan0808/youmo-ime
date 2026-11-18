@@ -4,6 +4,7 @@
  */
 package org.fcitx.fcitx5.android.ui.main.settings
 
+import android.content.Context
 import android.net.Uri
 import android.os.Bundle
 import android.widget.CheckBox
@@ -16,17 +17,22 @@ import androidx.lifecycle.lifecycleScope
 import androidx.preference.Preference
 import androidx.preference.PreferenceCategory
 import androidx.preference.SwitchPreferenceCompat
+import java.util.Locale
 import kotlinx.coroutines.launch
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.daemon.launchOnReady
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
-import org.fcitx.fcitx5.android.engine.runtime.UserWord
 import org.fcitx.fcitx5.android.engine.learn.control.BackupOp
 import org.fcitx.fcitx5.android.engine.learn.control.LearningOp
 import org.fcitx.fcitx5.android.engine.learn.control.LearningResult
+import org.fcitx.fcitx5.android.engine.runtime.UserWord
+import org.fcitx.fcitx5.android.input.learning.clearAndTell
 import org.fcitx.fcitx5.android.ui.common.PaddingPreferenceFragment
 import org.fcitx.fcitx5.android.ui.common.withLoadingDialog
 import org.fcitx.fcitx5.android.ui.main.MainViewModel
+import org.fcitx.fcitx5.android.ui.main.settings.search.PageEntry
+import org.fcitx.fcitx5.android.ui.main.settings.search.SearchHighlight
+import org.fcitx.fcitx5.android.ui.main.settings.search.SearchablePage
 import org.fcitx.fcitx5.android.utils.addPreference
 import org.fcitx.fcitx5.android.utils.navigateWithAnim
 import org.fcitx.fcitx5.android.utils.toast
@@ -65,7 +71,14 @@ class UserWordsFragment : PaddingPreferenceFragment() {
 
     private lateinit var backups: SwitchPreferenceCompat
 
+    private val voiceAsk = AppPrefs.getInstance().internal.voiceAskRemember
+
+    private lateinit var voiceAsks: SwitchPreferenceCompat
+
     private lateinit var exportLauncher: ActivityResultLauncher<String>
+
+    // what is learned not reaching the disk now (LearnLog.saving): said at the top for as long as it lasts (decode-4)
+    private lateinit var notSaving: Preference
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -76,8 +89,16 @@ class UserWordsFragment : PaddingPreferenceFragment() {
         val ctx = requireContext()
         val screen = preferenceManager.createPreferenceScreen(ctx)
         preferenceScreen = screen
+        notSaving = Preference(ctx).apply {
+            isIconSpaceReserved = false
+            isSelectable = false
+            isVisible = false
+            setSummary(R.string.learning_not_saving)
+        }
+        screen.addPreference(notSaving)
         // not kept by this screen: the app's preference is, which ⋯ sets too
         habits = SwitchPreferenceCompat(ctx).apply {
+            key = HABITS_KEY
             isPersistent = false
             isIconSpaceReserved = false
             setTitle(R.string.learning_use_habits)
@@ -92,6 +113,7 @@ class UserWordsFragment : PaddingPreferenceFragment() {
         screen.addPreference(habits)
         // U-106, beside U-93 (review-DE-design D-S7): the engine told, which makes the backups
         backups = SwitchPreferenceCompat(ctx).apply {
+            key = AUTO_BACKUP_KEY
             isPersistent = false
             isIconSpaceReserved = false
             setTitle(R.string.learning_auto_backup)
@@ -104,9 +126,23 @@ class UserWordsFragment : PaddingPreferenceFragment() {
             }
         }
         screen.addPreference(backups)
+        // 语音先问再记 (Q4): read by the keyboard as a talk's text goes in, nothing to tell the engine
+        voiceAsks = SwitchPreferenceCompat(ctx).apply {
+            key = VOICE_ASK_KEY
+            isPersistent = false
+            isIconSpaceReserved = false
+            setTitle(R.string.learning_voice_ask)
+            setSummary(R.string.learning_voice_ask_summary)
+            setOnPreferenceChangeListener { _, value ->
+                voiceAsk.setValue(value as Boolean)
+                true
+            }
+        }
+        screen.addPreference(voiceAsks)
         val words = category(R.string.words_section_manage)
         fun addListed(what: LearningOp.Listed) {
             listed[what] = Preference(ctx).apply {
+                key = listedKey(what)
                 setTitle(LearnedItemsFragment.title(what))
                 isIconSpaceReserved = false
                 setOnPreferenceClickListener {
@@ -118,6 +154,7 @@ class UserWordsFragment : PaddingPreferenceFragment() {
         }
         for (kind in UserWord.Kind.entries) {
             lists[kind] = Preference(ctx).apply {
+                key = listKey(kind)
                 setTitle(title(kind))
                 isIconSpaceReserved = false
                 setOnPreferenceClickListener {
@@ -131,15 +168,15 @@ class UserWordsFragment : PaddingPreferenceFragment() {
         }
         addListed(LearningOp.Listed.PINS)
         // English's learned words, a page of their own: the one the English settings open
-        words.addPreference(R.string.english_words) {
+        words.addPreference(R.string.english_words, key = ENGLISH_KEY) {
             navigateWithAnim(SettingsRoute.UserWordList(UserWord.Kind.LEARNED.name, english = true))
         }
-        words.addPreference(R.string.learning_clear_learned, R.string.learning_clear_learned_summary) { confirmClear() }
+        words.addPreference(R.string.learning_clear_learned, R.string.learning_clear_learned_summary, key = CLEAR_KEY) { confirmClear() }
         val files = category(R.string.words_section_files)
-        files.addPreference(R.string.learning_backups, R.string.learning_backups_summary) {
+        files.addPreference(R.string.learning_backups, R.string.learning_backups_summary, key = BACKUPS_KEY) {
             navigateWithAnim(SettingsRoute.LearningBackups)
         }
-        files.addPreference(R.string.export_words, R.string.export_words_summary) {
+        files.addPreference(R.string.export_words, R.string.export_words_summary, key = EXPORT_KEY) {
             LearningBackupsFragment.askSaveCopy(ctx, R.string.export_words, "youmo-words", exportLauncher::launch)
         }
     }
@@ -155,6 +192,7 @@ class UserWordsFragment : PaddingPreferenceFragment() {
         // turned off or on in ⋯ meanwhile
         habits.isChecked = useHabits.getValue()
         backups.isChecked = autoBackup.getValue()
+        voiceAsks.isChecked = voiceAsk.getValue()
         // back from a list: counted again
         refreshCounts()
     }
@@ -164,6 +202,7 @@ class UserWordsFragment : PaddingPreferenceFragment() {
             val counts = viewModel.fcitx.runOnReady { userWordCounts() }
             lists.forEach { (kind, pref) -> pref.summary = count(counts[kind] ?: 0) }
             val overview = viewModel.fcitx.runOnReady { learning(LearningOp.Overview) } as? LearningResult.Overview ?: return@launch
+            notSaving.isVisible = !overview.saving
             listed[LearningOp.Listed.PINS]?.summary = count(overview.pinned)
             listed[LearningOp.Listed.NO_PREDICT]?.summary = count(overview.noPredict)
         }
@@ -206,10 +245,9 @@ class UserWordsFragment : PaddingPreferenceFragment() {
     private fun clear(all: Boolean) {
         val ctx = requireContext()
         lifecycleScope.withLoadingDialog(ctx) {
-            val cleared = viewModel.fcitx.runOnReady { learning(LearningOp.ClearLearned(all)) }
             // works locked too (the record in memory then): what fails is the disk (review-E-ui S6)
-            // not on disk (locked since boot) is not now, as ⋯'s 清掉最近 says it (StatusAreaWindow)
-            ctx.toast(clearedMessage(cleared))
+            // not on disk (locked since boot) is not now, as ⋯'s 清掉最近 says it (PanelActions)
+            ctx.toast(viewModel.fcitx.runOnReady { clearAndTell(LearningOp.ClearLearned(all)) })
             refreshCounts()
         }
     }
@@ -219,11 +257,40 @@ class UserWordsFragment : PaddingPreferenceFragment() {
     // all of it, as a backup (WD-10): a word list would carry neither the imports nor the order learned
     private fun export(uri: Uri) = restore.saveCopy(uri, R.string.export_words_done)
 
-    companion object {
+    companion object : SearchablePage {
         fun title(kind: UserWord.Kind) = when (kind) {
             UserWord.Kind.ADDED -> R.string.my_words_added
             UserWord.Kind.LEARNED -> R.string.my_words_learned
             UserWord.Kind.BLOCKED -> R.string.my_words_blocked
+        }
+
+        // the rows' ids: where the settings search points
+        const val HABITS_KEY = "learning_use_habits"
+        private const val AUTO_BACKUP_KEY = "learning_auto_backup"
+        private const val VOICE_ASK_KEY = "learning_voice_ask"
+        private const val ENGLISH_KEY = "english_words"
+        private const val CLEAR_KEY = "learning_clear_learned"
+        private const val BACKUPS_KEY = "learning_backups"
+        private const val EXPORT_KEY = "export_words"
+
+        private fun listKey(kind: UserWord.Kind) = "user_words_${kind.name.lowercase(Locale.ROOT)}"
+        private fun listedKey(what: LearningOp.Listed) = "learned_${what.name.lowercase(Locale.ROOT)}"
+
+        override fun searchEntries(context: Context): List<PageEntry> {
+            fun row(@StringRes title: Int, key: String, @StringRes summary: Int = 0) =
+                PageEntry(context.getString(title), SearchHighlight.PREF + key, summary = if (summary == 0) "" else context.getString(summary))
+            return listOf(
+                row(R.string.learning_use_habits, HABITS_KEY, R.string.learning_use_habits_summary),
+                row(R.string.learning_auto_backup, AUTO_BACKUP_KEY, R.string.learning_auto_backup_summary),
+                row(R.string.learning_voice_ask, VOICE_ASK_KEY, R.string.learning_voice_ask_summary),
+            ) + UserWord.Kind.entries.map { row(title(it), listKey(it)) } +
+                listOf(LearningOp.Listed.NO_PREDICT, LearningOp.Listed.PINS).map { row(LearnedItemsFragment.title(it), listedKey(it)) } +
+                listOf(
+                    row(R.string.english_words, ENGLISH_KEY),
+                    row(R.string.learning_clear_learned, CLEAR_KEY, R.string.learning_clear_learned_summary),
+                    row(R.string.learning_backups, BACKUPS_KEY, R.string.learning_backups_summary),
+                    row(R.string.export_words, EXPORT_KEY, R.string.export_words_summary),
+                )
         }
     }
 }
@@ -236,11 +303,3 @@ internal fun blockedThatReturn(counts: Map<UserWord.Kind, Int>, tableBlocks: Lea
 @StringRes
 internal fun clearMessage(all: Boolean): Int =
     if (all) R.string.learning_clear_all_message else R.string.learning_clear_learned_message
-
-/** What 清掉学到的 tells: works locked too (the record in memory then), what fails is the disk; anything else is not now. */
-@StringRes
-internal fun clearedMessage(cleared: LearningResult?): Int = when (cleared) {
-    is LearningResult.Cleared -> R.string.learning_cleared
-    LearningResult.Failed -> R.string.learning_clear_failed
-    else -> R.string.learning_not_now
-}

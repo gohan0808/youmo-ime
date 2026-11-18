@@ -22,6 +22,7 @@ import org.fcitx.fcitx5.android.scene.layout.Key
 import org.fcitx.fcitx5.android.scene.layout.Layout
 import org.fcitx.fcitx5.android.scene.layout.Row
 import org.fcitx.fcitx5.android.scene.keys.SlotDefaults
+import java.util.Calendar
 
 /**
  * What the 26 keys (TextKeyboard) show as the input is, as values: what qwerty.xml's `when=` asks of
@@ -45,6 +46,8 @@ data class TextBoardState(
     val holdVoice: Boolean = false,
     /** A table's roots or their names over the letters (TableKeyboard.labelled): `{root:x}` on them. */
     val roots: Boolean = false,
+    /** Pinyin or 双拼 typed (ShiftSeparator.on): 分词 in Shift's place. */
+    val separating: Boolean = false,
 ) {
     fun input(): Input = Input(
         ime = when {
@@ -68,9 +71,10 @@ data class TextBoardState(
         voice = holdVoice,
         holdVoice = holdVoice,
         langKey = langKey,
-        // qwerty.xml asks it only of a table (确定 in Return's place): elsewhere the first key typed and
-        // the word committed would each give a new environment, so a scene made again the same as before
-        composing = composing && table,
+        // qwerty.xml asks it of a table (确定 in Return's place) and of pinyin's and 双拼's (分词 in Shift's): elsewhere
+        // (English's word) the first key typed and the word committed would each give a new environment, so a
+        // scene made again the same as before
+        composing = composing && table || separating,
         lookingUp = lookingUp,
     )
 }
@@ -109,16 +113,20 @@ object SceneMarks {
         charShortcuts: Boolean,
         names: Collection<String>,
         firsts: Map<String, String?> = emptyMap(),
+        now: () -> Calendar = Calendar::getInstance,
     ): MarkSettings {
         val marks = HashMap<String, MarkContent>()
         val user = HashSet<String>()
+        // one time for every mark of the board, read at the first that has variables (none: never), so two keys'
+        // `$minute` never show two minutes (R26 F8457)
+        val at by lazy(now)
         // the names as a layout reads them, one a key (`full/q`, `fn/space`): a slot stored by the same
         for (name in names) {
             for (up in listOf(true, false)) {
                 if (slots.isSet(name, up)) user += "$name:${if (up) "up" else "down"}"
                 marks["$name:${if (up) "up" else "down"}"] = when (val slot = slots.resolve(name, up)) {
                     SwipeSlot.First -> firsts[name]?.let(::symbol) ?: MarkContent.Empty
-                    else -> content(slot.shortcut) ?: MarkContent.Empty
+                    else -> content(slot.shortcut) { at } ?: MarkContent.Empty
                 }
             }
         }
@@ -144,10 +152,14 @@ object SceneMarks {
     /** A long press's first as its corner draws it: as a swipe's text is (KeyMarkText, two characters as seen and 「…」), one rule for both; typed and said whole. */
     fun symbol(first: String): MarkContent = MarkContent.Symbol(KeyMarkText.of(first))
 
-    fun content(s: KeyShortcut): MarkContent? = when (s) {
+    /**
+     * [s] as its mark draws it, a text of variables filled in at [now] (none where that is nothing). [now] asked of a
+     * text of variables alone: a keyboard's marks are made at each state, some 30-70 slots, few of them such (R26 F8250).
+     */
+    fun content(s: KeyShortcut, now: () -> Calendar): MarkContent? = when (s) {
         is KeyShortcut.Command -> MarkContent.Icon(icon(s.command))
         // at most two characters as seen, the rest an ellipsis (要做 1): the bubble shows it whole
-        is KeyShortcut.Text -> MarkContent.Text(KeyMarkText.of(s.text), KeyMarkText.shorter(s.text))
+        is KeyShortcut.Text -> (if (s.variables) s.typed(now()) else s.text).takeIf { it.isNotEmpty() }?.let { MarkContent.Text(KeyMarkText.of(it), KeyMarkText.shorter(it)) }
         KeyShortcut.None -> null
     }
 

@@ -18,10 +18,20 @@ import kotlinx.coroutines.withTimeout
 import org.fcitx.fcitx5.android.core.EngineBridge
 import org.fcitx.fcitx5.android.core.EngineState
 import org.fcitx.fcitx5.android.core.HostInstance
+import org.fcitx.fcitx5.android.core.KeyStates
+import org.fcitx.fcitx5.android.core.KeySym
 import org.fcitx.fcitx5.android.core.KotlinHost
+import org.fcitx.fcitx5.android.core.UNICODE
+import org.fcitx.fcitx5.android.data.pack.AppData
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog
+import org.fcitx.fcitx5.android.engine.data.PinyinData
 import org.fcitx.fcitx5.android.engine.learn.LearnLog
+import org.fcitx.fcitx5.android.engine.pinyin.Touch
+import org.fcitx.fcitx5.android.engine.platform.jvm.JvmFiles
+import org.fcitx.fcitx5.android.engine.runtime.Keyboard
 import org.fcitx.fcitx5.android.engine.store.RecordFormat
+import org.fcitx.fcitx5.android.engine.user.HistoryLines
+import org.fcitx.fcitx5.android.engine.user.UserModel
 import org.fcitx.fcitx5.android.host.HostEvent
 import org.junit.Assert.assertEquals
 import org.junit.Assume.assumeTrue
@@ -41,10 +51,29 @@ import java.io.File
  * words of its own (`userWordCounts`: added, made while typing or blocked) or where its logs hold
  * anything learned, the counts typing adds to the dictionary's own words among it (`learnedLogs`),
  * unless `-e evalLearned true` asks to score on them.
+ *
+ * `-e evalHistory <name>` types on a history instead: <name>.txt in the app's eval dir (run-on-device.sh's
+ * HISTORY pushes it there) or else in the test assets, words typed before the run as `ime-eval pinyin --history`
+ * reads them (HistoryLines), each counted once as typed; for timing what hangs on typed words (双拼's keys read
+ * alone, 简拼 in the middle, HabitOrder) on a phone. It replaces the app's learning record with them before the
+ * engine starts, so a learning record is no reason to stop then; words of the app's own or other logs still are,
+ * unless `evalLearned`: the history does not replace them (R27 F8531).
  */
 class EngineEvalRunner {
 
     private var unrefined = 0
+
+    // -e evalNine true: digits as pinyin's nine keys send them, codes of their own (Keyboard.pinyinNineKey); for
+    // English as its nine keys do (Keyboard.nineKey)
+    private var nine = false
+
+    private var english = false
+
+    // -e evalGrouped: a set's codes as a grouped keyboard sends them (GroupedKeyboard's wire, T9Keyboard's, ZhuyinKeyboard's):
+    // 14 pinyin's 14 keys (the group's code itself), 18 its 18 keys (codes of their own, Keyboard.pinyin18Key); sp18 and
+    // sp9 双拼's 18 and nine keys (the code itself), sp14 its 14 keys (Keyboard.shuangpin14Key); zy9 注音九键 and zy
+    // 大千 (their keys' codes, read back by Keyboard.keyedChar as the set's)
+    private var grouped: String? = null
 
     @Test
     fun run() {
@@ -52,18 +81,32 @@ class EngineEvalRunner {
         val set = args.getString("evalSet")
         assumeTrue("pass -e evalSet <name> to run", set != null)
         checkThisInputMethodIsNotBound()
+        val history = args.getString("evalHistory")
         val ime = args.getString("evalIme") ?: InputMethodCatalog.PINYIN
+        nine = args.getString("evalNine") == "true"
+        english = ime == InputMethodCatalog.ENGLISH
+        grouped = args.getString("evalGrouped")?.also { require(it in GROUPED) { "evalGrouped $it: one of $GROUPED" } }
+        // the two would measure the nine keys alone, the output named as if grouped were too
+        require(!(nine && grouped != null)) { "evalNine and evalGrouped: one at a time" }
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val testContext = InstrumentationRegistry.getInstrumentation().context
         val samples = testContext.assets.open("$set.tsv").bufferedReader().useLines { lines ->
             lines.filter { it.isNotBlank() && !it.startsWith("#") }.map { line ->
-                // input<TAB>expected<TAB>tag[<TAB>context], as EvalSet reads it
+                // input<TAB>expected<TAB>tag[<TAB>context[<TAB>touches[<TAB>places]]], as EvalSet reads it: each key's
+                // touch a space apart, `-` none (pinyin --touch … --touched writes them; 061-neighbour-correction),
+                // each key's place across it as the 14 and 18 keys send it, `-` none (061-neighbour-18key)
                 val fields = line.split('\t')
-                Sample(fields[0], fields.getOrElse(3) { "" })
+                val places = fields.getOrNull(5)?.split(' ')?.map { it.toFloatOrNull() ?: Float.NaN }
+                Sample(fields[0], fields.getOrElse(3) { "" }, fields.getOrNull(4)?.split(' ')?.map(Touch::parse), places)
             }.toList()
         }
         val dir = checkNotNull(context.getExternalFilesDir("eval")) { "external storage unavailable" }
         val out = File(dir, "$set-$ime.tsv")
+        history?.let { name ->
+            val lines = historyLines(dir, testContext, name)
+            val counted = writeHistory(File(context.filesDir, ENGINE_USER_DIR), lines)
+            android.util.Log.i("EngineEvalRunner", "history $name: $counted words of ${lines.count { it.isNotBlank() }} lines")
+        }
         val fcitx: HostInstance = KotlinHost(context)
         val scope = MainScope()
         try {
@@ -79,7 +122,8 @@ class EngineEvalRunner {
                 // scores of an app that learned are not comparable: see the class's KDoc
                 val ownWords = fcitx.userWordCounts().filterValues { it > 0 }
                 // read after userWordCounts, which opens pinyin's log and fills a new one from libime's
-                val logs = learnedLogs(File(context.filesDir, ENGINE_USER_DIR))
+                // the history's own record is the one learning there may be
+                val logs = learnedLogs(File(context.filesDir, ENGINE_USER_DIR)).filter { history == null || it.name != LearnLog.FILE }
                 val learned = ownWords.isNotEmpty() || logs.isNotEmpty()
                 check(!learned || args.getString("evalLearned") == "true") {
                     "the app has learned (words $ownWords, logs ${logs.map { it.name }}): clear its data (adb shell pm clear), " +
@@ -136,9 +180,15 @@ class EngineEvalRunner {
         // after the reset, as the service tells it
         if (sample.context.isNotEmpty()) fcitx.engineContext(sample.context)
         fcitx.isEmpty()
-        val latencies = sample.input.map { c ->
+        val latencies = sample.input.mapIndexed { i, c ->
             val start = SystemClock.elapsedRealtimeNanos()
-            fcitx.sendKey(c)
+            val touch = sample.touches?.getOrNull(i)
+            when {
+                nine -> fcitx.sendKey(KeySym(UNICODE + if (english) Keyboard.nineKey(c, upper = false) else Keyboard.pinyinNineKey(c)), KeyStates.Virtual, touch = touch)
+                grouped != null -> fcitx.sendKey(KeySym(UNICODE + wired(grouped!!, c, sample.places?.getOrNull(i) ?: Float.NaN)), KeyStates.Virtual, touch = touch)
+                touch != null -> fcitx.sendKey(c.toString(), touch = touch)
+                else -> fcitx.sendKey(c)
+            }
             val micros = (SystemClock.elapsedRealtimeNanos() - start) / 1000
             fcitx.isEmpty()
             micros
@@ -159,6 +209,32 @@ class EngineEvalRunner {
         return fcitx.getCandidates(0, CANDIDATES).map { it.text }
     }
 
+    // the history [name]: pushed to the eval dir [dir] by run-on-device.sh's HISTORY, or a test asset
+    private fun historyLines(dir: File, testContext: android.content.Context, name: String): List<String> {
+        val pushed = File(dir, "$name.txt")
+        if (pushed.isFile) return pushed.readLines()
+        val asset = runCatching { testContext.assets.open("$name.txt") }.getOrNull()
+        return requireNotNull(asset) { "evalHistory $name: no $name.txt in ${dir.path} nor in lib/ime-eval/data (run-on-device.sh HISTORY=<file.txt> pushes one)" }
+            .bufferedReader().use { it.readLines() }
+    }
+
+    /**
+     * Replaces the learning record in [dir] with [lines], a history counted as `ime-eval --history` counts it
+     * (HistoryLines, shared: the timings compare only so): each word committed whole once, today.
+     * @return how many were counted
+     */
+    private fun writeHistory(dir: File, lines: List<String>): Int {
+        val data = PinyinData.load(AppData.map(InputMethodCatalog.PINYIN_DATA), verify = false)
+        val rows = HistoryLines.rows(UserModel(data.dictionary, data.vocabulary, index = data.wordIndex), data, lines)
+        dir.mkdirs()
+        File(dir, LearnLog.FILE).delete()
+        LearnLog(JvmFiles(dir).file(LearnLog.FILE)).use { log ->
+            log.open()
+            rows.forEach { log.record(listOf(it)) }
+        }
+        return rows.size
+    }
+
     /** Same layout and cleaning as `RunResultFormat` in :lib:ime-eval, which this APK cannot depend on. */
     private fun tsvLine(input: String, latencies: List<Long>, candidates: List<String>) =
         (listOf(input, latencies.joinToString(",")) + candidates.map { it.replace(SEPARATORS, " ") })
@@ -177,8 +253,19 @@ class EngineEvalRunner {
         }
     }.toList()
 
+    // what the grouped keyboard [board] sends for the code [c] the engine reads, tapped [at] across its key (NaN: no
+    // place), as GroupedKeyboard.tapped sends the 14 and 18 keys'
+    private fun wired(board: String, c: Char, at: Float): Int = when (board) {
+        "18" -> if (at.isNaN()) Keyboard.pinyin18Key(c) else Keyboard.pinyin18Tap(c, at)
+        "14" -> if (at.isNaN()) c.code else Keyboard.tapKey(c, at)
+        "sp14" -> Keyboard.shuangpin14Key(c)
+        "zy9" -> Keyboard.ZHUYIN_NINE.first { Keyboard.keyedChar(it) == c }
+        "zy" -> Keyboard.ZHUYIN_FULL.first { Keyboard.keyedChar(it) == c }
+        else -> c.code
+    }
+
     /** A line of an evaluation set as it is typed: [input] after [context], the text before the cursor ("" for none). */
-    private data class Sample(val input: String, val context: String)
+    private data class Sample(val input: String, val context: String, val touches: List<Touch?>? = null, val places: List<Float>? = null)
 
     private companion object {
         const val UID = 0
@@ -196,5 +283,8 @@ class EngineEvalRunner {
         /** As Engines names the logs: pinyin.user, english.user, wubi.user. */
         const val LOG_SUFFIX = ".user"
         val SEPARATORS = Regex("[\t\r\n]")
+
+        // -e evalGrouped's keyboards
+        val GROUPED = setOf("14", "18", "sp18", "sp14", "sp9", "zy9", "zy")
     }
 }

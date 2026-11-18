@@ -8,6 +8,7 @@ import android.graphics.Rect
 import android.view.MotionEvent
 import android.view.ViewGroup
 import org.fcitx.fcitx5.android.input.keyboard.CustomGestureView.Event
+import org.fcitx.fcitx5.android.input.keyboard.canvas.KeyboardCanvasView
 import org.fcitx.fcitx5.android.input.scene.KeyRef
 
 /**
@@ -23,6 +24,9 @@ interface KeyHandle : KeyGesture.Key {
      * Null for a scene's key the scene drawn last has not: no popup over it.
      */
     val bounds: Rect?
+
+    /** Where its bubble goes over it, as [bounds]: a key across rows' its first row's, the bubble over its top, not its foot. */
+    val previewBounds: Rect? get() = bounds
 
     /** Its touch: the gesture's settings and where the finger is. */
     val keyGesture: KeyGesture
@@ -42,6 +46,14 @@ interface KeyHandle : KeyGesture.Key {
 fun interface KeyPlace {
     /** Its touch area in [keyboard]'s pixels, into [out]; empty where it is nowhere now. */
     fun place(keyboard: ViewGroup, out: Rect)
+}
+
+/** Where [canvas]'s scene drawn last has the key [ref], in the keyboard's pixels (nowhere before it is drawn); the key told by [ref]. */
+class ScenePlace internal constructor(val ref: KeyRef, private val canvas: () -> KeyboardCanvasView?) : KeyPlace {
+    override fun place(keyboard: ViewGroup, out: Rect) {
+        val c = canvas()
+        if (c != null && c.cell(ref, out)) out.offset(c.left, c.top) else out.setEmpty()
+    }
 }
 
 /** A finger's key, for the rest of its touch (BaseKeyboard's routing): a key the scene draws. */

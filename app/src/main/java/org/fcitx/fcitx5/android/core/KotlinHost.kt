@@ -17,10 +17,10 @@ import org.fcitx.fcitx5.android.BuildConfig
 import org.fcitx.fcitx5.android.FcitxApplication
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.data.clipboard.ClipboardManager
+import org.fcitx.fcitx5.android.data.layout.ThemeLayoutsToList
 import org.fcitx.fcitx5.android.data.pack.PackStore
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
 import org.fcitx.fcitx5.android.data.prefs.PinyinKeyboard
-import org.fcitx.fcitx5.android.data.punctuation.PunctuationMapEntry
 import org.fcitx.fcitx5.android.data.punctuation.PunctuationMaps
 import org.fcitx.fcitx5.android.data.punctuation.PunctuationStartKeys
 import org.fcitx.fcitx5.android.data.quickphrase.QuickPhraseManager
@@ -29,7 +29,10 @@ import org.fcitx.fcitx5.android.engine.glide.Glide
 import org.fcitx.fcitx5.android.engine.handwriting.InkReading
 import org.fcitx.fcitx5.android.engine.learn.control.LearningOp
 import org.fcitx.fcitx5.android.engine.pinyin.NineKeyLetters
+import org.fcitx.fcitx5.android.engine.pinyin.Touch
+import org.fcitx.fcitx5.android.engine.reading.CardReading
 import org.fcitx.fcitx5.android.engine.runtime.Keyboard
+import org.fcitx.fcitx5.android.engine.runtime.OwnKeysTurn
 import org.fcitx.fcitx5.android.engine.runtime.UserWord
 import org.fcitx.fcitx5.android.engine.session.Action
 import org.fcitx.fcitx5.android.host.ChineseConverter
@@ -40,6 +43,7 @@ import org.fcitx.fcitx5.android.host.ConfigWriter
 import org.fcitx.fcitx5.android.host.EngineHost
 import org.fcitx.fcitx5.android.host.EngineOptions
 import org.fcitx.fcitx5.android.host.FilePkgDataDir
+import org.fcitx.fcitx5.android.host.HandwritingRetire
 import org.fcitx.fcitx5.android.host.HostCore
 import org.fcitx.fcitx5.android.host.HostEvent
 import org.fcitx.fcitx5.android.host.HostEvents
@@ -60,6 +64,7 @@ import org.fcitx.fcitx5.android.host.QuickPhraseBook
 import org.fcitx.fcitx5.android.host.QuickPhraseEntry
 import org.fcitx.fcitx5.android.host.QuickPhraseHooks
 import org.fcitx.fcitx5.android.host.StatusEntry
+import org.fcitx.fcitx5.android.input.voice.VoiceEdits
 import org.fcitx.fcitx5.android.input.voice.VoiceHomophones
 import org.fcitx.fcitx5.android.pack.PackKind
 import org.fcitx.fcitx5.android.utils.AppUtil
@@ -239,14 +244,26 @@ class KotlinHost(
     override suspend fun sameCodes(texts: List<String>, ims: List<String>) = withContext(dispatcher) { bridge.engines.sameCodes(texts, ims) }
     override suspend fun pinyinOf(text: String) = withContext(dispatcher) { bridge.engines.pinyinOf(text) }
     override suspend fun pinyinsOf(texts: List<String>) = withContext(dispatcher) { bridge.engines.pinyinsOf(texts) }
-    override suspend fun charCard(index: Int, text: String, paged: Boolean) = onHost { inputMethodEntryCached.uniqueName.takeIf(EngineBridge::isEngines)?.let { bridge.engines.charCard(it, index, text, paged) } }
+    // 繁體: the candidate as shown, converted; the engine checks it against its own so (as learning's menu)
+    override suspend fun candidateCard(index: Int, text: String, paged: Boolean) =
+        onHost { inputMethodEntryCached.uniqueName.takeIf(EngineBridge::isEngines)?.let { bridge.engines.card(it, index, text, paged, ::shownText) } }
+
+    override suspend fun charCardOf(char: String, reading: CardReading?) = onHost { bridge.engines.charCardOf(char, reading) }
     override suspend fun wordBoundaries(texts: List<String>) = withContext(dispatcher) {
         aTextAtATime(texts) { bridge.engines.wordBoundaries(it) }
     }
     override suspend fun logProbs(texts: List<String>) = withContext(dispatcher) { bridge.engines.logProbs(texts) }
     override suspend fun voiceHomophones(words: List<UserWord>) = withContext(dispatcher) { bridge.engines.voiceHomophones(words) }
     override suspend fun voiceHomophonesAllowed(spans: List<VoiceHomophones.Span>) = withContext(dispatcher) { bridge.engines.voiceHomophonesAllowed(spans) }
+    override suspend fun rareHeld(texts: Collection<String>) = withContext(dispatcher) { bridge.engines.rareHeld(texts) }
+    override suspend fun rareGrid() = withContext(dispatcher) { bridge.engines.rareGrid() }
     override suspend fun addUserWord(text: String, pinyin: String) = withContext(dispatcher) { bridge.engines.addWord(text, pinyin) }
+    override suspend fun voiceSaid(text: String, before: String?, hinted: Boolean) = withContext(dispatcher) { bridge.engines.voiceSaid(text, before, hinted) }
+    override suspend fun voicePutIn(text: String) = withContext(dispatcher) { bridge.engines.voicePutIn(text) }
+    override suspend fun voiceConfirm(before: String?, after: String?) = withContext(dispatcher) { bridge.engines.voiceConfirm(before, after) }
+    override suspend fun voiceEditsEnd() = withContext(dispatcher) { bridge.engines.voiceEditsEnd() }
+    override suspend fun voiceRemember(ask: VoiceEdits.Ask) = withContext(dispatcher) { bridge.engines.voiceRemember(ask) }
+    override suspend fun voiceForget(word: String) = withContext(dispatcher) { bridge.engines.voiceForget(word) }
     override suspend fun blockUserWord(text: String, pinyin: String) = withContext(dispatcher) { bridge.engines.blockWord(text, pinyin) }
     override suspend fun removeUserWords(words: List<UserWord>) = withContext(dispatcher) { bridge.engines.removeWords(words) }
     override suspend fun englishWords() = withContext(dispatcher) { bridge.engines.englishWords() }
@@ -254,7 +271,6 @@ class KotlinHost(
     override suspend fun forgetEnglishWords(texts: List<String>) = withContext(dispatcher) { bridge.engines.forgetEnglishWords(texts) }
     override suspend fun importUserWords(lines: Sequence<String>, fileName: String) = withContext(dispatcher) { bridge.engines.importWords(lines, fileName) }
     override suspend fun importBatches() = withContext(dispatcher) { bridge.engines.importBatches() }
-    override suspend fun importedWords(batch: Int?) = withContext(dispatcher) { bridge.engines.importedWords(batch) }
     override suspend fun dropImport(batch: Int) = withContext(dispatcher) { bridge.engines.dropImport(batch) }
     override suspend fun restoreImport(batch: Int) = withContext(dispatcher) { bridge.engines.restoreImport(batch) }
     override suspend fun tableKeys(im: String) = withContext(dispatcher) { bridge.tableKeys(im) }
@@ -277,14 +293,13 @@ class KotlinHost(
         }
     }
 
-    override suspend fun offerInk(reading: InkReading, piece: Int, onKeys: Boolean, takesBack: Boolean) =
-        onHost { inkKey(Action.Ink(piece, reading, takesBack = onKeys && takesBack), onKeys) }
+    override suspend fun offerInk(reading: InkReading, piece: Int) = onHost { inkKey(Action.Ink(piece, reading)) }
 
-    override suspend fun inkFinished(piece: Int, onKeys: Boolean) = onHost { inkKey(Action.Ink(piece), onKeys) }
+    override suspend fun inkFinished(piece: Int) = onHost { inkKey(Action.Ink(piece)) }
 
-    // the Ink key carries what the pad told: it cannot come apart from it
-    private fun HostCore.inkKey(piece: Action.Ink, onKeys: Boolean) =
-        bridge.sendInk(piece, inputMethodEntryCached.uniqueName, onKeys) { sendVirtual(Keyboard.INK, piece) }
+    // the Ink key carries what the keys' ink told: it cannot come apart from it
+    private fun HostCore.inkKey(piece: Action.Ink) =
+        bridge.sendInk(piece, inputMethodEntryCached.uniqueName) { sendVirtual(Keyboard.INK, piece) }
 
     override suspend fun learning(op: LearningOp) = onHost {
         // 繁體: the menu names the candidate as shown, converted; the engine has it simplified. Each
@@ -306,8 +321,8 @@ class KotlinHost(
 
     // ---- keys and the panel
 
-    override suspend fun sendKey(key: String, states: UInt, code: Int, up: Boolean, timestamp: Int) =
-        onHost { key(KeySyms.fromString(key), states.toInt(), up, timestamp) }
+    override suspend fun sendKey(key: String, states: UInt, code: Int, up: Boolean, timestamp: Int, touch: Touch?) =
+        onHost { key(KeySyms.fromString(key), states.toInt(), up, timestamp, touch) }
 
     // a UTF-16 unit, as native-lib read it: a lone surrogate is no key
     override suspend fun sendKey(c: Char, states: UInt, code: Int, up: Boolean, timestamp: Int) =
@@ -316,23 +331,31 @@ class KotlinHost(
     override suspend fun sendKey(sym: Int, states: UInt, code: Int, up: Boolean, timestamp: Int) =
         onHost { key(sym, states.toInt(), up, timestamp) }
 
-    override suspend fun sendKey(sym: KeySym, states: KeyStates, code: Int, up: Boolean, timestamp: Int) =
-        onHost { key(sym.sym, states.toInt(), up, timestamp) }
+    override suspend fun sendKey(sym: KeySym, states: KeyStates, code: Int, up: Boolean, timestamp: Int, touch: Touch?) =
+        onHost { key(sym.sym, states.toInt(), up, timestamp, touch) }
 
-    // the frontend's keyEvent: virtual is the state's bit, as fcitx's KeyEvent::isVirtual reads it
-    private fun HostCore.key(sym: Int, states: Int, up: Boolean, timestamp: Int) {
-        // a layout's own keyboard's groups as it last told them, before its key reaches a temporary mode or the engine
-        // other groups while a code is typed on the ones before (060-render-p3 T10): the code committed as
-        // Return commits it, not lost with the session made anew; the field's composing text is left alone
+    // the frontend's keyEvent: virtual is the state's bit, as fcitx's KeyEvent::isVirtual reads it; a
+    // tap's [touch] goes with it as the key's payload, the engine's Keyboard reads it there
+    private fun HostCore.key(sym: Int, states: Int, up: Boolean, timestamp: Int, touch: Touch? = null) {
+        // a layout's own keyboard's groups as it last told them, before its key reaches a temporary mode or the engine.
+        // Other groups than the ones typed on (060-render-p3 T10, 061-custom-layout L4): their first code commits the
+        // code as Return commits it, not lost with the session made anew, the field's composing text left alone; a key
+        // before it (Backspace, space, a syllable) is still the groups' before, as KeyboardPair turns between keyboards
         val own = EngineState.ownKeys
-        if (bridge.replaces(own)) commitCode()
-        bridge.syncOwnKeys(own)
-        sendKey(Key(sym, states), release = up, virtual = states and HostKeyStates.VIRTUAL != 0, timestamp = timestamp)
+        val unicode = KeySyms.toUnicode(sym)
+        val turn = bridge.turnAt(own, unicode)
+        if (turn == OwnKeysTurn.Step.COMMIT_AND_TURN) commitCode()
+        if (turn != OwnKeysTurn.Step.WAIT) bridge.syncOwnKeys(own)
+        // the tap's place is all this payload carries to the engine (Keyboard.char reads only .touch): its char is no key's
+        // for a code past the BMP (a group's tap code, Keyboard.TAPS_18, PLACES) or a sym of none (0)
+        val payload = touch?.takeUnless { up }?.let { Action.Key(unicode.toChar(), touch = it) }
+        sendKey(Key(sym, states), release = up, virtual = states and HostKeyStates.VIRTUAL != 0, timestamp = timestamp, payload = payload)
     }
 
     override suspend fun select(idx: Int, text: String?): Boolean = onHost { select(idx, text) }
     override suspend fun isEmpty(): Boolean = onHost { isEmpty() }
-    override suspend fun reset() = onHost { reset() }
+    override suspend fun reset(drop: Boolean) = onHost { reset(drop) }
+    override suspend fun dropPredictions() = onHost { dropPredictions() }
     override suspend fun clearTyped(keyboard: (im: String) -> Any?) = onHost { clearTyped(keyboard) }
     override suspend fun retype(typing: HostCore.Retyping, keyboard: Any?) = onHost { retype(typing, keyboard) }
     override suspend fun moveCursor(position: Int) = onHost { moveCursor(position) }
@@ -362,19 +385,6 @@ class KotlinHost(
 
     override suspend fun punctuationMap(lang: String) = withContext(dispatcher) {
         if (lang != ZH_CN) emptyList() else punctuationMaps.load(ZH_CN)
-    }
-
-    override suspend fun setPunctuationMap(lang: String, entries: List<PunctuationMapEntry>) = onHost {
-        if (lang != ZH_CN) return@onHost
-        // the edit page's table (PunctuationProfile::set) saved whole, then used
-        val profile = PunctuationProfile.fromEntries(entries.map { PunctuationEntry(it.key, it.mapping, it.altMapping) })
-        // a save refused (the data not settled, the table not read) goes back to the page, which says so
-        // (PunctuationSaves): used here anyway, the edit would hold this run and be gone at the next
-        punctuationMaps.save(ZH_CN, profile.entries.map { PunctuationMapEntry(it.key, it.mapping, it.altMapping) })
-        modules?.punctuation?.setProfile(profile)
-        // with no context focused no status goes out: the keys' marks kept for the keyboard to come
-        punctuationCached = punctuationKeys()
-        keepStartKeys()
     }
 
     // ---- quick input, focus, status area, candidates
@@ -499,8 +509,8 @@ class KotlinHost(
         step("config")
         engine.start()
         step("engine.start")
-        // an edited table not read is not saved over, nor one where the data is not settled; the user told
-        punctuationMaps = PunctuationMaps(data.dir, writable = !directBoot && data.writable, onUnreadable = { dataUnreadable() }) { lang ->
+        // an edited table not read leaves the built-in one; the user told
+        punctuationMaps = PunctuationMaps(data.dir, onUnreadable = { dataUnreadable() }) { lang ->
             try {
                 context.assets.open("$BUILT_IN/punctuation/punc.mb.$lang")
             } catch (_: IOException) {
@@ -516,11 +526,13 @@ class KotlinHost(
         step("punctuation maps, writer")
         val strings = AppHostStrings(context)
         val available = InputMethodCatalog.LISTED.map { it.name }.toSet()
-        val profile = mergeNineKeys(Profile.load(readConfig(PROFILE).getOrNull(), available + NineKeysMerge.OLD, strings.defaultGroup), directBoot)
+        val loaded = Profile.load(readConfig(PROFILE).getOrNull(), available + NineKeysMerge.OLD + HandwritingRetire.OLD, strings.defaultGroup)
+        val retired = retireHandwriting(mergeNineKeys(loaded, directBoot), directBoot)
         this.directBoot = directBoot
         loadOptions(readConfig(EngineOptions.PATH).getOrNull(), directBoot)
-        if (!directBoot) tellUnseen()
         for (path in CONF_FILES) confTexts[path] = readConfig(path).getOrNull()
+        retireTraditionalHandwriting(retired, directBoot)
+        if (!directBoot) tellUnseen()
         step("strings, profile, confs")
         val punctuationProfile = punctuationProfile()
         step("punctuation table")
@@ -542,7 +554,7 @@ class KotlinHost(
         step("ChineseModules")
         val wasFirstRun = firstRun
         val made = HostCore(
-            engine.host, dispatcher, profile, available, strings, firstRun = wasFirstRun,
+            engine.host, dispatcher, retired.profile, available, strings, firstRun = wasFirstRun,
             showInputMethodInformation = showInputMethodInformation, persist = ::persist, modules = chinese::build,
         )
         made.events += HostEvents(::forward)
@@ -754,6 +766,45 @@ class KotlinHost(
     }
 
     /**
+     * [loaded] without 0.6.0's handwriting input method (HandwritingRetire), at every start: an upgrade's profile
+     * and a 0.6.0 backup restored alike, nothing done where none names it; the profile written once it is
+     * unlocked ([directBoot] writes nothing). The user told whenever it retires one (§6.1: a 0.6.0 backup
+     * restored, handwriting added back there and upgraded again; [AppPrefs.Internal.handwritingRetiredUnseen],
+     * [tellUnseen]); once ([AppPrefs.Internal.handwritingRetired], which must not undo what the user did since,
+     * the button taken off the toolbar): the toolbar's 手写 pinned, turned on where handwriting was the first input
+     * method (pinyin there now).
+     */
+    private fun retireHandwriting(loaded: Profile, directBoot: Boolean): Profile.Retired {
+        val retired = loaded.retireHandwriting()
+        if (!retired.changed || directBoot) return retired.copy(changed = false)
+        val prefs = AppPrefs.getInstance()
+        if (!prefs.internal.handwritingRetired.getValue()) {
+            prefs.pinHandwriting()
+            if (retired.moved) prefs.internal.handwritingOpen.setValue(true)
+            prefs.internal.handwritingRetired.setValue(true)
+        }
+        prefs.internal.handwritingRetiredUnseen.setValue(if (retired.moved) "$RETIRED_TOOLBAR,$RETIRED_MOVED" else RETIRED_TOOLBAR)
+        persist(Persist.ProfileChanged(retired.profile))
+        return retired
+    }
+
+    /**
+     * chttrans' list without 0.6.0's handwriting (HandwritingRetire.traditional), written back: its 繁体 pinyin's
+     * where pinyin took its first place ([retired] moved), else gone, and the user told so as handwriting is
+     * retired ([retired] changed: the first time). [directBoot] writes nothing.
+     */
+    private fun retireTraditionalHandwriting(retired: Profile.Retired, directBoot: Boolean) {
+        if (directBoot) return
+        val old = confTexts[ModuleConfigs.CHTTRANS]
+        val out = HandwritingRetire.traditional(ModuleConfigs.chttrans(old), retired.moved) ?: return
+        val text = ModuleConfigs.chttransText(old, out.enabled)
+        confTexts[ModuleConfigs.CHTTRANS] = text
+        writer?.write(ModuleConfigs.CHTTRANS) { text }
+        val internal = AppPrefs.getInstance().internal
+        if (out.lost && retired.changed) internal.handwritingRetiredUnseen.setValue(internal.handwritingRetiredUnseen.getValue() + ",$RETIRED_TRADITIONAL")
+    }
+
+    /**
      * The options read, 双拼's scheme as 0.5 has them (SchemeMigration): an install from before 0.5
      * (not this one's first run, not [AppPrefs.Internal.schemeSettled]: a 0.4 backup's prefs restored
      * have neither) with none stored pinned to 自然码, a dropped one 小鹤 and the user told once;
@@ -796,9 +847,22 @@ class KotlinHost(
      */
     private fun tellUnseen() {
         val internal = AppPrefs.getInstance().internal
+        val handwriting = internal.handwritingRetiredUnseen.getValue().split(',').filterTo(HashSet()) { it.isNotEmpty() }
+        if (handwriting.isNotEmpty()) {
+            val more = buildString {
+                if (RETIRED_MOVED in handwriting) append(context.getString(R.string.handwriting_retired_moved))
+                if (RETIRED_TRADITIONAL in handwriting) append(context.getString(R.string.handwriting_retired_traditional))
+            }
+            EngineNotices.toldUntilSeen(R.string.handwriting_retired, more) { internal.handwritingRetiredUnseen.setValue("") }
+        }
+        if (internal.keyHandwritingUnseen.getValue()) {
+            EngineNotices.toldUntilSeen(R.string.key_handwriting_retired) { internal.keyHandwritingUnseen.setValue(false) }
+        }
         if (internal.nineKeysUnseen.getValue()) {
             EngineNotices.toldUntilSeen(R.string.nine_keys_merged) { internal.nineKeysUnseen.setValue(false) }
         }
+        // the theme packs' boards put in the list and chosen, not yet seen: told as the start that chose them told them
+        ThemeLayoutsToList.tellUnseen()
         val retired = internal.schemeRetiredUnseen.getValue()
         if (retired.isNotEmpty()) {
             val name = ShuangpinNames.of(context, retired) ?: retired
@@ -879,16 +943,22 @@ class KotlinHost(
         eventsOut.tryEmit(event)
     }
 
-    private companion object {
-        const val PROFILE = "profile"
+    internal companion object {
+        private const val PROFILE = "profile"
+
+        // what the notice of handwriting moved onto the toolbar says besides that (Internal.handwritingRetiredUnseen,
+        // its markers comma-separated)
+        private const val RETIRED_TOOLBAR = "toolbar"
+        private const val RETIRED_MOVED = "moved"
+        private const val RETIRED_TRADITIONAL = "traditional"
 
         // the modules' files, read at the start and again at reloadConfig
-        val CONF_FILES = listOf(ModuleConfigs.PUNCTUATION, ModuleConfigs.CHTTRANS)
+        private val CONF_FILES = listOf(ModuleConfigs.PUNCTUATION, ModuleConfigs.CHTTRANS)
         const val ZH_CN = "zh_CN"
-        const val BUILT_IN = "pkgdata"
-        const val OPENCC = "engine/opencc-s2tw.data"
-        const val NANOS_PER_MILLI = 1_000_000L
-        const val IDLE_SECONDS = 30L
+        private const val BUILT_IN = "pkgdata"
+        private const val OPENCC = "engine/opencc-s2tw.data"
+        private const val NANOS_PER_MILLI = 1_000_000L
+        private const val IDLE_SECONDS = 30L
     }
 }
 

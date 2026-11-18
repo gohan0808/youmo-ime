@@ -18,8 +18,10 @@ import android.widget.TextView
 import androidx.core.view.ViewCompat
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
 import org.fcitx.fcitx5.android.data.theme.ThemeManager
+import org.fcitx.fcitx5.android.input.keyboard.KeyClock
 import org.fcitx.fcitx5.android.input.keyboard.ImKeyboards
 import org.fcitx.fcitx5.android.input.keyboard.KeyboardArea
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardHeightCap
 import org.fcitx.fcitx5.android.input.keyboard.SwipeSlotsCache
 import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneBoard
 import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneKeyCell
@@ -34,18 +36,19 @@ import org.fcitx.fcitx5.android.input.shortcut.KeyShortcutPreset
 import org.fcitx.fcitx5.android.input.shortcut.SwipeSlots
 import org.fcitx.fcitx5.android.input.theme.KeyNames
 import org.fcitx.fcitx5.android.scene.KeyState
+import org.fcitx.fcitx5.android.scene.engine.Env
 import org.fcitx.fcitx5.android.scene.engine.MarkContent
 import org.fcitx.fcitx5.android.scene.keys.DefaultMarks
 import org.fcitx.fcitx5.android.scene.keys.KeyId
 import org.fcitx.fcitx5.android.scene.keys.KeyboardVariant
 import org.fcitx.fcitx5.android.scene.layout.KeyAttrs
-import org.fcitx.fcitx5.android.scene.rules.KeyMarks
 import org.fcitx.fcitx5.android.scene.theme.Argb
 import org.fcitx.fcitx5.android.utils.styledColor
 import splitties.dimensions.dp
 import splitties.views.dsl.core.add
 import splitties.views.dsl.core.lParams
 import splitties.views.dsl.core.matchParent
+import splitties.views.dsl.core.wrapContent
 import com.google.android.material.R as MaterialR
 import org.fcitx.fcitx5.android.input.keys.KeyState as KeysState
 import org.fcitx.fcitx5.android.scene.layout.Text as SceneText
@@ -55,9 +58,6 @@ import org.fcitx.fcitx5.android.scene.layout.Text as SceneText
  * so a page reads as the keyboard it changes rather than as a list of strings.
  */
 object KeyCaps {
-
-    // the letters' rows (qwerty without its number row): a key's height the keys' over these
-    private const val KEY_ROWS = 4
 
     // a dimmed cap's label, as the views' (0.4)
     private const val DIMMED = 0.4
@@ -120,9 +120,9 @@ object KeyCaps {
      * keyboard's: the settings' caps, and what the page tells of a way drawn otherwise than set (SwipeFates).
      */
     internal fun SceneKeyCell.onBoard(ctx: Context, shortcut: Shortcut?, board: SceneKeyCell.Board?) {
-        keyboardKeyHeight = keyboardKeyHeight(ctx)
+        keyboardKeyHeight = keyboardKeyHeight(ctx, board?.layout)
         this.board = board
-        val layout = board?.let { SceneLayouts.of(ctx, it.layout) }
+        val layout = board?.let { SceneLayouts.board(ctx, it.layout) }
         val slots = shortcut?.slots ?: SwipeSlotsCache.current
         val charShortcuts = shortcut?.charShortcuts ?: true
         // the marks as the keyboard's resolver has them (060-keys-unify §1.3): each key's first from key_lists, its
@@ -132,7 +132,11 @@ object KeyCaps {
         } else {
             // a key alone (no board): its slots' marks, no first
             val spots = swipeSpots()
-            SceneMarks.settings(slots, swipeWays(), spots.symbol, spots.shortcut, charShortcuts, listOfNotNull(shortcut?.name?.let { KeyId.of(it).name }), emptyMap())
+            // the keyboard's clock (KeyClock), not the system's: a variable's value as the keyboard would show it (R26 F8250)
+            SceneMarks.settings(
+                slots, swipeWays(), spots.symbol, spots.shortcut, charShortcuts, listOfNotNull(shortcut?.name?.let { KeyId.of(it).name }), emptyMap(),
+                now = KeyClock::calendar,
+            )
         }
     }
 
@@ -144,15 +148,29 @@ object KeyCaps {
      * lists, one list a key for every input method (060-row-unlock), shown with the user's 按键字母 and 18 键's L with
      * its `:` (a scheme typing `;`'s: the item every keyboard but that one skips, §2).
      */
-    fun resolver(ctx: Context, layout: String): KeyResolver? = SceneLayouts.of(ctx, layout)?.let {
-        SceneBoard.resolver(it, KeyboardVariant(DefaultMarks.variantOf(it.layout).form, nineLetters(), semicolon = true))
+    fun resolver(ctx: Context, layout: String): KeyResolver? = SceneLayouts.board(ctx, layout)?.let {
+        SceneBoard.resolver(it, KeyboardVariant(DefaultMarks.variantOf(it.layout, it.fallback).form, nineLetters(), semicolon = true))
     }
 
     /** The nine keys' letters as the user set them (t9_letters), as 九键's keyboard has them: the editor's rows of 2 to 9. */
     fun nineLetters(): Map<Char, String> = KeyListsCache.nineLettersOf(AppPrefs.getInstance().keyboard.t9Letters.getValue())
 
-    /** A qwerty key's height on the keyboard as the height settings make it now, px (InputView's keys' area, [KeyboardArea]). */
-    fun keyboardKeyHeight(ctx: Context): Int = SwipeFates.size(upright(ctx), KeyNames.QWERTY, ImKeyboards.Layout.TEXT).height / KEY_ROWS
+    /**
+     * A key's height on the keyboard as the height settings make it now, px (InputView's keys' area, [KeyboardArea]):
+     * the keys' over [layout]'s rows (注音's five, a qwerty's four; none given: qwerty's).
+     */
+    fun keyboardKeyHeight(ctx: Context, layout: String? = null): Int {
+        val rows = layout?.let { rowsOf(ctx, it) } ?: KeyboardHeightCap.DEFAULT_ROWS
+        return (SwipeFates.size(upright(ctx), layout ?: KeyNames.QWERTY, ImKeyboards.Layout.TEXT, rows).height / rows).toInt()
+    }
+
+    // [layout]'s rows as the keyboard counts them (KeyboardWindow.rowUnits); upright, at no size: the built-in boards'
+    // rows do not depend on it. Once a turn, as [thisTurn] promises, not twice a cap (R26 F8324)
+    private fun rowsOf(ctx: Context, layout: String): Double = thisTurn(listOf(ROWS, layout)) {
+        SceneLayouts.board(ctx, layout)?.let {
+            KeyboardHeightCap.rowUnits(it.layout, it.fragments, Env(1.0, 1.0, ctx.resources.displayMetrics.density.toDouble()))
+        } ?: KeyboardHeightCap.DEFAULT_ROWS
+    }
 
     // the keyboard upright on this display, as the page's notes have it (SwipeFates), whatever way the page is turned
     private fun upright(ctx: Context) = thisTurn(UPRIGHT to Configuration(ctx.resources.configuration)) { KeyboardArea.screens(ctx).first }
@@ -161,6 +179,8 @@ object KeyCaps {
     const val NO_IM = ""
 
     private const val UPRIGHT = "upright"
+
+    private const val ROWS = "rows"
 
     // what one main-looper turn (a page rebuilt, a dialog's list drawn) works out once for all its caps, not per cap:
     // the upright screen (KeyboardArea.screens asks the window manager, a binder call, and a secure setting) and each
@@ -178,10 +198,13 @@ object KeyCaps {
     /**
      * The keyboard the key of [shortcut] (a shortcut page's name: `full/a`, `zyfull/1`, a function key's `space`) is on,
      * at its keys' size as InputView makes it upright (SwipeFates.size: the height settings, the bar, the board's code row, the
-     * paddings, the cap, one-handed, floating, split): [layout] the board, a function key's qwerty's unless given.
+     * paddings, the cap, one-handed, floating, split): [layout] the board, a function key's qwerty's unless given; a layout
+     * of the user's at its base's size (its code row, split as the letters where it is of them: KeyboardWindow's).
      */
     fun board(ctx: Context, shortcut: String, layout: String = defaultBoard(shortcut)): SceneKeyCell.Board {
-        val size = SwipeFates.size(upright(ctx), layout, CODE_ROWS[layout] ?: ImKeyboards.Layout.TEXT)
+        val screen = upright(ctx)
+        val base = SceneLayouts.board(ctx, layout)?.fallback ?: layout
+        val size = SwipeFates.size(screen, base, CODE_ROWS[base] ?: ImKeyboards.Layout.TEXT, rowsOf(ctx, layout))
         // the corners as the keyboard says them (BaseKeyboard.keyReadings: the long presses' firsts, the user's; none where the
         // first's way draws nothing); the marks drawn are the resolver's (onBoard)
         val alts = if (firstShown()) {
@@ -194,7 +217,7 @@ object KeyCaps {
             emptyMap()
         }
         return SceneKeyCell.Board(layout, KeyId.of(shortcut).name, size.width, size.height, alts,
-            AppPrefs.getInstance().keyboard.letterCase.getValue().case, size.floating, size.split)
+            AppPrefs.getInstance().keyboard.letterCase.getValue().case, size.floating, size.split, screen.landscape, size.resize)
     }
 
     /**
@@ -234,8 +257,8 @@ object KeyCaps {
     // the function keys qwerty has not: the board each is on (九键's 重输 and 0, 14/18 键's 分词)
     private val FUNCTION_BOARDS = mapOf("retype" to KeyNames.NINE, "zero" to KeyNames.NINE, "separator" to KeyNames.K14)
 
-    // each board's code row (handwriting's too, a function key's board of its own)
-    private val CODE_ROWS = BOARDS.values.toMap() + (KeyNames.HANDWRITING to ImKeyboards.Layout.HANDWRITING)
+    // each board's code row
+    private val CODE_ROWS = BOARDS.values.toMap()
 
     fun label(ctx: Context, text: String, size: Float = 18f) = TextView(ctx).apply {
         this.text = text
@@ -243,15 +266,6 @@ object KeyCaps {
         gravity = Gravity.CENTER
         typeface = Typeface.MONOSPACE
         setTextColor(ctx.styledColor(MaterialR.attr.colorOnSurface))
-    }
-
-    /** What a key draws beside its label, as the keyboard draws its swipes' marks ([KeyMarks]). */
-    sealed interface Mark {
-        /** A character: the corner symbol, or a text shortcut's whole, shrunk sideways to fit as on the key. */
-        data class Text(val text: String) : Mark
-
-        /** The key's symbol where the page labels the key by it (九键's digits): not drawn, its corner kept from the shortcut. */
-        data object Unshown : Mark
     }
 
     /**
@@ -267,20 +281,33 @@ object KeyCaps {
         state: String? = null,
         said: String? = null,
         shortcut: Shortcut? = null,
+        tag: String? = null,
     ): FrameLayout = KeyFrame(ctx).apply {
         isClickable = true
         isFocusable = true
         val ripple = ctx.obtainStyledAttributes(intArrayOf(android.R.attr.selectableItemBackground)).run {
             getDrawable(0).also { recycle() }
         }
-        contentDescription = listOfNotNull(text, hint, said).filter { it.isNotEmpty() }.joinToString(", ")
+        contentDescription = listOfNotNull(text, hint, said, tag).filter { it.isNotEmpty() }.joinToString(", ")
         ViewCompat.setStateDescription(this, state)
         isSelected = selected
         // drawn by the engine as the keyboard draws the key (060-render-p2 S6): its face in the keyboard's
         // theme, its symbol and shortcut's marks placed by the engine; edited, outlined along its face
         foreground = ripple
         add(sceneKey(ctx, text, hint, marked, dimmed, selected, shortcut), lParams(matchParent, matchParent))
+        // an item's mark (「变量」, 「原样」: 061-text-variables §2.5) in small words along the cap's foot
+        if (tag != null) {
+            add(TextView(ctx).apply {
+                this.text = tag
+                textSize = TAG_SP
+                setTextColor(ctx.styledColor(android.R.attr.textColorSecondary))
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, lParams(wrapContent, wrapContent, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL))
+        }
     }
+
+    // the mark's words under an item's label
+    private const val TAG_SP = 9f
 
     // the engine's cell is a gesture view and takes every touch it gets, so a tap never reached this frame's
     // click on a device (Robolectric's performClick went straight to the frame): the frame keeps them all

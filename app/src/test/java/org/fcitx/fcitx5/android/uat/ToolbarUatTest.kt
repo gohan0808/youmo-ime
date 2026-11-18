@@ -25,6 +25,7 @@ import org.fcitx.fcitx5.android.input.bar.ToolbarButton
 import org.fcitx.fcitx5.android.input.bar.ToolbarButtonLooks
 import org.fcitx.fcitx5.android.input.bar.ToolbarConfig
 import org.fcitx.fcitx5.android.input.bar.ui.ToolButton
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardStyle
 import org.fcitx.fcitx5.android.input.keyboard.OneHanded
 import org.fcitx.fcitx5.android.ui.common.DynamicListAdapter
 import org.fcitx.fcitx5.android.ui.main.ClipboardEditActivity
@@ -316,7 +317,11 @@ class ToolbarUatTest {
         h.clipboard("散步")
         assertEquals(s(R.string.delete_all_except_pinned), deleteAll())
         h.waitFor("the notice") { h.notice() != null }
-        assertTrue(h.noticeTexts().toString(), h.service.resources.getString(R.string.num_items_deleted, 1) in h.noticeTexts())
+        // the list drops 散步 after the notice says so (the database's change, then the page Paging loads anew): else 散步,
+        // still listed, passes "back" below at once, before the undo is in, and the next 全部删除 is asked of a
+        // database still without 散步 (only 公园 left to delete, then 散步 coming back: SDK 29, full runs)
+        h.waitFor("散步 gone") { h.entry("散步") == null }
+        h.noticeTexts().let { assertTrue(it.toString(), h.service.resources.getString(R.string.num_items_deleted, 1) in it) }
         val undo = KeyboardHarness.all(h.notice()!!.contentView).filterIsInstance<TextView>().last { it.text.toString() == s(R.string.undo) }
         assertTrue(undo.performClick())
         h.waitFor("散步 back") { h.entry("散步") != null }
@@ -362,7 +367,7 @@ class ToolbarUatTest {
     @Test
     @Uat("TB-20")
     fun oneHandedToASideAcrossAndBack() {
-        prefs.set(ThemeManager.prefs.oneHanded, OneHanded.Off)
+        prefs.setStyleDefault()
         val width = h.service.resources.displayMetrics.widthPixels
         h.start()
         expand()
@@ -391,7 +396,7 @@ class ToolbarUatTest {
     @Test
     @Uat("TB-21")
     fun oneHandedPanelsAsNarrow() {
-        prefs.set(ThemeManager.prefs.oneHanded, OneHanded.Right)
+        prefs.setStyle(KeyboardStyle.ONE_HANDED, side = OneHanded.Right)
         h.start()
         val kb = keyboardBox()
         h.tap(h.key("符"))
@@ -399,7 +404,7 @@ class ToolbarUatTest {
         h.tap(h.key(s(R.string.picker_back)))
         h.tap(h.described(s(R.string.a11y_key_emoji)))
         assertEquals(kb, keyboardBox())
-        h.tap(h.key("ABC"))
+        h.tap(h.key(s(R.string.picker_back)))
         h.copied("公园")
         h.clipboard("公园")
         assertEquals(kb, keyboardBox())
@@ -451,7 +456,7 @@ class ToolbarUatTest {
         h.tap(button(h.service.getString(android.R.string.copy)))
         assertEquals(0 to 0, h.field.selectionStart to h.field.selectionEnd)
         // nothing copied, nothing done: 选择 stays on as it shows, → selects (review M1)
-        assertTrue(h.noticeTexts().toString(), s(R.string.nothing_to_copy) in h.noticeTexts())
+        h.noticeTexts().let { assertTrue(it.toString(), s(R.string.nothing_to_copy) in it) }
         assertTrue(select.isActivated)
         h.tap(h.described(s(R.string.move_cursor_right)))
         assertEquals(0 to 1, h.field.selectionStart to h.field.selectionEnd)
@@ -465,14 +470,14 @@ class ToolbarUatTest {
         editing()
         h.tap(button(h.service.getString(android.R.string.selectAll)))
         h.tap(button(h.service.getString(android.R.string.copy)))
-        assertTrue(h.noticeTexts().toString(), s(R.string.text_copied) in h.noticeTexts())
+        h.noticeTexts().let { assertTrue(it.toString(), s(R.string.text_copied) in it) }
         h.tap(button(h.service.getString(android.R.string.selectAll)))
         h.tap(button(h.service.getString(android.R.string.cut)))
-        assertTrue(h.noticeTexts().toString(), s(R.string.text_cut) in h.noticeTexts())
+        h.noticeTexts().let { assertTrue(it.toString(), s(R.string.text_cut) in it) }
         h.after(3000)
         assertNull(h.notice())
         h.tap(button(h.service.getString(android.R.string.copy)))
-        assertTrue(h.noticeTexts().toString(), s(R.string.nothing_to_copy) in h.noticeTexts())
+        h.noticeTexts().let { assertTrue(it.toString(), s(R.string.nothing_to_copy) in it) }
     }
 
     @Test
@@ -585,7 +590,7 @@ class ToolbarUatTest {
     }
 
     @Test
-    @Uat("TB-42")
+    @Uat("TB-42", "TB-68")
     fun theToolbarButtonsPageSetsTheBar() {
         prefs.set(toolbarButtons, "")
         SettingsHarness().use { st ->
@@ -613,16 +618,18 @@ class ToolbarUatTest {
         assertEquals(
             ToolbarConfig.Layout(
                 listOf(ToolbarButton.Redo, ToolbarButton.CursorMove, ToolbarButton.Clipboard, ToolbarButton.QuickPhrase, ToolbarButton.More),
-                listOf(ToolbarButton.Theme, ToolbarButton.Emoji, ToolbarButton.Voice, ToolbarButton.Hide)
+                listOf(ToolbarButton.Theme, ToolbarButton.Emoji, ToolbarButton.Handwriting, ToolbarButton.Voice, ToolbarButton.Hide)
             ),
             config.layout(everywhere)
         )
         h.start()
         // the theme there before the toolbar is opened, the undo not even then; the microphone as ever
-        val pinned = listOf(R.string.theme, R.string.a11y_key_emoji, R.string.voice_input, R.string.hide_keyboard)
+        val pinned = listOf(R.string.theme, R.string.a11y_key_emoji, R.string.handwriting, R.string.voice_input, R.string.hide_keyboard)
         assertEquals(pinned.map(::s), barButtons())
         expand()
-        assertEquals((listOf(R.string.redo, R.string.text_editing, R.string.clipboard, R.string.quick_phrases, R.string.status_area) + pinned).map(::s), barButtons())
+        // ten slots: the menu key, five at the right, three of the toolbar's and ⋯; 快速输入 with no slot in ⋯'s panel
+        assertEquals((listOf(R.string.redo, R.string.text_editing, R.string.clipboard, R.string.status_area) + pinned).map(::s), barButtons())
+        assertEquals(s(R.string.quick_phrases), ToolbarSpacingUatTest.openMore(h).first())
     }
 
     @Test
@@ -638,10 +645,10 @@ class ToolbarUatTest {
             st.idle()
             val pinned = ToolbarConfig.parse(toolbarButtons.getValue()).layout(everywhere).pinned
             assertEquals(listOf(ToolbarButton.Voice, ToolbarButton.Hide, ToolbarButton.Emoji), pinned)
-            // the others above the divider: the microphone still below it
+            // the others above the divider (handwriting, pinned by default since 0.6.1, too): the microphone still below it
             (st.page as ToolbarButtonsFragment).reset()
             st.idle()
-            for (b in listOf(ToolbarButton.Emoji, ToolbarButton.Hide)) {
+            for (b in listOf(ToolbarButton.Emoji, ToolbarButton.Handwriting, ToolbarButton.Hide)) {
                 var at = adapter.indexOf(b)
                 while (at > adapter.entries.indexOf(ToolbarConfig.Item.Divider)) adapter.swapItem(at, --at)
                 st.idle()
@@ -659,13 +666,13 @@ class ToolbarUatTest {
     @Uat("TB-43")
     fun thePanelsTogglesOnTheBar() {
         prefs.set(toolbarButtons, "habits,one_handed,trad_simp,|,emoji,hide")
-        prefs.set(ThemeManager.prefs.oneHanded, OneHanded.Off)
+        prefs.setStyleDefault()
         prefs.set(AppPrefs.getInstance().internal.useHabits, true)
         h.start()
         expand()
         // no 简繁 till the input method offers it; the ⋯ there, fixed
         assertEquals(listOf(R.string.learning_habits_off, R.string.one_handed, R.string.status_area, R.string.a11y_key_emoji, R.string.hide_keyboard).map(::s), barButtons())
-        val chttrans = listOf(StatusEntry(7, "chttrans", "fcitx-chttrans-inactive", ""))
+        val chttrans = listOf(StatusEntry(7, "chttrans", "fcitx-chttrans-inactive", "", false))
         h.api.statusAreaCached = chttrans
         h.emit(HostEvent.StatusArea(chttrans, KeyboardHarness.PINYIN))
         h.relayout()
@@ -675,15 +682,15 @@ class ToolbarUatTest {
         h.tap(h.described(s(R.string.status_simplified)))
         h.idle()
         assertTrue(h.api.calls.toString(), "activateAction(7)" in h.api.calls)
-        val traditional = listOf(StatusEntry(7, "chttrans", "fcitx-chttrans-active", ""))
+        val traditional = listOf(StatusEntry(7, "chttrans", "fcitx-chttrans-active", "", true))
         h.emit(HostEvent.StatusArea(traditional, KeyboardHarness.PINYIN))
         assertTrue(lit(R.string.status_traditional))
         // the panel's one-handed toggle, the same, lit while on; off from elsewhere, unlit
         assertFalse(lit(R.string.one_handed))
         h.tap(h.described(s(R.string.one_handed)))
-        assertTrue(ThemeManager.prefs.oneHanded.getValue() != OneHanded.Off)
+        assertEquals(KeyboardStyle.ONE_HANDED, TestStyles.stored(landscape = false))
         assertTrue(lit(R.string.one_handed))
-        ThemeManager.prefs.oneHanded.setValue(OneHanded.Off)
+        TestStyles.clear()
         h.idle()
         assertFalse(lit(R.string.one_handed))
         // habits off: lit, and named for turning them back on
@@ -696,7 +703,7 @@ class ToolbarUatTest {
     @Uat("TB-43")
     fun thePanelsOthersOnTheBar() {
         prefs.set(toolbarButtons, "theme,input_method_settings,clear_recent,|,floating,one_handed,hide")
-        prefs.set(ThemeManager.prefs.floatingKeyboard, false)
+        prefs.setStyleDefault()
         h.start()
         expand()
         h.tap(h.described(s(R.string.theme)))
@@ -712,7 +719,7 @@ class ToolbarUatTest {
         assertTrue(shadowOf(spans).isShowing)
         // the input view made anew for it: the spans gone with the old one
         h.tap(h.described(s(R.string.floating_keyboard)))
-        assertTrue(ThemeManager.prefs.floatingKeyboard.getValue())
+        assertEquals(KeyboardStyle.FLOATING, TestStyles.stored(landscape = false))
         h.after(500)
         assertFalse(shadowOf(spans).isShowing)
     }
@@ -720,21 +727,22 @@ class ToolbarUatTest {
     @Test
     @Uat("TB-43")
     fun floatingTheBarFitsAndHasNoOneHanded() {
-        // more at the right than a floating bar holds: the rest on the toolbar, the menu key and ⋯ reachable
+        // more at the right than a floating bar holds at a button's width: all of them there, narrower (the user's call,
+        // 2026-11-15), none over the menu key, ⋯ reachable
         prefs.set(toolbarButtons, "undo,|,emoji,voice,hide,theme,floating,one_handed,habits,clear_recent,input_method_settings,redo")
-        prefs.set(ThemeManager.prefs.floatingKeyboard, true)
+        prefs.setStyle(KeyboardStyle.FLOATING)
         h.start()
         h.relayout()
         val menu = h.box(h.described(s(R.string.expand_toolbar)))
         val bar = h.box(h.bar)
         val right = barButtons()
-        assertTrue(right.toString(), right.size in 1..6)
+        assertEquals(right.toString(), 9, right.size)
         for (name in right) {
             val b = h.box(h.described(name))
             assertTrue("$name $b over the menu key $menu", b.left >= menu.right && b.right <= bar.right)
         }
         assertFalse(s(R.string.one_handed) in right)
-        // lit wherever it went, the right or the toolbar
+        // lit at the right
         expand()
         assertTrue(lit(R.string.floating_keyboard))
         val all = barButtons()

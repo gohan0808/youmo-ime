@@ -15,6 +15,8 @@ import org.fcitx.fcitx5.android.data.theme.ThemeManager
 import org.fcitx.fcitx5.android.input.KeyboardHarness
 import org.fcitx.fcitx5.android.input.floating.FloatingHandle
 import org.fcitx.fcitx5.android.input.floating.FloatingHandleSide
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardHeightCap
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardStyle
 import org.fcitx.fcitx5.android.input.keyboard.OneHanded
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -93,7 +95,7 @@ class MotionNoticeUatTest {
     @Test
     @Uat("MN-03")
     fun floatingAtTheTopTheNoticeGoesBelow() {
-        prefs.set(ThemeManager.prefs.floatingKeyboard, true)
+        prefs.setStyle(KeyboardStyle.FLOATING)
         h.start()
         val handle = grip()!!
         h.drag(handle, h.box(handle).exactCenterX(), 0f)
@@ -112,7 +114,7 @@ class MotionNoticeUatTest {
     @Uat("MN-03")
     @Config(qualifiers = "w851dp-h393dp-land-440dpi")
     fun floatingAtTheLeftTheNoticeGoesRight() {
-        prefs.set(ThemeManager.prefs.floatingKeyboard, true)
+        prefs.setStyle(KeyboardStyle.FLOATING)
         h.start()
         val handle = grip()!!
         h.drag(handle, 0f, h.box(handle).exactCenterY())
@@ -147,8 +149,10 @@ class MotionNoticeUatTest {
         h.copied("公园")
         h.clipboard("公园")
         deleteByMenu("公园")
-        // marked on Room's thread, then said
+        // marked on Room's thread, then said; the list drops it after (Paging's load anew): else "back" below passes on
+        // the list as it was, the undo not yet in, and the close's clearing may run before it and leave 公园 to the next
         h.waitFor("the notice") { h.notice() != null }
+        h.waitFor("公园 gone") { h.entry("公园") == null }
         val said = h.noticeTexts()
         assertTrue(said.toString(), s(R.string.undo) in said && h.service.resources.getString(R.string.num_items_deleted, 1) in said)
         // over the keys, where every notice is, not a bar at the bottom
@@ -187,10 +191,11 @@ class MotionNoticeUatTest {
         val walk = h.entry("散步")!!
         h.drag(walk, h.box(walk).right - 10f, h.box(walk).exactCenterY(), steps = 6)
         h.waitFor("the notice") { h.notice() != null }
-        assertTrue(h.noticeTexts().toString(), h.service.resources.getString(R.string.num_items_deleted, 1) in h.noticeTexts())
+        h.noticeTexts().let { assertTrue(it.toString(), h.service.resources.getString(R.string.num_items_deleted, 1) in it) }
         deleteByMenu("公园")
         h.waitFor("2 deleted") { h.service.resources.getString(R.string.num_items_deleted, 2) in h.noticeTexts() }
-        assertTrue(h.noticeTexts().toString(), h.service.resources.getString(R.string.num_items_deleted, 2) in h.noticeTexts())
+        h.noticeTexts().let { assertTrue(it.toString(), h.service.resources.getString(R.string.num_items_deleted, 2) in it) }
+        h.waitFor("both gone") { h.entry("公园") == null && h.entry("散步") == null }
         undo()
         h.waitFor("both back") { h.entry("公园") != null && h.entry("散步") != null }
     }
@@ -246,7 +251,7 @@ class MotionNoticeUatTest {
         h.after(500)
         h.relayout()
         assertFalse("${keys()}", floating())
-        prefs.set(ThemeManager.prefs.floatingKeyboard, true)
+        prefs.setStyle(KeyboardStyle.FLOATING)
         h.after(500)
         h.relayout()
         val again = keys()
@@ -257,7 +262,7 @@ class MotionNoticeUatTest {
     @Uat("MN-12")
     fun oneHandedTheHandleAsWideAsTheKeyboard() {
         prefs.set(ThemeManager.prefs.alwaysShowHandle, true)
-        prefs.set(ThemeManager.prefs.oneHanded, OneHanded.Right)
+        prefs.setStyle(KeyboardStyle.ONE_HANDED, side = OneHanded.Right)
         h.start()
         val kb = keys()
         val g = h.box(grip()!!)
@@ -269,14 +274,16 @@ class MotionNoticeUatTest {
     @Test
     @Uat("MN-21")
     @Config(qualifiers = "w851dp-h393dp-land-440dpi")
-    fun landscapeLargestCandidatesStillCappedAtSevenTenths() {
+    fun landscapeLargestCandidatesStillLeaveTheApp120dp() {
         prefs.set(ThemeManager.prefs.candidateTextSize, 28)
         prefs.set(ThemeManager.prefs.alwaysShowHandle, true)
         prefs.set(AppPrefs.getInstance().keyboard.keyboardHeightPercentLandscape, 60)
         h.start()
-        val top = h.box(h.bar).top
-        val bottom = h.box(h.keyboard).bottom
-        assertTrue("area ${bottom - top} of $screenH", bottom - top <= 0.70 * screenH + 8)
+        val density = h.service.resources.displayMetrics.density
+        // the handle over the bar is the keyboard's: the app's room is above the topmost of them
+        val top = minOf(h.box(h.bar).top, grip()?.let { h.box(it).top } ?: Int.MAX_VALUE)
+        val app = top - h.box(h.inputView).top
+        assertTrue("app $app px of $screenH", app >= KeyboardHeightCap.MIN_APP_DP * density - 2)
         h.capture("MotionNoticeUatTest/landscape_28sp")
     }
 }

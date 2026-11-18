@@ -17,11 +17,19 @@ import org.fcitx.fcitx5.android.engine.session.Snapshot
 /**
  * 笔画筛选, as 触宝 has it: while [session] shows something typed, a stroke drawn on the keyboard
  * ([Action.Stroke]) keeps those of its candidates whose first character is written starting so
- * ([Strokes.startsWith]: either order of one written two ways), in the order [session] gives them;
+ * (as the mainland writes it where [mainland] knows it, else [Strokes.startsWith]: any of rime-stroke's
+ * orders of one written two ways), in the order [session] gives them;
  * the next stroke is that character's next. A candidate whose first character is no letter (an
  * emoji, a mark) goes as the one before it went: 🐑 stays after 羊. A Latin word, a character the
  * strokes do not know, goes. The first [lookAhead] of [session]'s candidates are looked through,
- * as far as a page asks.
+ * as far as a page asks, and the first page as far as its [singles] characters are found: strokes that
+ * keep many words and few characters alone look through all [lookAhead] for it, [session] asked a
+ * CHUNK at a time (review F8290; cheap beside the decode, and a character found late still comes up).
+ *
+ * Kept, the first stays first, and the first [singles] characters alone (one ideograph, 〇 too) after it come right
+ * after it, wherever they were among those looked through, each with the emoji and marks that went with it; the
+ * words they pass come after them as they were. A word of two or more is rarely what a stroke is drawn for:
+ * the character is (dev/design/061-swipe-eval.md §二). A first that is a character alone is no one of them. 0, the order is [session]'s.
  *
  * The preedit is [session]'s, then the strokes ([Strokes.shown]). Backspace takes the last stroke
  * back, the pinyin once none is left; nothing found, the bar is empty and Backspace takes the
@@ -40,6 +48,10 @@ class StrokeFilter(
     private val strokes: () -> Strokes?,
     pageSize: Int = StrokeLookup.DEFAULT_PAGE_SIZE,
     private val lookAhead: Int = LOOK_AHEAD,
+    // how many characters alone come right after the first kept (EngineSettings.strokeSingles)
+    private val singles: Int = SINGLES,
+    // whether a character's stroke order as the mainland writes it starts with these strokes (CharInfo.orderStartsWith); null where not known
+    private val mainland: (Int, CharSequence) -> Boolean? = { _, _ -> null },
 ) : Session by session {
 
     // the strokes drawn, 横竖撇捺折 as Strokes.KEYS
@@ -58,6 +70,12 @@ class StrokeFilter(
     private val pager = Pager(pageSize)
 
     private class Kept(val index: Int, val choice: Choice)
+
+    // the order shown ([singles]), as indices into [kept], so far: the first and its marks, the characters alone moved
+    // after it, then the rest from [restFrom] on, those moved passed over
+    private val order = ArrayList<Int>()
+    private val moved = HashSet<Int>()
+    private var restFrom = 0
 
     /** Whether strokes are drawn: the candidates shown are those they keep. */
     val filtering: Boolean get() = drawn.isNotEmpty()
@@ -175,9 +193,7 @@ class StrokeFilter(
 
     private fun refilter(keepPage: Boolean): Snapshot {
         val page = pager.page
-        kept.clear()
-        scanned = 0
-        done = false
+        clearKept()
         lastKept = false
         if (keepPage) pager.keep(page) { keptAt(it) != null } else pager.reset()
         return snapshot()
@@ -185,14 +201,64 @@ class StrokeFilter(
 
     private fun end() {
         drawn.setLength(0)
-        kept.clear()
-        scanned = 0
-        done = false
+        clearKept()
         pager.reset()
     }
 
-    // the [i]th candidate kept, looking through [session]'s as far as needed
+    private fun clearKept() {
+        kept.clear()
+        scanned = 0
+        done = false
+        order.clear()
+        moved.clear()
+        restFrom = 0
+    }
+
+    // the [i]th candidate shown, the characters alone moved up ([singles])
     private fun keptAt(i: Int): Kept? {
+        if (i < 0) return null
+        if (singles <= 0) return inOrder(i)
+        while (order.size <= i && extend()) Unit
+        return order.getOrNull(i)?.let { kept[it] }
+    }
+
+    // [order] a step longer: at first the first kept with its marks and the [singles] after it, then the next of the rest
+    private fun extend(): Boolean {
+        if (order.isEmpty()) {
+            if (inOrder(0) == null) return false
+            restFrom = group(0) { order += it }
+            var at = restFrom
+            var found = 0
+            while (found < singles) {
+                val k = inOrder(at) ?: break
+                if (alone(k.choice.text)) {
+                    group(at) { order += it; moved += it }
+                    found++
+                }
+                at++
+            }
+            return true
+        }
+        while (true) {
+            if (inOrder(restFrom) == null) return false
+            val at = restFrom++
+            if (at !in moved) {
+                order += at
+                return true
+            }
+        }
+    }
+
+    // the kept candidate at [at] and the emoji and marks kept after it, each told [take]: where the next is
+    private inline fun group(at: Int, take: (Int) -> Unit): Int {
+        take(at)
+        var next = at + 1
+        while (inOrder(next)?.let { mark(it.choice.text) } == true) take(next++)
+        return next
+    }
+
+    // the [i]th candidate kept in [session]'s order, looking through [session]'s as far as needed
+    private fun inOrder(i: Int): Kept? {
         if (i < 0) return null
         val table = strokes() ?: return null
         while (kept.size <= i && !done) {
@@ -214,9 +280,22 @@ class StrokeFilter(
         val first = text.codePointAt(0)
         // an emoji, a mark: no strokes of its own, it follows the word it is offered after
         // (〇 is no letter to Java, but written as one)
-        if (!Character.isLetterOrDigit(first) && !Character.isIdeographic(first)) return lastKept
+        if (mark(text)) return lastKept
+        // one the mainland's table has goes by that order alone, as its card shows it: rime-stroke's others are
+        // mostly Taiwan's, which start otherwise for 473 of its 6940 (艳 丿一一丨, 小 乛丿丶: ST-120)
+        mainland(first, drawn)?.let { return it }
         return first <= Char.MAX_VALUE.code && table.startsWith(first.toChar(), drawn)
     }
+
+    // an emoji, a mark: no letter first
+    private fun mark(text: String): Boolean {
+        val first = text.codePointAt(0)
+        return !Character.isLetterOrDigit(first) && !Character.isIdeographic(first)
+    }
+
+    // a character alone: one ideograph (〇 too)
+    private fun alone(text: String): Boolean = text.isNotEmpty() && Character.charCount(text.codePointAt(0)) == text.length &&
+        Character.isIdeographic(text.codePointAt(0))
 
     private fun shown(s: Snapshot): Snapshot {
         under = s
@@ -255,6 +334,10 @@ class StrokeFilter(
     companion object {
         /** How many of the session's candidates are looked through for those the strokes keep. */
         const val LOOK_AHEAD = 2000
+
+        /** How many characters alone come right after the first kept, unless set otherwise (首页单字, 0 to 5). */
+        const val SINGLES = 2
+        val SINGLES_RANGE = 0..5
 
         // the pinyin, then the strokes
         const val SEPARATOR = " "

@@ -13,7 +13,6 @@ import android.text.SpannableStringBuilder
 import android.text.style.RelativeSizeSpan
 import android.text.style.StyleSpan
 import android.view.View
-import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
@@ -24,6 +23,11 @@ import androidx.lifecycle.lifecycleScope
 import androidx.preference.Preference
 import androidx.preference.PreferenceCategory
 import com.google.android.material.snackbar.Snackbar
+import java.io.File
+import java.io.InputStream
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.resume
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -31,6 +35,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -39,7 +44,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -54,9 +58,9 @@ import org.fcitx.fcitx5.android.data.pinyin.PinyinDictManager
 import org.fcitx.fcitx5.android.data.pinyin.countWordLines
 import org.fcitx.fcitx5.android.data.pinyin.dict.PinyinDictionary
 import org.fcitx.fcitx5.android.data.pinyin.dict.TextDictionary
+import org.fcitx.fcitx5.android.engine.learn.backup.LearnBackup
 import org.fcitx.fcitx5.android.engine.runtime.Engines
 import org.fcitx.fcitx5.android.engine.runtime.ImportLayer
-import org.fcitx.fcitx5.android.engine.learn.backup.LearnBackup
 import org.fcitx.fcitx5.android.engine.user.DictionaryFormat
 import org.fcitx.fcitx5.android.engine.user.ImportFiles
 import org.fcitx.fcitx5.android.engine.user.WordListFiles
@@ -68,6 +72,10 @@ import org.fcitx.fcitx5.android.ui.common.withLoading
 import org.fcitx.fcitx5.android.ui.main.MainViewModel
 import org.fcitx.fcitx5.android.ui.main.MainViewModel.ButtonMode
 import org.fcitx.fcitx5.android.ui.main.launchOutlivingPage
+import org.fcitx.fcitx5.android.ui.main.settings.search.PageEntry
+import org.fcitx.fcitx5.android.ui.main.settings.search.ReadyLater
+import org.fcitx.fcitx5.android.ui.main.settings.search.SearchHighlight
+import org.fcitx.fcitx5.android.ui.main.settings.search.SearchablePage
 import org.fcitx.fcitx5.android.utils.addPreference
 import org.fcitx.fcitx5.android.utils.appContext
 import org.fcitx.fcitx5.android.utils.importErrorDialog
@@ -81,11 +89,6 @@ import splitties.resources.resolveThemeAttribute
 import splitties.views.dsl.core.textView
 import splitties.views.textAppearance
 import timber.log.Timber
-import java.io.File
-import java.io.InputStream
-import java.util.concurrent.atomic.AtomicBoolean
-import kotlin.coroutines.CoroutineContext
-import kotlin.coroutines.resume
 
 /**
  * The words and phrases (词库与短语): the user dictionary, then the base one, as they rank, and
@@ -96,7 +99,7 @@ import kotlin.coroutines.resume
  * asked; one merged can be turned off or deleted. Another input method's list read into the user
  * dictionary is imported as a batch (U-101), listed under 导入的词 to be undone whole (U-102).
  */
-class PinyinDictionaryFragment : PaddingPreferenceFragment() {
+class PinyinDictionaryFragment : PaddingPreferenceFragment(), ReadyLater {
 
     private val args by lazyRoute<SettingsRoute.PinyinDict>()
 
@@ -240,7 +243,7 @@ class PinyinDictionaryFragment : PaddingPreferenceFragment() {
         user.addPreference(R.string.my_words, R.string.layer_user_summary) {
             navigateWithAnim(SettingsRoute.UserWords)
         }
-        user.addPreference(R.string.imported_lists, R.string.imported_lists_summary) { showImports() }
+        user.addPreference(R.string.imported_lists, R.string.imported_lists_summary, key = IMPORTED_KEY) { showImports() }
         val base = category(R.string.layer_base)
         base.addPreference(builtIn(R.string.builtin_base_title, R.string.builtin_base_summary))
         val work = MergedDictionary.work.value
@@ -262,7 +265,7 @@ class PinyinDictionaryFragment : PaddingPreferenceFragment() {
             base.addPreference(row)
         }
         val files = category(R.string.import_section)
-        files.addPreference(R.string.import_dict, R.string.import_dict_summary) { launcher.launch("*/*") }
+        files.addPreference(R.string.import_dict, R.string.import_dict_summary, key = IMPORT_KEY) { launcher.launch("*/*") }
         val phrases = category(R.string.section_phrases)
         phrases.addPreference(R.string.custom_phrases, R.string.custom_phrases_summary) {
             navigateWithAnim(SettingsRoute.PinyinCustomPhrase)
@@ -270,10 +273,18 @@ class PinyinDictionaryFragment : PaddingPreferenceFragment() {
         phrases.addPreference(R.string.common_words, R.string.common_words_summary) {
             navigateWithAnim(SettingsRoute.CommonWords)
         }
+        rareRow = Preference(ctx).apply {
+            setTitle(R.string.rare_chars)
+            summary = rareSummary
+            isIconSpaceReserved = false
+            setOnPreferenceClickListener { navigateWithAnim(SettingsRoute.RareChars); true }
+        }.also(phrases::addPreference)
         phrases.addPreference(R.string.quick_phrases, R.string.quick_phrases_summary) {
             navigateWithAnim(SettingsRoute.QuickPhrase())
         }
         screen.addPreference(hint(ctx, R.string.words_page_hint))
+        // built once the list is read and counted, after the view: a search result's row is pointed at now
+        view?.post { SearchHighlight.ready(this) }
     }
 
     private fun hint(ctx: Context, @StringRes text: Int) = Preference(ctx).apply {
@@ -391,6 +402,9 @@ class PinyinDictionaryFragment : PaddingPreferenceFragment() {
                 // a provider's error comes back through the binder as any kind (a SecurityException for
                 // a file the picker gave that it will not open after all): shown, as import() does
                 ctx.importErrorDialog(e)
+            } catch (@Suppress("SwallowedException") e: OutOfMemoryError) {
+                // a file read whole (a .scel, a .dict converted) larger than the heap takes: told so, not the process lost
+                ctx.importErrorDialog(R.string.dict_refused_too_large)
             }
         }
     }
@@ -576,6 +590,9 @@ class PinyinDictionaryFragment : PaddingPreferenceFragment() {
                 throw e
             } catch (e: Exception) {
                 ctx.importErrorDialog(e)
+            } catch (@Suppress("SwallowedException") e: OutOfMemoryError) {
+                // the user dictionary's .scel or word list read whole, larger than the heap takes: told so, not the process lost
+                ctx.importErrorDialog(R.string.dict_refused_too_large)
             } finally {
                 // the page gone, too: about twice the file in the cache otherwise (review S3)
                 withContext(NonCancellable + Dispatchers.IO) { prepared.close() }
@@ -727,10 +744,24 @@ class PinyinDictionaryFragment : PaddingPreferenceFragment() {
                     val app = view.context.applicationContext
                     fcitx.lifecycleScope.launch {
                         // the record read afresh since (a fold, a clear): nothing to put back, and said so
-                        if (!fcitx.runOnReady { restoreImport(batch.id) }) Toast.makeText(app, R.string.import_restore_failed, Toast.LENGTH_SHORT).show()
+                        if (!fcitx.runOnReady { restoreImport(batch.id) }) app.toast(R.string.import_restore_failed)
                     }
                 }
                 .show()
+        }
+    }
+
+    // 生僻字屏蔽's row: 「关」 or 「已屏蔽 N 个字」 (§6.1), counted over the grid the engine copies
+    private var rareRow: Preference? = null
+    private var rareSummary: String? = null
+
+    override fun onStart() {
+        super.onStart()
+        val fcitx = viewModel.fcitx
+        lifecycleScope.launch {
+            val said = rareSummary(requireContext()) { fcitx.runOnReady { rareGrid() } } ?: return@launch
+            rareSummary = said
+            rareRow?.summary = said
         }
     }
 
@@ -743,7 +774,16 @@ class PinyinDictionaryFragment : PaddingPreferenceFragment() {
         super.onStop()
     }
 
-    companion object {
+    // the rows that open a page of their own are found as that page (SettingsPages)
+    companion object : SearchablePage {
+        private const val IMPORTED_KEY = "imported_lists"
+        private const val IMPORT_KEY = "import_dict"
+
+        override fun searchEntries(context: Context) = listOf(
+            PageEntry(context.getString(R.string.imported_lists), SearchHighlight.PREF + IMPORTED_KEY, summary = context.getString(R.string.imported_lists_summary)),
+            PageEntry(context.getString(R.string.import_dict), SearchHighlight.PREF + IMPORT_KEY, summary = context.getString(R.string.import_dict_summary)),
+        )
+
         private const val SMALL = 0.85f
         private const val GAP = 0.6f
         private const val TITLE = 1.15f
@@ -791,9 +831,7 @@ internal fun startsInUser(incoming: Incoming) = incoming.userExport || !offersBa
 internal fun offersBase(incoming: Incoming) = mergesIntoBase(incoming.fileName) && incoming.namedForBase
 
 /** Whether a file named [fileName] is Rime's dictionary (`*.dict.yaml`): text the base takes, its header skipped. */
-internal fun isRimeDictionary(fileName: String) = fileName.lowercase().endsWith(RIME_DICTIONARY)
-
-private const val RIME_DICTIONARY = ".dict.yaml"
+internal fun isRimeDictionary(fileName: String) = PinyinDictManager.isRimeDictionary(fileName)
 
 /** Whether the base dictionary takes a file named [fileName]: a dictionary's type, or Rime's. */
 internal fun mergesIntoBase(fileName: String) =
@@ -814,7 +852,7 @@ internal suspend fun importWordsFrom(
     // a few MB at most); a .dict is converted as the base's are, to UTF-8 text read a line at a time
     when (PinyinDictionary.Type.fromFileName(withLowercaseExtension(fileName))) {
         PinyinDictionary.Type.Sougou -> {
-            val lines = withContext(Dispatchers.IO) { scelLines(open().use { it.readImported(MAX_SCEL) }) }
+            val lines = withContext(Dispatchers.IO) { scelLines(open().use { it.readImported(PinyinDictManager.MAX_SCEL.toInt()) }) }
             import(lines.asSequence())
         }
         PinyinDictionary.Type.LibIME -> withContext(Dispatchers.IO) { PinyinDictManager.readWords(open(), fileName, import) }
@@ -823,9 +861,6 @@ internal suspend fun importWordsFrom(
             import(lines)
         }
     }
-
-// a .scel read at most: Sogou's biggest cell dictionaries are some 10 MB
-private const val MAX_SCEL = 32 shl 20
 
 /** The words of a .scel file, [bytes], as lines of a word list: `词 pin'yin 12`. */
 internal fun scelLines(bytes: ByteArray): List<String> = ArrayList<String>().also { out -> ImportFiles.Scel.read(bytes) { out += it.line() } }
@@ -876,10 +911,10 @@ internal fun incoming(fileName: String, head: ByteArray?) = Incoming(
  */
 internal class Incoming(val fileName: String, val userExport: Boolean = false, val backup: Boolean = false) {
     /** what it is kept as: Rime's `luna_pinyin.dict.yaml` as luna_pinyin */
-    val name = if (isRimeDictionary(fileName)) fileName.dropLast(RIME_DICTIONARY.length) else PinyinDictionary.nameOf(fileName)
+    val name = PinyinDictManager.keptName(fileName)
 
-    /** Whether [name] can name a file of the base: `.dict.yaml` alone names none, a hidden `.txt` the list shows untitled. */
-    val namedForBase get() = name.isNotEmpty() && !name.startsWith(".")
+    /** Whether [name] can name a file of the base (PinyinDictManager.dictionaryName). */
+    val namedForBase get() = PinyinDictManager.dictionaryName(fileName) != null
 
     /** Named as a backup, and not one (cut short, or damaged): never offered as words, read as text it is noise. */
     val brokenBackup get() = !backup && withLowercaseExtension(fileName).endsWith(LearnBackup.EXTENSION)

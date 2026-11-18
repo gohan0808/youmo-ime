@@ -18,12 +18,13 @@ import org.fcitx.fcitx5.android.engine.InputMethodCatalog
 import org.fcitx.fcitx5.android.engine.table.KeyLabels
 import org.fcitx.fcitx5.android.input.bar.KawaiiBarComponent
 import org.fcitx.fcitx5.android.input.floating.FloatingHandle
-import org.fcitx.fcitx5.android.input.floating.FloatingKeyboard
 import org.fcitx.fcitx5.android.input.keyboard.BaseKeyboard
 import org.fcitx.fcitx5.android.input.keyboard.CodeRowHeight
-import org.fcitx.fcitx5.android.input.keyboard.HandwritingKeyboard
 import org.fcitx.fcitx5.android.input.keyboard.ImKeyboards
 import org.fcitx.fcitx5.android.input.keyboard.KeyboardArea
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardHeightCap
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardWindow
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardStyles
 import org.fcitx.fcitx5.android.input.keyboard.SplitKeyboard
 import org.fcitx.fcitx5.android.input.keyboard.canvas.AndroidTextMeasurer
 import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneBoard
@@ -31,6 +32,7 @@ import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneFonts
 import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneLayout
 import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneThemes
 import org.fcitx.fcitx5.android.input.keyboard.keyboardCompact
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardNames
 import org.fcitx.fcitx5.android.input.keyboard.keyboardMakers
 import org.fcitx.fcitx5.android.input.keyboard.lettersOf
 import org.fcitx.fcitx5.android.input.keyboard.nameOf
@@ -96,7 +98,8 @@ object SwipeFates {
     private class Shown(val label: String, val keyboard: BaseKeyboard, val ime: InputMethodEntry?, val codeRow: ImKeyboards.Layout, val rootsShown: Boolean)
 
     /** A keyboard made for an input method, before the page names it. */
-    private class Made(val ime: InputMethodEntry?, val keyboard: BaseKeyboard, val layout: ImKeyboards.Layout, val roots: Boolean)
+    // [custom] the name of the layout of the user's it draws (061-custom-layout §9), if any
+    private class Made(val ime: InputMethodEntry?, val keyboard: BaseKeyboard, val layout: ImKeyboards.Layout, val roots: Boolean, val custom: String? = null)
 
     /**
      * A settings page's keyboards: one a keyboard of [imes] (the input methods on), [tableLabels] each table's
@@ -121,26 +124,27 @@ object SwipeFates {
         }
 
         private fun shown(imes: List<InputMethodEntry>, tableLabels: Map<String, String?>): List<Shown> {
-            val makers = keyboardMakers({ ctx }, { theme }) { HandwritingKeyboard(ctx, theme, deliver = { _, _ -> }) }
+            val makers = keyboardMakers({ ctx }, { theme })
             val prefs = AppPrefs.getInstance().keyboard
             val scheme = EngineState.shuangpinScheme
             val on = imes.ifEmpty { listOf(null) }
             // one keyboard a layout, told each input method's own as its scene is asked of ([jobs])
             val keyboards = HashMap<String, BaseKeyboard>()
+            val chosen = prefs.imKeyboards()
             val made = on.mapNotNull { ime ->
-                val layout = ImKeyboards.layoutOf(ime?.uniqueName ?: InputMethodCatalog.ENGLISH, prefs.imKeyboards(), scheme)
-                val name = ime?.let { lettersOf(it.uniqueName, prefs.imKeyboards(), scheme) } ?: nameOf(layout, scheme)
-                val keyboard = keyboards[name] ?: makers[name]?.invoke()?.also { keyboards[name] = it } ?: return@mapNotNull null
+                val layout = ImKeyboards.layoutOf(ime?.uniqueName ?: InputMethodCatalog.ENGLISH, chosen, scheme)
+                val name = ime?.let { lettersOf(it.uniqueName, chosen, scheme) } ?: nameOf(layout, scheme)
+                val keyboard = keyboards[name] ?: makers[KeyboardNames.base(name)]?.invoke(KeyboardNames.custom(name))?.also { keyboards[name] = it } ?: return@mapNotNull null
                 // the roots fill the full keyboard's letters alone (a table on the nine keys has none drawn)
                 val roots = layout == ImKeyboards.Layout.TEXT && ime != null && ime.uniqueName in InputMethodCatalog.TABLES &&
                     KeyLabels.of(tableLabels[ime.uniqueName].orEmpty()) == KeyLabels.ROOTS && !keyboardCompact()
-                Made(ime, keyboard, layout, roots)
+                Made(ime, keyboard, layout, roots, ime?.let { ImKeyboards.shown(it.uniqueName, chosen, scheme).custom?.name })
             }
-            // a board named by its page's name; two input methods on one board, each by its own too
-            val boards = made.groupBy { it.keyboard.themeBoard }
-            return made.map { m ->
-                val board = boardName(ctx, m.keyboard.themeBoard)
-                val label = if (boards[m.keyboard.themeBoard].orEmpty().size > 1 && m.ime != null) "$board（${InputMethodNames.of(ctx, m.ime)}）" else board
+            // a board named by its page's name, a layout of the user's by its own; two input methods on one, each by its own too
+            val names = made.map { it.custom ?: boardName(ctx, it.keyboard.themeBoard) }
+            return made.mapIndexed { i, m ->
+                val board = names[i]
+                val label = if (names.count { it == board } > 1 && m.ime != null) "$board（${InputMethodNames.of(ctx, m.ime)}）" else board
                 Shown(label, m.keyboard, m.ime, m.layout, m.roots)
             }
         }
@@ -160,8 +164,9 @@ object SwipeFates {
                 val english = s.ime?.uniqueName == InputMethodCatalog.ENGLISH
                 val punctuation = if (english) emptyMap() else PunctuationStartKeys.known.orEmpty()
                 s.keyboard.onPunctuationUpdate(punctuation)
+                val rows = KeyboardWindow.rowUnits(s.keyboard, look)
                 listOf(upright, turned).mapNotNull { screen ->
-                    val size = size(screen, s.keyboard.themeBoard, s.codeRow)
+                    val size = size(screen, s.keyboard.themeBoard, s.codeRow, rows)
                     val (layout, env) = s.keyboard.shownAs(look, size.width, size.height) ?: return@mapNotNull null
                     // the marks as the keyboard's resolver makes them (key_lists' firsts, the nine keys' letters as the user
                     // set them, t9_letters), the ways as [slots] has them
@@ -169,10 +174,11 @@ object SwipeFates {
                         .marks(KeysState(punctuation = punctuation, ways = on, spots = spots))
                         .let { if (it.charShortcuts == !s.rootsShown) it else it.copy(charShortcuts = !s.rootsShown) }
                     val shownEnv = env.copy(
-                        density = screen.density.toDouble(), landscape = screen.landscape, floating = size.floating,
+                        density = screen.density * size.resize, landscape = screen.landscape, floating = size.floating,
                         split = size.split, marks = marks, typed = null, board = layout.id, keyStyle = keyStyle,
                     )
-                    Job(s.label, screen.landscape, sceneTheme, shownEnv, layout, measurer, s.rootsShown, cascades, ways)
+                    // the turned one of the two, not 横屏: a foldable's inner screen is that both ways up
+                    Job(s.label, screen === turned, sceneTheme, shownEnv, layout, measurer, s.rootsShown, cascades, ways)
                 }
             }
         }
@@ -195,26 +201,31 @@ object SwipeFates {
         return Seen(job.label, job.landscape, fates, job.ways, roots)
     }
 
-    /** The size of the keys of a board ([board]: KeyNames') on [s], as InputView gives it; [floating] its text scale, [split] the letters halved. */
+    /**
+     * The size of the keys of a board ([board]: KeyNames') on [s], as InputView gives it; [floating] its text scale, [split]
+     * the letters halved, [resize] the floating keyboard resized (all of it drawn as much bigger: SceneEnvs.of's density).
+     */
     @VisibleForTesting
-    internal data class Size(val width: Int, val height: Int, val floating: Double?, val split: Boolean)
+    internal data class Size(val width: Int, val height: Int, val floating: Double?, val split: Boolean, val resize: Double = 1.0)
 
     // InputView.updateKeyboardSize and placement: floating as narrow and short as there, docked one-handed or at a
-    // side as SplitKeyboard puts it, a docked handle counted in the cap
+    // side as SplitKeyboard puts it, a docked handle counted in the cap, [rows] the board's (注音's five give way less)
     @VisibleForTesting
-    internal fun size(s: KeyboardArea.Screen, board: String?, codeRow: ImKeyboards.Layout): Size {
+    internal fun size(s: KeyboardArea.Screen, board: String?, codeRow: ImKeyboards.Layout, rows: Double = KeyboardHeightCap.DEFAULT_ROWS): Size {
         val prefs = ThemeManager.prefs
-        if (prefs.floatingKeyboard.getValue()) {
-            val widthDp = FloatingKeyboard.widthDp(s.widthDp)
-            val height = FloatingKeyboard.height(KeyboardArea.requestedHeight(s), widthDp, s.widthDp)
-            return Size(s.dp(widthDp.toDouble()), height, FloatingKeyboard.textScale(widthDp, s.widthDp).toDouble(), false)
+        // each screen by its own shape's 键盘样式: upright floating, turned split (061-wide-keyboard-style)
+        val style = KeyboardStyles.of(s)
+        if (style.floating) {
+            // as resized on [s]'s shape, its own (KeyboardArea.floatingSize)
+            val floating = KeyboardArea.floatingSize(s)
+            return Size(s.dp(floating.widthDp.toDouble()), floating.keysHeightPx, floating.textScale.toDouble(), false, floating.resize.toDouble())
         }
         val handle = if (prefs.alwaysShowHandle.getValue()) s.dp(FloatingHandle.HEIGHT_DP.toDouble()) else 0
-        val height = KeyboardArea.keysHeight(s, CodeRowHeight.keyboardDp(codeRow, KawaiiBarComponent.codeRowFloats()), handle)
+        val height = KeyboardArea.keysHeight(s, CodeRowHeight.keyboardDp(codeRow, KawaiiBarComponent.codeRowFloats()), handle, rows = rows)
         val letters = board == KeyNames.QWERTY
-        val splitting = KeyboardArea.splits(s, floating = false)
+        val splitting = style.splits
         val widthDp = KeyboardArea.widthDp(s, floating = false)
-        val placed = SplitKeyboard.placement(prefs.oneHanded.getValue().dock, prefs.splitDock.getValue().dock, splitting, letters, widthDp)
+        val placed = SplitKeyboard.placement(KeyboardStyles.oneHandedDock(s), prefs.splitDock.getValue().dock, splitting, letters, widthDp)
         return when {
             placed != null -> Size(s.dp(placed.widthDp.toDouble()), height, null, false)
             else -> Size(KeyboardArea.keysWidth(s), height, null, splitting && letters)
@@ -291,7 +302,6 @@ object SwipeFates {
             KeyNames.ZHUYIN_NINE -> R.string.shortcut_page_zy9
             KeyNames.ZHUYIN -> R.string.shortcut_page_zyfull
             KeyNames.NUMBER -> R.string.shortcut_page_number
-            KeyNames.HANDWRITING -> R.string.im_handwriting
             else -> R.string.shortcut_page_full
         },
     )

@@ -161,6 +161,26 @@ test("the app's layouts are the library's, a layout of a page's reads with its o
   assert.equal(missing.ok, false);
   assert.match(missing.problems[0].message, /nowhere/);
   assert.equal(E.readLayout(k14, { 'grouped-bottom': '<fragment' }).ok, false);
+  // as a theme pack's file of a board (主题只管外观, KeyData): a key's held and swiped the app's of its name, what is written
+  // of them and not taken told with its line; as written without the board
+  const zhuyin = read(dir, 'zhuyin.xml');
+  const swiped = zhuyin.replace('shortcut="zyfull/1"', 'shortcut="zyfull/1" swipe-up="commit:ㄅㄅ"');
+  const asPack = E.readLayout(swiped, null, 'zhuyin');
+  assert.ok(asPack.ok, JSON.stringify(asPack.problems));
+  const line = swiped.split('\n').findIndex((l) => l.includes('commit:ㄅㄅ')) + 1;
+  assert.deepEqual(asPack.ignored, [{ file: 'zhuyin', line, what: 'swipe-up' }]);
+  assert.equal(E.buildScene(asPack.layout, light, env, fixed).scene.text(), E.buildScene('zhuyin', light, env, fixed).scene.text());
+  assert.deepEqual(E.defaultMarks(asPack.layout, {}), E.defaultMarks('zhuyin', {}));
+  assert.deepEqual(E.readLayout(swiped, null).ignored, []);
+  assert.deepEqual(E.readLayout(zhuyin, null, 'zhuyin').ignored, [], 'written as the app has it: nothing');
+  // a pack's k14.xml writing based-on="k18" is the 14 keys' still: held as the app's k14, its corners the 14 keys'
+  const as18 = E.readLayout(k14.replace('<keyboard ', '<keyboard based-on="k18" '), null, 'k14');
+  assert.ok(as18.ok, JSON.stringify(as18.problems));
+  assert.deepEqual(E.defaultMarks(as18.layout, {}), E.defaultMarks('k14', {}));
+  assert.equal(E.buildScene(as18.layout, light, env, fixed).scene.text(), E.buildScene('k14', light, env, fixed).scene.text());
+  assert.ok(E.replaces('grouped-bottom') && E.replaces('emoticon') && E.replaces('zhuyin') && !E.replaces('mine'));
+  // the boards the user picks among their own layouts: a pack's file of one is not stood for (061-custom-layout §11)
+  for (const id of ['qwerty', 'k14', 'k18', 'nine', 'number', 'symbols']) assert.ok(!E.replaces(id), id);
   assert.equal(E.buildScene('nope', light, env, fixed).ok, false);
   assert.equal(E.buildScene('qwerty', light, { width: 1080 }, fixed).ok, false, 'an environment without its height');
   assert.equal(E.buildScene('qwerty', light, '{"width": 1, "height": 1, "density": 1, "shift": "twice"}', fixed).ok, false);
@@ -333,6 +353,9 @@ class RecordingContext {
     const view = icons[p.d];
     const corners = [this.map(0, 0), this.map(view.vw, 0), this.map(view.vw, view.vh), this.map(0, view.vh)];
     this.lines.push('icon ' + p.d + ' ' + RecordingContext.box(RecordingContext.bounds(corners)) + ' ' + argb(this.s.fillStyle));
+    // where the viewport's top left went, beside the line (EnginePaintTest's format has its box alone): a square
+    // turned about its middle has the box it had, so a turn is seen only here
+    (this.iconCorners ??= []).push(corners[0].map((v) => Math.round(v * 10) / 10 + 0));
   }
 
   // a stroked text's line is its stroke's; the fill right after it must be the same text at the same place in the
@@ -447,6 +470,39 @@ test("the library's painter draws what the app's ScenePainter draws, line for li
   assert.deepEqual(wrong, []);
 });
 
+// 061-toolbar-icons: the page's bar sample draws an icon as the app's bar does, by the painter's own op
+test('paintIcon draws a name of the icons given in its box and tint, turned about its middle; one not given draws nothing', () => {
+  const ctx = new RecordingContext();
+  assert.ok(E.paintIcon(ctx, { icons }, 'undo', 10, 4, 20, '#ff112233', 0).ok);
+  assert.deepEqual(ctx.written().filter((l) => l.startsWith('icon')), ['icon undo 10.0,4.0,30.0,24.0 #ff112233']);
+  const turned = new RecordingContext();
+  assert.ok(E.paintIcon(turned, { icons }, 'toolbar-expand', 0, 0, 20, '#ff000000', -90).ok);
+  assert.deepEqual(turned.written().filter((l) => l.startsWith('icon')), ['icon toolbar-expand 0.0,0.0,20.0,20.0 #ff000000']);
+  // turned: its box the same, its top left gone to the bottom left (a quarter turn back about the middle, as the
+  // app's canvas.rotate(-90f, cx, cy)); not turned, where it was (review R26 F8154)
+  assert.deepEqual(turned.iconCorners, [[0, 20]]);
+  assert.deepEqual(ctx.iconCorners, [[10, 4]]);
+  const back = new RecordingContext();
+  assert.ok(E.paintIcon(back, { icons }, 'toolbar-collapse', 0, 0, 20, '#ff000000', 90).ok);
+  assert.deepEqual(back.iconCorners, [[20, 0]]);
+  const none = new RecordingContext();
+  assert.ok(E.paintIcon(none, { icons: {} }, 'undo', 0, 0, 20, '#ff000000', 0).ok);
+  assert.ok(!none.written().some((l) => l.startsWith('icon')));
+  assert.equal(E.paintIcon(none, { icons }, 'undo', 0, 0, 20, 'red', 0).ok, false, 'a tint not #aarrggbb');
+  assert.equal(E.paintIcon({}, { icons }, 'undo', 0, 0, 20, '#ff000000', 0).ok, false, 'not a context');
+});
+
+// the icon page's groups: every name the engine draws in one at least, the bar's own fallback only where it differs
+test("the bar's icons block groups every icon the app draws, and the menu key's ⌄ turned", () => {
+  const bar = JSON.parse(read(testdata, 'bar-icons.json'));
+  const all = new Set(Object.values(bar.groups).flat());
+  assert.deepEqual([...all].sort(), Object.keys(icons).sort());
+  assert.deepEqual(Object.keys(bar.groups), ['return', 'keys', 'commands', 'bar', 'panel']);
+  assert.ok(bar.groups.bar.includes('undo') && bar.groups.commands.includes('undo'), 'one name, one meaning: undo in both');
+  assert.deepEqual(Object.keys(bar.toolbarFallback).sort(), ['choose-keyboard', 'hide-keyboard']);
+  assert.deepEqual(bar.turned, { 'toolbar-expand': -90, 'toolbar-collapse': 90 });
+});
+
 test('a page with no icon or image for an op draws what it can: a nine-slice its fallback colour, nothing for the rest', () => {
   // theme 3.0's space key an image over its key's colour (look-3.0.xml): that colour where the page has no image
   const t = E.readTheme(read(data, 'facade', 'look-3.0.xml'), null, null);
@@ -543,4 +599,50 @@ test('readIcon gives each path its own colour (CSS order, alpha last) or null, a
   assert.equal(r.icon.paths[0].fill, null);
   assert.match(r.icon.paths[0].d, /^M2 2 ?L6 2/);
   assert.equal(r.icon.paths[1].fill >>> 0, 0x80ff0000);
+});
+
+// 061-custom-layout L1: the page's layout check and writer are the JVM's (LayoutCheckTest, LayoutWriterTest)
+test('checkLayout answers as the app\'s import would, and writeLayout writes what the JVM writes', () => {
+  const qwerty = read(scene, 'commonMain', 'layouts', 'qwerty.xml');
+  const own = qwerty.replace('id="qwerty"', 'id="my-qwerty" based-on="qwerty"');
+  const r = E.checkLayout(own, '0.6.1', null);
+  assert.equal(r.ok, true, JSON.stringify(r.errors));
+  assert.equal(r.family, 'letters');
+  assert.equal(r.minApp, '0.6.1', 'based-on= is 0.6.1\'s');
+  assert.deepEqual(Array.from(r.pads), []);
+  // the commit: texts its base types (/ @ . .com) are not listed; another text on a base key is
+  assert.deepEqual(Array.from(r.commits), []);
+  assert.ok(!Array.from(r.warnings).some((w) => w.key === 'commits'));
+  // (.cn is the base's too: its .com key's list types it)
+  const cn = E.checkLayout(own.replace('send="commit:.com"', 'send="commit:.io"'), '0.6.1', null);
+  assert.deepEqual(Array.from(cn.commits), ['.io']);
+  assert.ok(Array.from(cn.warnings).some((w) => w.key === 'commits'));
+  const newer = E.checkLayout(own.replace(/(<keyboard[^>]*>)/, '$1<meta min-app="9.0.0"/>'), '0.6.1', null);
+  assert.deepEqual(Array.from(newer.errors).map((e) => [e.key, Array.from(e.args)]), [['newer', ['9.0.0']]]);
+  const bad = E.checkLayout('<keyboard', '0.6.1', null);
+  assert.equal(bad.ok, false);
+  assert.equal(bad.errors[0].key, 'read');
+  assert.equal(E.checkLayout(42, '0.6.1', null).ok, false, 'a value of the wrong type is a problem');
+  assert.equal(E.writeLayout(E.layout('k18')), read(data, 'writer', 'k18.layout'));
+});
+
+// a theme pack's layout made one of the user's (PackLayouts.convert, 061-custom-layout §2.3): the page's is the app's, the
+// text the JVM's own test holds (commonTest/data/convert)
+test("a pack's layout made one of the user's is the JVM's, byte for byte", () => {
+  const k18 = read(data, 'mint-k17', 'layouts', 'k18.xml');
+  const c = E.convertPackLayout('薄荷 17 键', { author: '小明', license: 'CC-BY-4.0' }, 'k18', k18, null, '0.6.1');
+  assert.ok(c.ok, c.why);
+  assert.equal(c.text, read(data, 'convert', 'k17-motion.layout'));
+  assert.equal(c.name, '薄荷 17 键 · 17 键');
+  // its HJK on H's name a key of its own, its letters' (L6 verifier R-S1)
+  assert.deepEqual(Object.assign({}, c.renames), { 'g18/h': c.id + '/hjk' });
+  const named = E.convertPackLayout('薄荷', null, 'k18', k18.replace('shortcut="g18/q"', 'shortcut="mine"'), null, '0.6.1');
+  assert.deepEqual(Object.assign({}, named.renames), { 'fn/mine': named.id + '/r1c1', 'g18/h': named.id + '/hjk' });
+  // a board a pack still stands for: not made one, why said
+  const zhuyin = E.convertPackLayout('薄荷', null, 'zhuyin', E.layoutSource('zhuyin'), null, '0.6.1');
+  assert.equal(zhuyin.ok, false);
+  assert.ok(zhuyin.why);
+  // what it makes reads as a layout of the user's (readOwnLayout, as 外观 → 布局 reads it)
+  const own = E.readOwnLayout(c.text);
+  assert.ok(own.ok, JSON.stringify(own.problems));
 });

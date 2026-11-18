@@ -4,6 +4,7 @@
  */
 
 import org.gradle.api.DefaultTask
+import org.gradle.api.GradleException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.file.ConfigurableFileCollection
@@ -56,7 +57,8 @@ import javax.inject.Inject
  * For now the transducer, its tokens and the tagger come from [LOCAL_PROPERTY]'s directory alone (the
  * pinned release is the offline model; its download tasks stay registered, wired to nothing, for when
  * the streaming one is released); the hotwords and the VAD are built or downloaded (SHA-256 checked,
- * DownloadTask). All go into `voice/` of the voice pack.
+ * DownloadTask). All go into `voice/` of the voice pack. The directory is checked against the listing of
+ * the pack's version ([listing]): a machine whose directory is another version's builds no pack under this one.
  */
 class VoiceDataPlugin : Plugin<Project> {
 
@@ -84,16 +86,18 @@ class VoiceDataPlugin : Plugin<Project> {
         internal val ORT_FILES = listOf("encoder.ort", "decoder.ort", "joiner.ort")
 
         /**
-         * A directory of the 0.6.0 models instead of the downloads, until they are published
+         * A directory of the voice pack's models instead of the downloads, until they are published
          * (dev/design/060-voice-tagger.md §5.1): the streaming transducer's [ORT_FILES], its
          * [MODEL_FILES] and [BPE_MODEL], and the polish tagger's [TAGGER_FILES]. A machine's own,
-         * in ~/.gradle/gradle.properties.
+         * in ~/.gradle/gradle.properties. What each voice pack version has of it: [listing]
+         * (`shasum -a 256 -c` in the directory); the build holds the directory to it.
          */
         const val LOCAL_PROPERTY = "youmo.voiceModelDir"
 
-        /** [value] trimmed, a leading `~/` taken as [home] (as it is, a `$` in it no group reference) */
-        fun homed(value: String, home: String): String = value.trim().replaceFirst(Regex("^~(?=/)"), Regex.escapeReplacement(home))
         internal val TAGGER_FILES = listOf("polish-tagger.ort", "polish-tagger.json")
+
+        /** the model files voice pack [version] has of [LOCAL_PROPERTY]'s directory, by SHA-256 (the root project's) */
+        internal fun listing(version: Int) = "gradle/voice-pack-v$version.sha256"
 
         // whether a stretch heard is speech at all (VoiceQuiet): not where it ends, as before 0.6.0
         private const val VAD_URL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx"
@@ -144,11 +148,14 @@ class VoiceDataPlugin : Plugin<Project> {
             outputFile.set(target.layout.buildDirectory.file("generated/voice-hotwords/hotwords.txt"))
         }
         val localDir = target.providers.gradleProperty(LOCAL_PROPERTY)
+        // the version AssetPacksPlugin packs under (app/packs.properties)
+        val version = packsProperty(packsProperties(target), "voice.version")
         target.tasks.register<CopyVoiceModels>(COPY_TASK) {
             // nothing downloaded for the model without it: copy() then fails, saying where it comes from
             if (localDir.isPresent) {
                 local.set(target.layout.projectDirectory.dir(homed(localDir.get(), System.getProperty("user.home"))))
             }
+            expected.set(target.rootProject.layout.projectDirectory.file(listing(version)))
             this.hotwords.set(hotwords.flatMap { it.outputFile })
             this.vad.set(vad.flatMap { it.outputFile })
             outputDir.set(target.layout.buildDirectory.dir("generated/voice-assets"))
@@ -189,7 +196,7 @@ class VoiceDataPlugin : Plugin<Project> {
         }
     }
 
-    /** The model (ORT), its tokens and the tagger (from [local]), the hotwords and the VAD, as `voice/` of the voice pack. */
+    /** The model (ORT), its tokens and the tagger (from [local], as [expected] lists them), the hotwords and the VAD, as `voice/` of the voice pack. */
     @DisableCachingByDefault(because = "linking is quicker than the cache would be")
     abstract class CopyVoiceModels : DefaultTask() {
         /** [LOCAL_PROPERTY]'s directory (`~/` taken as home): without it [copy] fails */
@@ -197,6 +204,11 @@ class VoiceDataPlugin : Plugin<Project> {
         @get:InputDirectory
         @get:PathSensitive(PathSensitivity.RELATIVE)
         abstract val local: DirectoryProperty
+
+        /** [listing] of the pack's version: each file of [local] the pack takes, by SHA-256 */
+        @get:InputFile
+        @get:PathSensitive(PathSensitivity.NAME_ONLY)
+        abstract val expected: RegularFileProperty
 
         @get:InputFile
         @get:PathSensitive(PathSensitivity.NAME_ONLY)
@@ -219,12 +231,33 @@ class VoiceDataPlugin : Plugin<Project> {
             val local = checkNotNull(local.orNull?.asFile) {
                 "voice: the streaming model and the polish tagger come from $LOCAL_PROPERTY alone for now (in ~/.gradle/gradle.properties); the pinned release is the offline model"
             }
+            check(local, expected.get().asFile)
             for (name in MODEL_FILES) link(local.resolve(name), out.resolve(name))
             for (name in ORT_FILES) link(local.resolve(name), out.resolve(name))
             for (name in TAGGER_FILES) link(local.resolve(name), out.resolve(name))
             out.resolve("bpe.vocab").writeText(vocabulary(local.resolve(BPE_MODEL).readBytes()))
             hotwords.get().asFile.copyTo(out.resolve("hotwords.txt"))
             vad.get().asFile.copyTo(out.resolve("silero_vad.onnx"))
+        }
+
+        // the directory is a machine's own, not in the repo: a pack under this version with another
+        // version's model would ship it silently
+        // (a listing missing for the version is Gradle's to say: expected is an @InputFile)
+        private fun check(local: File, listing: File) {
+            val sums = listing.readLines().filter { it.isNotBlank() && !it.startsWith("#") }.associate { line ->
+                val fields = line.trim().split(Regex("\\s+"), limit = 2)
+                if (fields.size < 2) throw GradleException("voice: ${listing.name}'s line '$line' is not `<sha256>  <file>`")
+                fields[1].removePrefix("*") to fields[0]
+            }
+            for (name in MODEL_FILES + ORT_FILES + TAGGER_FILES + BPE_MODEL) {
+                val sum = sums[name] ?: throw GradleException("voice: ${listing.name} does not list $name")
+                val file = local.resolve(name)
+                val actual = if (file.isFile) sha256Of(file) else "missing"
+                // shasum writes lower case; a listing written by hand may not
+                if (!actual.equals(sum, ignoreCase = true)) {
+                    throw GradleException("voice: $LOCAL_PROPERTY's $name ($actual) is not the one ${listing.name} lists ($sum): point $LOCAL_PROPERTY at that pack's models")
+                }
+            }
         }
 
         // some 175 MB in the local directory: a second name for it, not a second copy

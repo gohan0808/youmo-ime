@@ -3,14 +3,14 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
 plugins {
-    id("org.fcitx.fcitx5.android.app-convention")
-    id("org.fcitx.fcitx5.android.native-app-convention")
-    id("org.fcitx.fcitx5.android.build-metadata")
-    id("org.fcitx.fcitx5.android.engine-data")
-    id("org.fcitx.fcitx5.android.voice-data")
-    id("org.fcitx.fcitx5.android.handwriting-data")
-    id("org.fcitx.fcitx5.android.asset-packs")
-    id("org.fcitx.fcitx5.android.unit-test-resources")
+    id("youmo.app-convention")
+    id("youmo.native-app-convention")
+    id("youmo.build-metadata")
+    id("youmo.engine-data")
+    id("youmo.voice-data")
+    id("youmo.handwriting-data")
+    id("youmo.asset-packs")
+    id("youmo.unit-test-resources")
     alias(libs.plugins.kotlin.parcelize)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
@@ -77,13 +77,27 @@ fun Test.unitTestSettings() {
     })
     // fixtures found from any working directory (an IDE's run too): core/Fixtures.kt
     systemProperty("uat.fixtures", rootProject.file("uat/fixtures").path)
+    // read from disk, not the classpath: each an input, so an edit to it alone runs the tests again rather than
+    // leaving them up to date. The fixtures (Fixtures, BackupUatTest, PinyinDictManagerTest)
+    inputs.dir(rootProject.file("uat/fixtures")).withPropertyName("uatFixtures")
+        .withPathSensitivity(org.gradle.api.tasks.PathSensitivity.RELATIVE)
+    // the strokes' names (StrokeNamesTest), the docs' settings tables (SettingsPagesTest), the punctuation table
+    // the app ships (ChinesePunctuation: assets are not on the unit tests' classpath)
+    inputs.files(
+        rootProject.file("lexicon/stroke-order.tsv"), rootProject.file("docs/settings.md"), rootProject.file("docs/words.md"),
+        file("src/main/host-assets/pkgdata/punctuation/punc.mb.zh_CN"),
+    ).withPropertyName("repoFiles").withPathSensitivity(org.gradle.api.tasks.PathSensitivity.RELATIVE)
+    // the Room schemas each version was exported as (ClipboardDatabaseMigrationTest)
+    inputs.dir(file("schemas")).withPropertyName("roomSchemas")
+        .withPathSensitivity(org.gradle.api.tasks.PathSensitivity.RELATIVE)
     // the theme maker's shared cases (ThemeMakerRulesTest): compared, or with -PupdateThemeMaker written
     systemProperty("themeMaker.testdata", rootProject.file("web/theme-maker/test/testdata").path)
     systemProperty("enginePaint.out", layout.buildDirectory.dir("w1-pixel").get().asFile.path)
     systemProperty("themeMaker.update", project.hasProperty("updateThemeMaker").toString())
-    // the built-in themes' files (src/commonMain/themes) and Transparent's, test data (src/commonTest/data): TestThemes
+    // the built-in themes' files (src/commonMain/themes, raw resources too) and the scene's test data (src/commonTest/data:
+    // TestThemes' Transparent, EnginePaintTest, the k17 and qwerty-060 layouts)
     systemProperty("scene.src", rootProject.file("lib/keyboard-scene/src").path)
-    inputs.file(rootProject.file("lib/keyboard-scene/src/commonTest/data/transparent.xml")).withPropertyName("transparentTheme")
+    inputs.dir(rootProject.file("lib/keyboard-scene/src/commonTest/data")).withPropertyName("sceneTestData")
         .withPathSensitivity(org.gradle.api.tasks.PathSensitivity.RELATIVE)
     // compared with the page and its files: a change there is a reason to run again, not an up-to-date skip
     inputs.dir(rootProject.file("web/theme-maker")).withPropertyName("themeMaker")
@@ -156,30 +170,6 @@ android {
         // Chinese and English only, library translations too; zh-HK/zh-MO still resolve to
         // values-zh-rTW through Android's Hant script matching
         localeFilters += listOf("en") + Versions.translations.map { it.replace("_", "-r") }
-        // what the native host's CMake install left in src/main/assets (usr/: fcitx's data and
-        // catalogs) and its data descriptor (descriptor.json), in checkouts that built it:
-        // ignored files, never deleted
-        // a non-empty list replaces aapt's default one rather than adding to it, so that is
-        // repeated first (dot files, `_` dirs, backups~, VCS and OS litter)
-        @Suppress("UnstableApiUsage")
-        ignoreAssetsPatterns += listOf(
-            "!.svn", "!.git", "!.ds_store", "!*.scc", ".*", "<dir>_*", "!CVS", "!thumbs.db",
-            "!picasa.ini", "!*~",
-        ) + listOf("<dir>usr", "descriptor.json")
-    }
-
-    // the native fcitx host's libraries, no longer built: copy-fcitx5-modules and CMake copied
-    // them into AGP's obj dirs, which keep .so files from older builds
-    packaging {
-        jniLibs {
-            excludes += listOf(
-                "libspell", "libimselector",
-                "libFcitx5Core", "libFcitx5Utils", "libFcitx5Config", "libnative-lib",
-                "libandroidengine", "libandroidfrontend", "libandroidnotification",
-                "libchttrans", "libclipboard", "libfullwidth", "libpunctuation", "libquickphrase",
-                "libunicode", "libscel2org5",
-            ).map { "**/$it.so" }
-        }
     }
 
     testOptions {
@@ -218,6 +208,12 @@ android {
         kotlin.srcDir("src/debug/java")
         manifest.srcFile("src/debug/AndroidManifest.xml")
     }
+}
+
+// 0.3.x's native host installed fcitx's data (usr/) and its descriptor into src/main/assets; they are
+// untracked, so an old checkout still has them and they would be packed. Stop rather than filter.
+listOf("src/main/assets/usr", "src/main/assets/descriptor.json").map(::file).filter { it.exists() }.let { left ->
+    check(left.isEmpty()) { "0.3.x leftovers would go into the APK, delete them: ${left.joinToString()}" }
 }
 
 // TablesSettingsUatTest runs the real engine on build/generated's pinyin and table blobs. Nothing
@@ -333,8 +329,6 @@ dependencies {
     implementation(libs.androidx.startup)
     implementation(libs.androidx.viewpager2)
     implementation(libs.material)
-    implementation(libs.arrow.core)
-    implementation(libs.arrow.functions)
     implementation(libs.flexbox)
     implementation(libs.dependency)
     implementation(libs.timber)

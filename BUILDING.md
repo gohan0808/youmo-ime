@@ -30,8 +30,8 @@ cd youmo-ime
 `youmo-voice-v<N>.youmopack`（语音包，可选：语音识别模型），装好应用后在 **设置 → 资源包** 里导入（只在模拟器上也可以用
 `uat/tools/uat.py packs --port <端口>` 从电脑导入，它会先装上 debug 包；真机在设置里导入）。资源包用 Ed25519 签名：local.properties 里写了 `youmo.packKey`（正式私钥的路径）
 就用它签，否则用仓库里的测试密钥签；正式版只认正式公钥（`app/pack-keys/release.pub`），debug 和 benchmark 包两种都认；所以自己打正式版时，要把自己的公钥放进 `app/pack-keys/release.pub` 并设好 `youmo.packKey`，否则它不认自己做出的资源包。
-`./gradlew :app:assembleRelease` 打正式版。默认四种 ABI 都编，只编一种快得多：手机加 `-PbuildABI=arm64-v8a`（发布的安装包就是这样打的），
-Apple 芯片上的 arm64 模拟器同样用 arm64-v8a；x86_64 的模拟器或 redroid 加 `-PbuildABI=x86_64`。
+`./gradlew :app:assembleRelease` 打正式版。默认只编 arm64-v8a（发布的安装包就是它），其他 ABI 用 `-PbuildABI` 指定（逗号分隔可以编几种）：
+Apple 芯片上的 arm64 模拟器用默认的就行，x86_64 的模拟器或 redroid 加 `-PbuildABI=x86_64`。
 
 从 0.3.x 的检出更新时（原生 fcitx5 和 chinese-addons 已删掉，fcitx5 子模块也去掉了），pull/merge 前先执行一次，否则子模块留下的文件会挡住 git：
 
@@ -48,7 +48,7 @@ rm -rf lib/fcitx5 lib/fcitx5-chinese-addons
 
 - libime 发布的词典和码表文本源，rime-stroke 的笔画表；
 - Unicode 的 `emoji-test.txt`、CLDR 的 `annotations/zh.xml`（表情），kfcd/chaizi 的 `chaizi-jt.txt`（拆字）；字卡的笔顺不下载，是仓库里的 `lexicon/stroke-order.tsv`；
-- 语音包的识别模型、词表和语音整理模型（`polish-tagger.ort`、`polish-tagger.json`）不下载，取自 `youmo.voiceModelDir` 指的本机目录；
+- 语音包的识别模型、词表和语音整理模型（`polish-tagger.ort`、`polish-tagger.json`）不下载，取自 `youmo.voiceModelDir` 指的本机目录，这个目录里的文件要和语音包当前版本的清单 `gradle/voice-pack-v<N>.sha256`（N 是 `app/packs.properties` 的 `voice.version`）一致，不一致时构建失败并说是哪个文件。语音整理模型训练用了只许非商业使用的数据（MagicData-RAMC、RealTalk-CN，见 README「许可与数据」），所以语音包单独授权、仅供非商业使用（CC BY-NC-SA 4.0）；
 - 本仓库 release 里的数据，每类一个，版本写在 `build-logic` 里：
 
 | release | 内容 | 放进资源包的 |
@@ -131,8 +131,8 @@ it but in two **resource packs** under `app/build/packs/`: `youmo-text-v<N>.youm
 models, handwriting) and the optional `youmo-voice-v<N>.youmopack` (the speech recognizer), imported under **Settings → Resource packs**
 (on an emulator only, also from the computer: `uat/tools/uat.py packs --port <port>`, which installs the debug APK first; on a phone, in Settings). Packs are Ed25519-signed: with the release
 key's path as `youmo.packKey` in local.properties, by it, else by the repository's test key; a release build trusts the release
-key alone (`app/pack-keys/release.pub`), a debug or benchmark build both; so a release build of your own needs your public key in `app/pack-keys/release.pub` and `youmo.packKey` set, else it refuses the packs it builds. `./gradlew :app:assembleRelease` makes the release APK. All four ABIs are built by default; one is much faster:
-`-PbuildABI=arm64-v8a` for phones (as the released APKs are built) and an arm64 emulator (Apple silicon), `-PbuildABI=x86_64` for an x86_64 emulator or redroid.
+key alone (`app/pack-keys/release.pub`), a debug or benchmark build both; so a release build of your own needs your public key in `app/pack-keys/release.pub` and `youmo.packKey` set, else it refuses the packs it builds. `./gradlew :app:assembleRelease` makes the release APK. Only arm64-v8a is built by default (phones, as the released APKs are built, and an arm64 emulator on Apple silicon); another ABI is
+chosen with `-PbuildABI=`: `-PbuildABI=x86_64` for an x86_64 emulator or redroid.
 
 Updating a checkout of 0.3.x (native fcitx5 and chinese-addons are deleted, and with them the fcitx5 submodule): run this once
 before pulling or merging, or the files the submodule left behind get in git's way:
@@ -151,7 +151,7 @@ The build downloads its data and checks the SHA-256 of each file:
 
 - the dictionary and code table text sources published by libime, and rime-stroke's stroke table;
 - Unicode's `emoji-test.txt` and CLDR's `annotations/zh.xml` (emoji), kfcd/chaizi's `chaizi-jt.txt` (拆字); a character card's stroke orders are not downloaded but `lexicon/stroke-order.tsv` in the repository;
-- for the voice pack, X-ASR's original model archive (for its token list) and silero VAD; the voice pack's recognizer model, its tokens and the polish tagger (`polish-tagger.ort`, `polish-tagger.json`) are not downloaded but taken from the local directory `youmo.voiceModelDir` names;
+- for the voice pack, X-ASR's original model archive (for its token list) and silero VAD; the voice pack's recognizer model, its tokens and the polish tagger (`polish-tagger.ort`, `polish-tagger.json`) are not downloaded but taken from the local directory `youmo.voiceModelDir` names, whose files must be the ones the voice pack's version lists in `gradle/voice-pack-v<N>.sha256` (N: `voice.version` of `app/packs.properties`; the build fails naming the file that differs). The polish tagger is trained on data allowed for non-commercial use only (MagicData-RAMC, RealTalk-CN; README's "Licences and data"), so the voice pack is licensed apart from the app, for non-commercial use only (CC BY-NC-SA 4.0);
 - this repository's data releases, one of each kind, their versions pinned in `build-logic`:
 
 | Release | What | In the packs as |

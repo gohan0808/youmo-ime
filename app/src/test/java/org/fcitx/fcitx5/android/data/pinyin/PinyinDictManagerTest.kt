@@ -8,8 +8,10 @@ import android.os.Environment
 import kotlinx.coroutines.runBlocking
 import org.fcitx.fcitx5.android.FcitxApplication
 import org.fcitx.fcitx5.android.R
+import org.fcitx.fcitx5.android.Uat
 import org.fcitx.fcitx5.android.core.HostConfigDir
 import org.fcitx.fcitx5.android.core.phoneStorage
+import org.fcitx.fcitx5.android.data.pinyin.dict.PinyinDictionary
 import org.fcitx.fcitx5.android.data.pinyin.dict.TextDictionary
 import org.fcitx.fcitx5.android.engine.assertRows
 import org.fcitx.fcitx5.android.engine.user.DictionaryFormat
@@ -17,6 +19,7 @@ import org.fcitx.fcitx5.android.utils.appContext
 import org.fcitx.fcitx5.android.utils.errorArg
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -55,6 +58,67 @@ class PinyinDictManagerTest {
         dir.listFiles()?.forEach { it.deleteRecursively() }
         // made when the manager first ran, under that test's application: it may be gone since
         dir.mkdirs()
+    }
+
+    // import-edit-2: a binary dictionary past its kind's cap is refused as it is copied, before anything reads it whole
+    // (an OutOfMemoryError there took the keyboard down with this process), the copy left in no cache; nothing is
+    // read past the cap ([endless] fails the test there). R25r2 F7856: the user dictionary's import (readWords) copies
+    // into the cache as the base's does, and went through an unbounded copyTo; and each kind has the cap of how it is
+    // read (maxImported). Text has no row: it is streamed, capped for the cache alone, and a row would write its
+    // 512 MiB to the test's disk
+    @Test
+    @Uat("WD-14z3")
+    fun aBinaryDictionaryPastItsCapIsRefusedAsItIsCopied() {
+        class Row(val why: String, val name: String, val type: PinyinDictionary.Type, val says: Boolean, val import: (InputStream, String) -> Unit)
+        val prepare = { stream: InputStream, name: String -> PinyinDictManager.prepare(stream, name).let { } }
+        val readWords = { stream: InputStream, name: String -> runBlocking { PinyinDictManager.readWords(stream, name) { it.count() } }.let { } }
+        assertRows(
+            listOf(
+                Row("a .scel for the base (the page's prepare): read whole into memory, so capped; the page shows why", "big.scel", PinyinDictionary.Type.Sougou, true, prepare),
+                Row("a .scel for the user dictionary (readWords), its extension in capitals: the same copy, the same cap", "BIG.SCEL", PinyinDictionary.Type.Sougou, false, readWords),
+                Row("a .dict for the base: read whole and decompressed, its own cap", "big.dict", PinyinDictionary.Type.LibIME, true, prepare),
+            ),
+            { it.why },
+        ) { row ->
+            val cache = importCopies()
+            val refused = assertThrows(PinyinDictManager.Refusal::class.java) { row.import(endless(PinyinDictManager.maxImported(row.type)), row.name) }
+            assertEquals(DictionaryFormat.Reason.TOO_LARGE, refused.reason)
+            // what the page shows of it (WD-14z3): 格式不支持 and that the file is too large
+            if (row.says) assertEquals(appContext.getString(R.string.dict_refused, appContext.getString(R.string.dict_refused_too_large)), refused.message)
+            assertEquals(emptySet<String>(), importCopies() - cache)
+        }
+    }
+
+    // an import's copies in the cache (PinyinDictManager's createTempFile "import…"), not the whole cache: it is the
+    // application's, written meanwhile by others (a temp dir, a theme's unpacking, an earlier test's work landing late),
+    // and compared whole the case failed on what was none of the import's
+    private fun importCopies() = appContext.cacheDir.list().orEmpty().filter { it.startsWith("import") }.toSet()
+
+    // zeroes without end, failing the test if read past [cap]: what is copied stops there
+    private fun endless(cap: Long) = object : InputStream() {
+        private var given = 0L
+
+        override fun read(): Int = if (given++ > cap) error("read past the cap") else 0
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int {
+            if (given > cap) error("read past the cap")
+            b.fill(0, off, off + len)
+            given += len
+            return len
+        }
+    }
+
+    // audit-061 import-edit-7: one rule of what a file names in the base, the settings page's and importFromInputStream's
+    @Test
+    fun aFileIsNamedInTheBaseAsTheSettingsPageNamesIt() {
+        assertEquals("luna_pinyin", PinyinDictManager.dictionaryName("luna_pinyin.dict.yaml"))
+        assertEquals("mine", PinyinDictManager.dictionaryName("mine.txt"))
+        assertNull(PinyinDictManager.dictionaryName(".dict.yaml"))
+        assertNull(PinyinDictManager.dictionaryName(".hidden.txt"))
+        val hidden = Provided("搭子 da'zi 0\n".toByteArray())
+        assertTrue(PinyinDictManager.importFromInputStream(hidden, ".hidden.txt").isFailure)
+        assertTrue(hidden.closed)
+        assertEquals(emptyList<String>(), dir.list()!!.filter { it.startsWith(".hidden") })
     }
 
     @Test
@@ -270,7 +334,10 @@ class PinyinDictManagerTest {
             empty()
             val mine = PinyinDictManager.importFromInputStream("幽默 you'mo\n".byteInputStream(), "mine.txt").getOrThrow()
             assertTrue(row.why, PinyinDictManager.turn(mine, false))
-            if (!row.compiledFirst) MergedDictionary.refreshNow(dir)
+            // the compile the turn queued, done before an older build's text is put there: one it converted
+            // as it was written (made, not yet written to) was committed empty and deleted under the write,
+            // its words gone. An older build is never running beside this one's compile
+            MergedDictionary.refreshNow(dir)
             File(dir, "big.txt").writeText("搭子 da'zi 0.0\n妮 ni 0.0\n你 ni 0.0\n")
             if (row.compiledFirst) MergedDictionary.refreshNow(dir)
             assertEquals(row.why, row.compiledFirst, File(dir, MergedDictionary.FILE).exists())

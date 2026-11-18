@@ -1,40 +1,54 @@
-// Builds the site's two pages, each one file that needs nothing else: index.html (the maker, 060-render-p3 M1)
+// Builds the site's pages, each one file that needs nothing else: index.html (the maker, 060-render-p3 M1)
 // from src/ (page.html with style.css, lib.js, maker.js, form.js, src/panels/*.js and ui.js put in) and classic/index.html (the maker
 // before 0.6.0, kept till 0.6.x ends) from src/classic/ (its page.html, style.css and ui.js, src/lib.js shared),
+// layout/index.html (the layout maker, 061-custom-layout §12) from src/layout/ (its page.html, style.css over src/'s,
+// layout-maker.js and ui.js; src/'s form.js and maker.js shared),
 // the CSP's script hashes worked out, and the generated blocks (youmo-format,
-// youmo-presets, youmo-layout, youmo-icons, youmo-engine-icons: the app's tests write them, never by
-// hand) kept from the page there is, each page carrying only the blocks its page.html has a slot for
-// (the maker: youmo-format, youmo-engine-icons; classic: the four it reads), the page's fonts (fonts/,
+// youmo-presets, youmo-layout, youmo-icons, youmo-engine-icons, youmo-bar-icons: the app's tests write them, never by
+// hand) read from generated/<id>.json, each page carrying only the blocks its page.html has a slot for
+// (the maker: youmo-format, youmo-engine-icons, youmo-bar-icons; classic: the four it reads), the page's fonts (fonts/,
 // tools/subset-fonts.py) put in.
+// No page is in git (R25 B12): only their sources and the generated files are, so a change to src/ is
+// committed once. CI (pages.yml, unit_test.yml), the tests (in memory) and dev/serve.mjs make them.
 // The engine (060-render-p3 W1: lib/keyboard-scene's library, `./gradlew :lib:keyboard-scene:youmoEngine`)
-// is not in git: index.html holds NO_ENGINE in its place, and the engine goes in only where the page is
-// built (pages.yml; the tests, in memory), so a change to the engine's code never has to make the page
-// again (classic draws without it: its page has no engine slot). The app's tests write each block into
-// every page that has it (ThemeMakerTestdata.block).
-// Edit src/, then: node web/theme-maker/tools/assemble.mjs        (both pages, as git keeps them)
-// The pages with the engine: node web/theme-maker/tools/assemble.mjs --engine [out]   (out: build/index.html,
-// classic beside it at classic/index.html)
-// The page's test fails when a page is not what this makes of src/ and the fonts.
+// goes in only with --engine; without it the page holds NO_ENGINE in its place (classic draws without
+// it: its page has no engine slot).
+// The pages to open from this checkout: node web/theme-maker/tools/assemble.mjs --engine [out]   (out: build/index.html,
+// classic and layout beside it at classic/index.html, layout/index.html); without --engine: the three here, no engine.
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-export const GENERATED = ['youmo-format', 'youmo-presets', 'youmo-layout', 'youmo-icons', 'youmo-engine-icons'];
+export const GENERATED = ['youmo-format', 'youmo-presets', 'youmo-layout', 'youmo-icons', 'youmo-engine-icons', 'youmo-bar-icons'];
+
+/** Where the app's tests write the generated blocks, each as <id>.json (ThemeMakerTestdata.block). */
+export const GENERATED_DIR = join(root, 'generated');
+
+/** The generated block [id] as a page has it: generated/<id>.json without its last newline. */
+export function generated(id, dir = GENERATED_DIR) {
+  const file = join(dir, id + '.json');
+  if (!existsSync(file)) throw new Error('no ' + id + ' block: ' + file + ' is missing (the app\'s tests write it: -PupdateThemeMaker)');
+  return readFileSync(file, 'utf8').replace(/\n+$/, '');
+}
 
 /** The engine as the build writes it: what the page's youmo-engine script is. */
 export const ENGINE = join(root, '..', '..', 'lib', 'keyboard-scene', 'build', 'youmo-engine', 'youmo-engine.js');
 
-/** What index.html has for the engine's script, as git keeps it: the engine is put in when the page is built. */
+/** What the page has for the engine's script when it is made without --engine. */
 export const NO_ENGINE = '/* the engine (060-render-p3 W1) is put in where the page is built: ./gradlew :lib:keyboard-scene:youmoEngine, then node web/theme-maker/tools/assemble.mjs --engine */';
 
 /** Where `--engine` writes the page with its engine when it is given no file (build/: not in git). */
 export const BUILT = join(root, 'build', 'index.html');
 
-/** The classic page's sources and where git keeps it (060-render-p3 §5.1: …/theme-maker/classic/). */
+/** The classic page's sources and where it is made (060-render-p3 §5.1: …/theme-maker/classic/). */
 export const CLASSIC_SRC = join(root, 'src', 'classic');
 export const CLASSIC = join(root, 'classic', 'index.html');
+
+/** The layout maker's sources and where it is made (061-custom-layout §12.1: …/theme-maker/layout/). */
+export const LAYOUT_SRC = join(root, 'src', 'layout');
+export const LAYOUT = join(root, 'layout', 'index.html');
 
 /** The library both pages run (youmo-lib): the app's 3.0 file format, its zip, its rules. */
 export const LIB = join(root, 'src', 'lib.js');
@@ -87,31 +101,62 @@ export function examplesJson(dir = EXAMPLES) {
   })).replace(/</g, '\\u003c');
 }
 
+/** The layout maker's examples (§12.4 从示例开始): examples/layouts/, layouts.json (`[{id, note}]`) and each `<id>.layout`. */
+export const LAYOUT_EXAMPLES = join(EXAMPLES, 'layouts');
+
+const XML_ENTITIES = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" };
+
+/** [text], an attribute's value as written, as XML reads it: its five entities and character references undone. */
+export function unescapeXml(text) {
+  return text.replace(/&(?:#x([0-9a-fA-F]+)|#([0-9]+)|(lt|gt|amp|quot|apos));/g, (m, hex, dec, named) =>
+    named ? XML_ENTITIES[named] : String.fromCodePoint(parseInt(hex ?? dec, hex ? 16 : 10)));
+}
+
 /**
- * The page made of [src]'s files, the generated blocks taken from [old] (the index.html as it is), the
- * engine of [engine] (its file; null: NO_ENGINE, index.html as git keeps it), the fonts of [fonts] (their folder).
+ * The layout maker's youmo-layout-examples block: each example of [dir] as `{id, label, note, xml}`, its label the
+ * layout's name=, in layouts.json's order.
  */
-export function assemble(src = join(root, 'src'), old = readFileSync(src === CLASSIC_SRC ? CLASSIC : join(root, 'index.html'), 'utf8'), engine = null, fonts = join(root, 'fonts'), lib = LIB) {
+export function layoutExamplesJson(dir = LAYOUT_EXAMPLES) {
+  const list = JSON.parse(readFileSync(join(dir, 'layouts.json'), 'utf8'));
+  return JSON.stringify(list.map(({ id, note }) => {
+    const xml = readFileSync(join(dir, id + '.layout'), 'utf8');
+    // the root's name= as XML reads it: not one in a comment, its entities undone
+    const name = /<keyboard\b[^>]*\sname=(?:"([^"]*)"|'([^']*)')/.exec(xml.replace(/<!--[\s\S]*?-->/g, ''));
+    if (!name) throw new Error(id + '.layout has no name=');
+    return { id, label: unescapeXml(name[1] ?? name[2]), note, xml };
+  })).replace(/</g, '\\u003c');
+}
+
+/**
+ * The page made of [src]'s files, the generated blocks of [gen] (their folder, generated/), the
+ * engine of [engine] (its file; null: NO_ENGINE), the fonts of [fonts] (their folder).
+ */
+export function assemble(src = join(root, 'src'), engine = null, fonts = join(root, 'fonts'), lib = LIB, gen = GENERATED_DIR) {
   const read = (f) => readFileSync(f, 'utf8').replace(/\n+$/, '');
   const page = readFileSync(join(src, 'page.html'), 'utf8');
   const seen = new Map();
   for (const m of page.matchAll(/\{\{([\w-]+)\}\}/g)) seen.set(m[1], (seen.get(m[1]) || 0) + 1);
-  const text = { css: read(join(src, 'style.css')), lib: read(lib), ui: read(join(src, 'ui.js')), fonts: fontFaces(fonts) };
+  const text = { css: read(join(src, 'style.css')), ui: read(join(src, 'ui.js')), fonts: fontFaces(fonts) };
+  // the library (youmo-lib): the theme makers', and the layout maker's (a .theme opened, §12.4)
+  if (seen.has('lib')) text.lib = read(lib);
+  // a page of a folder of src/ (layout/) has the maker's style.css under its own
+  if (seen.has('base-css')) text['base-css'] = read(join(root, 'src', 'style.css'));
   // the engine and the generated blocks: only where page.html has a slot for them
   if (seen.has('engine')) text.engine = engine == null ? NO_ENGINE : engineText(engine);
   // the examples (060-render-p3 M4, 从示例开始): examples/, each a pack's files, in examples.json's order
   if (seen.has('examples')) text.examples = examplesJson();
+  // the layout maker's (§12.4): examples/layouts/
+  if (seen.has('layout-examples')) text['layout-examples'] = layoutExamplesJson();
   // the editing's tabs (060-render-p3 §5.1): every file of src/panels/, in their names' order, in one script
   if (seen.has('panels')) text.panels = readdirSync(join(src, 'panels')).filter((f) => f.endsWith('.js')).sort().map((f) => read(join(src, 'panels', f))).join('\n');
-  // a page's other scripts (the maker's maker.js): each slot of page.html no other text fills, src/<slot>.js
+  // a page's other scripts (the maker's maker.js): each slot of page.html no other text fills, src/<slot>.js; a page
+  // of a folder of src/ (layout/) shares src/'s where it has none of its own (form.js, maker.js)
   for (const slot of seen.keys()) {
-    if (!(slot in text) && !GENERATED.includes(slot) && slot !== 'script-hashes' && slot !== 'engine') text[slot] = read(join(src, slot + '.js'));
+    if (slot in text || GENERATED.includes(slot) || slot === 'script-hashes' || slot === 'engine') continue;
+    const own = join(src, slot + '.js');
+    text[slot] = read(existsSync(own) ? own : join(root, 'src', slot + '.js'));
   }
-  for (const id of GENERATED.filter((g) => seen.has(g))) {
-    const kept = blockOf(old, id);
-    if (kept == null) throw new Error('the page has no ' + id + ' block to keep');
-    text[id] = kept;
-  }
+  for (const id of GENERATED.filter((g) => seen.has(g))) text[id] = generated(id, gen);
   // every slot of page.html filled in one pass, each exactly once: what is put in (a script that says
   // {{lib}}, a `$&`) is never read as a slot or a replacement pattern
   for (const slot of [...Object.keys(text), 'script-hashes']) {
@@ -120,7 +165,7 @@ export function assemble(src = join(root, 'src'), old = readFileSync(src === CLA
   const fill = (values) => page.replace(/\{\{([\w-]+)\}\}/g, (all, slot) => (slot in values ? values[slot] : all));
   // the CSP lets only these run: each script element's text, as the browser hashes it
   const filled = fill(text);
-  const hashes = [...filled.matchAll(/<script id="youmo-(?:lib|ui|engine|maker|form|panels)">([\s\S]*?)<\/script>/g)]
+  const hashes = [...filled.matchAll(/<script id="youmo-(?:lib|ui|engine|maker|form|panels|layout-maker|layout-edit)">([\s\S]*?)<\/script>/g)]
     .map((m) => "'sha256-" + createHash('sha256').update(m[1]).digest('base64') + "'");
   const scripts = [...filled.matchAll(/<script(?![^>]*type="application\/json")[^>]*>/g)].length;
   if (hashes.length !== scripts) throw new Error('a script not hashed: ' + hashes.length + ' of ' + scripts);
@@ -130,13 +175,14 @@ export function assemble(src = join(root, 'src'), old = readFileSync(src === CLA
 // run as a script (through a symlink or /tmp → /private/tmp too: both sides real paths)
 const real = (p) => { try { return realpathSync(p); } catch (e) { return p; } };
 if (process.argv[1] && real(process.argv[1]) === real(fileURLToPath(import.meta.url))) {
-  // --engine [out]: the pages with the engine (the site's), else as git keeps them; classic beside the maker
+  // --engine [out]: the pages with the engine (the site's), else without it here; classic beside the maker
   const at = process.argv.indexOf('--engine');
   const out = at < 0 ? join(root, 'index.html') : resolve(process.argv[at + 1] || BUILT);
   const engine = at < 0 ? null : ENGINE;
-  const html = assemble(undefined, undefined, engine);
-  const classic = assemble(CLASSIC_SRC, undefined, engine);
-  for (const [file, page] of [[out, html], [join(dirname(out), 'classic', 'index.html'), classic]]) {
+  const html = assemble(undefined, engine);
+  const classic = assemble(CLASSIC_SRC, engine);
+  const layout = assemble(LAYOUT_SRC, engine);
+  for (const [file, page] of [[out, html], [join(dirname(out), 'classic', 'index.html'), classic], [join(dirname(out), 'layout', 'index.html'), layout]]) {
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, page);
     console.log(file, Buffer.byteLength(page));

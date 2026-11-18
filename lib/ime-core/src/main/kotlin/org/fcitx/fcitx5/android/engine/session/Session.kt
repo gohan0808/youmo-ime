@@ -13,6 +13,7 @@ import org.fcitx.fcitx5.android.engine.learn.LearnRecord.Commit
 import org.fcitx.fcitx5.android.engine.learn.control.BlockScope
 import org.fcitx.fcitx5.android.engine.learn.control.Why
 import org.fcitx.fcitx5.android.engine.reading.WordReading
+import org.fcitx.fcitx5.android.engine.pinyin.Touch
 
 /**
  * An input method engine as its host sees it: actions in, what to show and commit out. The host
@@ -177,8 +178,11 @@ sealed class Action {
      * its key a grouped keyboard's code was tapped ([Keyboard.tapKey][org.fcitx.fcitx5.android.engine.runtime.Keyboard.tapKey]):
      * the 14 keys' across alone, 0 the left edge and 1 the right; a layout's own keyboard's across
      * and down packed as one ([NineKeyLetters.place][org.fcitx.fcitx5.android.engine.pinyin.NineKeyLetters.place]); NaN for none.
+     * [touch]: where on its key it was tapped and the keys around it, for reading it as one of
+     * those where it spells nothing or less likely ([Touch], 061-neighbour-correction); null for
+     * none (a hardware key, TalkBack, a key typed by a glide or sent by the app).
      */
-    data class Key(val char: Char, val glided: Boolean = false, val at: Float = Float.NaN) : Action()
+    data class Key(val char: Char, val glided: Boolean = false, val at: Float = Float.NaN, val touch: Touch? = null) : Action()
 
     object Backspace : Action()
 
@@ -241,9 +245,11 @@ sealed class Action {
     /**
      * A key of the nine keys typed for English: [digit] (2 to 9), any of its letters, the session
      * spelling the word ([upper]: that letter a capital, Shift on as it was pressed); or a letter
-     * a long press pinned there, itself, the word still the nine keys' (never corrected).
+     * a long press pinned there, itself, the word still the nine keys' (never corrected). [touch]:
+     * where on its key it was tapped and the keys around it, for reading it as one of those
+     * (061-neighbour-english); null for none.
      */
-    data class NineKey(val digit: Char, val upper: Boolean = false) : Action()
+    data class NineKey(val digit: Char, val upper: Boolean = false, val touch: Touch? = null) : Action()
 
     /** Commits what was typed, as typed (enter). */
     object CommitRaw : Action()
@@ -252,10 +258,9 @@ sealed class Action {
      * Handwriting: what the pad read of its [piece], [reading], or, none, that [piece] finished;
      * shown with those held before it (HandwritingSession.hold). Sent with the key that carries it
      * ([Keyboard.INK]), so that it comes in order with the keys and taps around it; nothing to any
-     * other session. [takesBack]: written on the letter keys (InkOver), the first reading of a piece whose
-     * first dot was a tap: that tap's letter is deleted first, if it alone is what is typed (else nothing is).
+     * other session.
      */
-    data class Ink(val piece: Int, val reading: InkReading? = null, val takesBack: Boolean = false) : Action()
+    data class Ink(val piece: Int, val reading: InkReading? = null) : Action()
 
     /**
      * Glide typing: the keyboard's [glide] (EnglishSession commits its word), or its [readings] as
@@ -311,6 +316,13 @@ sealed class Action {
 
     /** Drops everything: the input, and what was committed as context (the cursor moved away). */
     object Reset : Action()
+
+    /**
+     * 联想 put away (the bar's ×), nothing else: what was committed stays the context, as do the
+     * session's own space and a correction's undo, which [Reset] would drop (review 061-small M1).
+     * Nothing to a session showing no predictions.
+     */
+    object DropPredictions : Action()
 
     /**
      * Drops everything as [Reset] does, then takes [before], the text before the cursor, as what

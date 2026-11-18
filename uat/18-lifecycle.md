@@ -99,9 +99,114 @@
 - **预期**：两次键盘重建后拼音栏都还是「ni」，候选栏照样有「你好」，框里是空的；不算改设置，拼音没有被清掉。
 - **JVM**：`StuckBarUatTest.floatingAndDockedMidPinyinKeepIt`（直接改悬浮开关，拖把手改的就是它）；设备上不跑。
 
-### LC-19 [P1] 手写的字没选时换主题：字上屏
-- **前提**：B0-手写（见 09-handwriting.md），写「中」，停笔，不选（「中」带下划线在框里）。
-- **操作**：键盘还在时换主题（JVM 上直接改，同 LC-15）；再写一个字。
-- **预期**：「中」照原样上屏留在框里，下划线没了；再写的是新的一个字，不接在「中」的笔画上（docs/other-input-methods.md）。
-- **JVM**：`StuckBarUatTest.aThemeChangedMidHandwritingCommitsIt`；设备上不跑（同 LC-15）。
 
+### LC-20 [P2] 键盘一直没启动完时重启实例或换界面语言：提示可能没重启成
+<!-- R25r2 F7883 -->
+- **前提**：B0-设置，键盘的实例一直停在启动中（设备上很难造出：要它启动时卡住 10 秒以上，比如很慢的机器刚开机时；造不出记为阻塞）。
+- **操作**：**⋮ → 开发者**，点 **重启 Fcitx 实例**，确定，等提示；再在 **界面语言** 里换一种语言，等提示。
+- **预期**：两处都提示「键盘还在启动，可能没有重启成。请稍后再试」，不说「完成」（说「可能」：等不到启动完时没有重启，或者已经重启了、新的实例还在启动，两种都是这一句）；换语言时界面照常换成新的语言（输入法和设置页的名字等键盘下次启动才换）；稍后键盘启动完，再点 **重启 Fcitx 实例** 照常提示完成（LC-10）。
+- **JVM**：`HostRestartTest.aHostStuckStartingIsWaitedForNoLongerThanTheWaitAndSaidNotUp`（`HostDaemon` 等不到启动完时不重启、返回 false）；`DeveloperUatTest.aRestartGivenUpOnAHostStillStartingSaysItMayNotHaveRestarted`、`AppLanguageUatTest.aLanguageChangedWhileTheHostStaysStartingSaysItMayNotHaveRestarted`（两处在它返回 false 时的那一句，测试接缝 `HostDaemon.testRestarted`）；`DeveloperUatTest.restartedTheInstanceSaysDone`（启动完了照常提示完成）。设备上造不出一直停在启动中，不跑。
+
+## 编码行在输入框里（B-IF）
+
+总规矩：输入法证明不了是自己写的字一个都不删；证明不了就留在框里成为普通文字。
+
+### LC-21 [P0] 输入框里打拼音：选字、收键盘都不留编码
+- **前提**：B-IF。
+- **操作**：在「普通文本」框点 n i h a o，看框和键盘上方；点空格；再点 n i，收起键盘。
+- **预期**：打字时框里是带下划线的「ni hao」，键盘上方没有拼音条；空格后框里是「你好」；收起键盘后框里还是「你好」，没有留下「ni」。
+- **JVM**：`CodeInFieldUatTest.theCodeIsTheFieldsComposingTextTillAWordIsChosenAndGoesAsTheKeyboardDoes`；设备上照跑。
+
+### LC-22 [P0] 选中文字后打拼音，选中的文字不丢
+- **前提**：B-IF，输入测试台 `ime` 页的 `preselected` 框（「前面选中的后面」，预先选中「选中」）。
+- **操作**：点 n i，看框和键盘上方；退格上滑清除；再点 n i，点框里别的位置；收起键盘。
+- **预期**：打字时框里的字和选区都没变，拼音在键盘上方的小条里；清除后选区还在；点别处后、收起键盘后框里还是「前面选中的后面」。
+- **JVM**：`CodeInFieldUatTest.aSelectionAsTheCodeStartsKeepsTheCodeOnTheStripAndTheSelectionWhole`；设备上照跑（点框会把选区变成光标，脚本再选一段：Android 12 及以后用 Shift+← 选两个字，更早的（Android 10 的 youmo29）没有 `input keycombination`，长按框选一个词）。
+
+### LC-23 [P1] 输入框里打拼音时点另一个框（已知会留下）
+- **前提**：B-IF，测试页打开全部的框（`fields.html`），在「普通文本」框点 n i。
+- **操作**：点「句子」框，点 h a o 空格。
+- **预期**：「句子」框里是「好」；「普通文本」框里可能留下「ni」成为普通文字（应用在输入法知道之前就把它定成了文字，输入法不删），框里别的字一个不少。
+- **JVM**：`CodeInFieldUatTest.aConnectionTheAppClosesFirstIsSentNothingAndTheNextFieldTakesItsOwnCode`（应用先关掉连接、输入法才收到结束输入：旧框留下「ni」，什么都不发给它；新框的编码照常）。
+
+### LC-24 [P1] 输入框里打拼音时转屏
+- **前提**：B-IF，在「普通文本」框点 n i h a o。
+- **操作**：转成横屏，键盘收起了就点框；点 h a o 空格；停约 1 秒再转回竖屏。
+- **预期**：框里最后是「好」或者「ni hao好」（输入法自己重启输入时证明后拿走；应用重建了框就留下），不会少字、不会多出别的字母；转屏后打字正常。转屏时网页丢了焦点的那几次（键盘几乎盖满网页，API 36 模拟器上 5 次里约 3 次）：空格后框里没有「好」，键盘上方那一行写着「没写进去：好，点一下输入框」；点一下框、再点这一行，「好」进框，这一行消失（LC-36）。
+- **JVM**：`CodeInFieldUatTest.theScreenTurnedTakesTheCodeAwayProvenOurs`（输入法自己的重启：拿走）；`CodeInFieldUatTest.aScreenTheAppMakesAnewHasTheCodeLeftAsTextInTheNewField`（应用重建界面，先关旧连接，新框带着旧文字开始输入：「ni」留下，之后的拼音接着进新框）；`CommitKeptUatTest.theCodeInTheFieldWhenTheFieldDropsItsWritesAfterATurnIsKeptAndWrittenByATapOnItsLine`（转屏后框收了写入却不照办：编码改到小条，上屏的字留在键盘上，点那一行写进去）。
+
+### LC-25 [P1] 输入框里打拼音时切走再回来、切换输入法
+- **前提**：B-IF，在「普通文本」框点 n i。
+- **操作**：按"最近任务"切到设置再切回来，点框；点 n i，再用输入法选择器换到别的输入法再换回来。
+- **预期**：框里没有多出别的字；拼音如果留下，是「ni」原样成为普通文字；回来后打字正常。
+
+### LC-26 [P1] 应用自己重启输入的框：留下这一次的编码，之后在小条里
+- **前提**：B-IF，输入测试台 `behavior` 页的 `settext_echo` 框。
+- **操作**：点 n，看框；再点 n i h a o，点空格。
+- **预期**：第一个 n 留在框里成为普通文字（应用重启了输入，输入法不删；重启照旧清掉引擎里这一次的编码，键盘上没有它）；再打的拼音在键盘上方的小条里，框里不再出现拼音；空格后框里是「n你好」，别的字一个不少。
+- **JVM**：`CodeInFieldUatTest.anAppsOwnRestartLeavesTheCodeAsTextAndFloatsItFromThen`；设备上照跑。
+
+### LC-27 [P1] 会改写文字的框：改过的那段留下，之后在小条里
+- **前提**：B-IF，输入测试台 `behavior` 页的 `upper` 框。
+- **操作**：点 n i h a o，点空格。
+- **预期**：框里先出现「N」（应用改成了大写，输入法不删），之后的拼音在键盘上方的小条里；空格后框里是「N你好」。
+- **JVM**：`CodeInFieldUatTest.anAppThatRewritesTheCodeHasItLeftAndFloatsTheRest`；设备上照跑。
+
+### LC-28 [P1] 读不到光标前文字的框：拼音一直在小条里
+- **前提**：B-IF，输入测试台 `behavior` 页的 `null_before` 框。
+- **操作**：点 n i h a o，看框；点空格。
+- **预期**：框里始终没有拼音，拼音在键盘上方的小条里；空格后框里是「你好」。
+- **JVM**：`CodeInFieldUatTest.aFieldThatWillNotBeReadNeverHasTheCode`；设备上照跑。
+
+### LC-29 [P1] 限长的框：放得下的字母留下，之后在小条里
+- **前提**：B-IF，输入测试台 `ime` 页的 `max10` 框（最多 10 个字）。
+- **操作**：点 n i h a o z h o n g g u o，看框和键盘上方。
+- **预期**：框里是应用收下的前 10 个字符「ni hao zho」（编码照显示的样子写进框，音节间有空格；应用截掉了后面的，输入法不删，成为普通文字）；拼音「ni hao zhong guo」整个在键盘上方的小条里，接着打完、选字和「浮在键盘上方」时一样。
+- **JVM**：`CodeInFieldUatTest.aFieldThatCutsTheCodeShortKeepsWhatItTookAndFloatsTheRest`；设备上照跑。
+
+### LC-30 [P1] 应用清掉 composing 的框：拼音拿走，在小条里
+- **前提**：B-IF，输入测试台 `behavior` 页的 `finish_composing` 框，再换 `finish_composing_async` 框。
+- **操作**：各点 n i h a o（快打），看框和键盘上方；点空格。
+- **预期**：打字时框里最多闪一下第一个字母，拼音在键盘上方的小条里；空格后框里是「你好」。`finish_composing_async` 框里最多多留一个字母（如「nni」，之后拼音在小条里，空格后「nni你好」），框里原有的字一个不少。留下的是上一次写进去的整段编码的一份：这个框每次改动都清，所以是一个字母；停顿后才清的应用（防抖）会留下停顿前打的整段（如「ABnihniha」）。应用异步去掉 composing 时 `EditText` 不报告，输入法只在上一次写入还没报告时（Android 13 起）读编辑器的 composing 区来发现（API 36 模拟器实测）。
+- **JVM**：`CodeInFieldUatTest.aFieldThatClearsTheComposingTextHasTheCodeTakenAwayAndFloated`（应用清除时有报告的三种：同步清、post 清、清得比下一键晚，都不留字母；清除不报告，像设备上的 `EditText`（harness 的 `spanAloneUnreported`）：留下「nni」，和设备一致；以及报告没赶上下一键：SDK 36 读 composing 区不留、SDK 29 留一个）；设备上照跑（API 36 模拟器）。
+
+### LC-31 [P1] 终端（TYPE_NULL）：拼音一直在小条里
+- **前提**：B-IF，输入测试台 `behavior` 页的 `terminal` 框。
+- **操作**：点 n i h a o，看框和键盘上方；点空格。
+- **预期**：框里始终没有拼音，拼音在键盘上方的小条里；空格后框里是「你好」。
+- **JVM**：`CodeInFieldUatTest.aTerminalNeverHasTheCode`；设备上照跑。
+
+### LC-32 [P1] 不设 id 的两个框之间换框
+- **前提**：B-IF，输入测试台 `behavior` 页的 `no_id_a` 框。
+- **操作**：点 n i；点 `no_id_b` 框，点 h a o 空格。
+- **预期**：`no_id_b` 里是「好」；`no_id_a` 里没有多出别的字，拼音如果留下是「ni」原样成为普通文字（同 LC-23）。
+- **JVM**：`CodeInFieldUatTest.anotherFieldTappedLeavesTheFirstWholeAndTheNextTakesItsOwnCode`（输入法先知道换了框：拿走）；设备上照跑。
+
+### LC-33 [P2] 网页里会改写文字的框
+- **前提**：B-IF，输入测试台 `webview` 页的 `w_rewrite` 框（JS 在 input 事件里转大写）。
+- **操作**：点 n i h a o，点空格。
+- **预期**：同 LC-27：被改成大写的那段留下，之后拼音在键盘上方的小条里；最后框里是留下的大写字母加「你好」，别的字一个不少。
+
+### LC-34 [P1] 发送后 setText("") 的聊天框：发出去后拼音照样进框
+- **前提**：B-IF，输入测试台 `behavior` 页的 `chat_settext` 框（发送后 `setText("")`，框架自己让输入法重来：Android 10 直接重启，30 起延后，34 起 `invalidateInput`）。
+- **操作**：点 n i h a o、空格，点回车（发送）；再点 n i，看框和键盘上方；点空格。
+- **预期**：发送前框里是「你好」，发送后框是空的；再打的「ni」带着下划线在框里，键盘上方没有小条；空格后框里是「你」，没有上一次的字母留下。
+- **JVM**：没有。这条看的是各版本框架自己让输入法重来的方式，harness 只有一种 `restart()`；发送时框里已经没有编码，编码在框里时应用重启输入见 LC-26。设备上跑（API 36 模拟器；Android 10 用 youmo29）。
+
+### LC-35 [P1] 手写写了一半时转屏、换主题：写好的上屏，手写还开着
+- **前提**：B0-手写，写「中」，停笔，不选（「中」在编码处）。
+- **操作**：转屏（或换一个主题）；再写「人」。
+- **预期**：「中」上屏留在框里（键盘重建时写好的上屏，DECISIONS A2）；回来后手写还开着，写的「人」是新的一个字。
+- **JVM**：`HostCasesUatTest.aCharacterNotCommittedIsPutInWhenTheKeyboardGoes`（键盘走时写好的上屏）、`KeyHandwritingUatTest.theKeyboardHiddenAndShownAgainStillWrites`（键盘重建后还写得上）；设备上不跑。
+
+### LC-36 [P1] 输入框收了字却没写进去：字留在键盘上，点一下写进去
+- **前提**：B0，点「普通文本」框（B-IF 下也一样）；一个收下输入法的写入却不照办的框（网页的框在它的 WebView 丢了焦点、键盘还开着时就是这样：转屏时键盘几乎盖满网页，见 LC-24；设备上要靠转屏碰，造不出记为阻塞）。编码行三种样式都一样。
+- **操作**：点 n i 空格，再点 h a o 空格，看键盘上方；点一下框，再点键盘上方那一行。
+- **预期**：框里没有字时，候选上方的编码行写着「没写进去：你好，点一下输入框」（两次上屏的字按顺序都留着；很长的只显示末尾 24 个字，前面是「…」），读屏念出这一句；框恢复后点这一行，「你好」写在光标处，只写一次，这一行消失；框还没恢复时点它，字照旧留着；刚又上屏了别的字、还在等回报时点它，等那次判完再写，按打字的顺序。留着的字在这几种情况下不再留：接着打别的字并且写进去了、换到另一个输入框、键盘收起。转屏、应用在同一个框里重新开始输入（点了网页的框）时还留着。照常收字的框，不管光标回报得多晚，都不出现这一行（上屏后马上删掉、发送清空、应用清空并重新开始输入也不出现）；密码框、应用要求不记录的框、没有类型的框（终端）不检查，也不显示。有类型、收下文字就在同一次写入里清空自己（或放回提示符，如 `> `）的框（终端、远程桌面这类）也不出现这一行。留着的字最多保留最后 256 个（UTF-16 计，不把一个表情切成两半），点那一行写进去的就是这最后一段。实体键盘打的字（空格选词）也一样留着。测试页没有「收下就清空」的框，这一条和 256 个的上限只在 JVM 上断言。
+- **JVM**：`CommitKeptUatTest.withTheCodeOnTheStripOrInTheBarWhatADeafFieldDroppedIsKeptTheSame`（浮动、嵌在键盘里两种编码行：两个词都留着，点那一行写进去）；`CommitKeptUatTest.aFieldThatTakesTheTextIsNeverSaidToHaveDroppedItHoweverLateItReports`（马上回报、回报晚于等待、编码在框里且回报晚：都不出现）；`CommitKeptUatTest.whatIsKeptGoesWithTheKeyboardAnotherFieldOrSomethingElseTypedAndStaysThroughATurnAndARestart`（各种放掉和留着的情况、密码框）；`CommitKeptUatTest.aCommitMadeJustBeforeTheWaitForAnEarlierOneIsUpWaitsItsOwnTime`（前一次的定时器不判后一次，换了框也一样）；`CommitKeptUatTest.aCommitFollowedByADeletionASendOrInputStartedAnewIsNotSaidToBeLostInAFieldThatReportsLate`（回报晚的框里上屏后删掉、发送、清空重开：不出现）；`CommitKeptUatTest.theKeptLineTappedWhileAnotherCommitWaitsWritesBothInTheOrderTyped`（等待中点那一行：按顺序写进去）；`CommitKeptUatTest.theKeptLineTappedWhileACommitWaitsThatThenReportsIsStillWritten`（等待中点了，那次上屏照常回报：留着的照样写进去）；`CommitKeptUatTest.theKeptLineAskedForIsWrittenWhenTheWaitEndsHoweverItEnds`（读回来写进去了、按了退格、post 前又上屏了一次、输入已结束：都写，按打字顺序，不写进已结束的连接）；`CommitKeptUatTest.theKeptLineGoesBeforeAuxBelowWhichKeepsItsFormatting`；`CommitReadAfterKeyTest.theUpOfTheSpaceThatChoseAWordHandedBackBeforeTheFieldReportsLeavesTheCommitJudged`（实体键盘：选词空格的抬起在回报前交回，照样判、照样留）；ime-core 的 `CommitCheckTest`（判定本身：改写文字的框、读不到的框、一排同样的字、打到一半的英文词），其中 `CommitCheckTest.a field that uses the text and puts its buffer back is not said to have dropped it`（同一次写入里清空或放回提示符：不留；在写入里就拿走的：留最后 256 个，不切开表情）。设备上的那一种见 LC-24。
+
+### LC-37 [P1] 屏幕键盘开着时没有「显示屏幕键盘」按钮
+- **前提**：B-IF（编码行 输入框里），只用屏幕键盘，没接实体键盘。
+- **操作**：在「普通文本」框，先看整屏；点 n i h a o，空格；转成横屏再转回来；切到设置再切回来，点框，点 n i 空格。每一步看整屏，特别是左上角。
+- **预期**：屏幕上（键盘外、应用的标题栏上）任何时候都没有带键盘图标的灰色小方块（「显示屏幕键盘」按钮，实体键盘打字时悬浮候选窗才有它），应用左上角的返回键照常能点。编码行在键盘上方、嵌在键盘里时也一样；一次上屏没写进框（LC-36）时也一样。
+- **JVM**：`CodeInFieldUatTest.theTouchKeyboardUpShowsNoFloatingWindowAsTheCodeMovesOrACommitIsKept`（编码进框、选词后出框、上屏的字留在键盘上：悬浮窗和它的触摸窗都不出现）；设备上照跑。

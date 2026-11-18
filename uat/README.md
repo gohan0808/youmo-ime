@@ -26,7 +26,7 @@
 | [13-words.md](13-words.md) | 词库页、用户词库、屏蔽词、导入导出、导入词库、导入的词、清空学到的、自定义短语、常用词 |
 | [14-settings.md](14-settings.md) | 设置首页、通用输入、外观、按键、声音与振动、剪贴板与表情、实体键盘、界面语言、开发者、关于 |
 | [15-privacy-backup.md](15-privacy-backup.md) | 隐私与权限、密码框和无痕、不用我的输入习惯、清掉最近、备份与恢复（含学到的合并、退回、自动备份） |
-| [16-landscape-split.md](16-landscape-split.md) | 横屏、分体键盘、分体时其他面板靠边 |
+| [16-landscape-split.md](16-landscape-split.md) | 横屏、分体键盘、分体时其他面板靠边，竖屏、横屏键盘样式 |
 | [17-hardware-keyboard.md](17-hardware-keyboard.md) | 实体键盘 |
 | [18-lifecycle.md](18-lifecycle.md) | 转屏、切换应用、换输入框、引擎重启这些时刻 |
 | [19-motion-notices.md](19-motion-notices.md) | 提示条（位置、替换、配色）、始终显示悬浮条、候选字号 |
@@ -85,7 +85,12 @@
 
 **B0-九键双拼**：同 B0-18键，**键盘** 选成「九键」。
 
+**B0-手写**：B0，点「普通文本」框，点工具栏的 **手写**（按钮亮起，字母变淡；见 09-handwriting.md）。手写开关记在设置里，脚本在每条之间把它按基线开或关。
+
 **B0-设置**：B0 的第 1–3 步，然后打开"幽默输入法"应用，停在设置首页。
+
+**B-IF（编码行在输入框里）**：B0，然后在 **外观 → 大小与样式** 里把 **编码行** 选成「输入框里（实验性）」，在弹出的说明上点 **确定**，回测试页点「普通文本」框。
+LC-01/03/04 的「不留字母」是 B0 下的；B-IF 下由 LC-21 起的几条代替（dev/design/061-code-in-field.md §9）。
 
 前提里写"B0，另外……"的，先到 B0，再做"另外"的部分。
 
@@ -95,12 +100,14 @@
 `./gradlew :app:packs` 打在 `app/build/packs/`）每台设备只导入一次：
 
 ```sh
-uat/tools/uat.py packs --port 5554    # 装 debug 包并导入两个包（已是这一版的跳过）；--no-voice 只导文字包
+uat/tools/uat.py packs --port 5554    # 装 debug 包并导入两个包（版本相同、文件也和上次导入的相同才跳过）；--no-voice 只导文字包
 ```
 
 它走 debug 包里只认 shell 的导入口（`PackImportProvider`，`content://<包名>.uat.packs`）：`content write` 把包写进 App 的缓存，
 `content call --method import` 交给和「资源包」页同一个 `PackStore.import`（签名、每个文件的 SHA-256、格式号都照查），
 `--method state` 查每个包的状态。debug 包信任仓库里的测试密钥和正式密钥。
+开发时重做的包版本号不变（`packs.properties` 只在发版时升），所以运行器每导入一个包就在设备上记下它的文件 SHA-256
+（`/data/local/tmp/youmo-uat-packs/<包>.sha256`），版本相同但文件变了也会重导。标记里还记着这次导入在 App 里的代号（`files/packs/<包>/current`），在「资源包」页手动导入过别的文件，代号就变了，下次运行也会重导，不用手动删标记。
 
 重置时不能用 `pm clear`：它连资源包一起删，每条用例再导一次要多好几秒。debug 包可以 `run-as`，运行器就先停掉输入法、
 `am force-stop`、收回录音权限、删掉外部存储里 App 的目录，再用 App 自己的身份删掉数据目录里除 `files/packs` 以外的一切（设置、词、剪贴板、主题），
@@ -163,7 +170,7 @@ adb shell su 0 am start -n io.github.sraw.youmo.debug/org.fcitx.fcitx5.android.i
 
 | 测试 | 设备 |
 |---|---|
-| 大部分 | 真机或 Android 模拟器（arm64-v8a 镜像，装的就是发布用的 arm64 包；Apple 芯片上原生跑）。发版前至少在一台真机上跑一遍 P0；语音的 VO-23、VO-24、VO-26 也在真机上照「操作」跑（时间戳、开麦前的全零、真实的小声，片段麦克风测不到） |
+| 大部分 | 真机或 Android 模拟器（arm64-v8a 镜像，装的就是发布用的 arm64 包；Apple 芯片上原生跑）。发版前至少在一台真机上跑一遍 P0；语音的 VO-23、VO-24、VO-26 也在真机上照「操作」跑（时间戳、开麦前的全零、真实的小声，片段麦克风测不到），VO-55 在真机上量松开到出字的时间（模拟器上只是中位数 ≤ 1500 ms 的粗线） |
 | 实体键盘（17） | 真机接蓝牙或 USB 键盘；或者模拟器加一个 uinput 键盘（见 [17-hardware-keyboard.md](17-hardware-keyboard.md) 开头）。模拟器有自己的内核，和别的用例同一台设备上跑；**只在模拟器里造虚拟键盘**（容器类设备如 redroid 和宿主机共用内核，造出来的键盘宿主机也会收到） |
 | 横屏与分体（16） | 屏幕横过来宽度不少于 600 dp 的手机或平板，模拟器也行 |
 | 语音（12） | 真机，有麦克风，导入语音包；arm64 debug 包导入语音包后也能在模拟器上跑（片段麦克风，见「实体键盘和语音」） |
@@ -176,7 +183,7 @@ adb shell su 0 am start -n io.github.sraw.youmo.debug/org.fcitx.fcitx5.android.i
 
 | 类 | 在哪 | 写法 | 例子 |
 |---|---|---|---|
-| 引擎 | ime-core 单测（小数据、毫秒级）或 `:lib:ime-eval:uatTest`（真数据：EngineReplay 只有引擎，HostReplay 加 Kotlin 宿主的标点、简繁、快速输入、面板、虚拟时钟，ParityReplay 对设备录的序列） | `needs="jvm:<测试类>.<方法>"`，`.md` 加 **JVM** 行 | 整句、学习排序、标点、快速输入、九键连按 |
+| 引擎 | ime-core 单测（小数据、毫秒级）或 `:lib:ime-eval:uatTest`（真数据：EngineReplay 只有引擎，HostReplay 加 Kotlin 宿主的标点、简繁、快速输入、面板、虚拟时钟） | `needs="jvm:<测试类>.<方法>"`，`.md` 加 **JVM** 行 | 整句、学习排序、标点、快速输入、九键连按 |
 | 界面 | `:app:testDebugUnitTest` 的 Robolectric + Roborazzi（`uat/*UatTest`、`KeyboardHarness`、`*KeyboardScreenshotTest`） | 同上 | 键盘样子、状态面板、设置页、词库页、横屏/分体 |
 | 只能在设备上 | 模拟器 | 不写 `needs=` | 真窗口和 insets、系统界面（向导、输入法选择框、导航栏、TalkBack）、麦克风、真实体键盘、安装/升级/降级、杀进程、转屏和切应用、锁屏、内存和堆 |
 | 冒烟 | 模拟器，另有 JVM 断言 | 不写 `needs=`，`.md` 有 **JVM** 行并写"设备上留作冒烟" | 每区一条胶水最重的 |
@@ -211,17 +218,17 @@ adb shell su 0 am start -n io.github.sraw.youmo.debug/org.fcitx.fcitx5.android.i
 | `voice:…` | 导入了语音包的 debug 包（默认就是；`--no-voice` 时、发布包上在别处跑：发布包没有片段麦克风） | 12 语音 |
 | `release:…` | 发版时手动（要上一版正式包或两个版本的包） | PR-13、PR-14、PR-30、PR-35、PR-36、PR-37、PR-38、PR-41、PR-43、TBL-12d、TBL-33、TBL-43、WD-14r、WD-14v、QU-20、ST-82、ST-85、ST-110 |
 | `release,scripted:…` | 发版时用发布包脚本跑（`UAT_BUILD=release` 时脚本照跑，平时不跑；要雾凇拼音，一条三四分钟） | WD-14d、WD-14h、TBL-12c |
-| `manual:…` | 真机或手工 | HK-03a、HK-03b、HK-30、HK-33、MN-13、SET-11、ST-56、ST-57、ST-58、QU-24、ST-68、ST-69、ST-70、ST-73、ST-74、TB-53、VO-37、ST-75、ST-76、ST-77、ST-78、ST-79、ST-80、ST-81、TB-46a、PR-51、ST-83、ST-84、ST-86、ST-87、ST-88、ST-89、ST-91、ST-92、ST-93、ST-94、ST-102、ST-103、KB-84、ST-111 |
-| `jvm:<测试>` | JVM 上的测试（`:app:testDebugUnitTest`、`:app:testDebugUnitTestAt29` 的 Robolectric，`:lib:ime-eval:uatTest` 的引擎回放，`:lib:ime-core:test`），`uat.py jvm` 记录 | T9-01、PAN-09、ST-01、MN-20 |
+| `manual:…` | 真机或手工 | HK-03a、HK-03b、HK-30、HK-33、MN-13、SET-11、ST-56、ST-57、ST-58、QU-24、ST-68、ST-69、ST-70、ST-73、ST-74、TB-53、VO-37、ST-75、ST-76、ST-77、ST-78、ST-79、ST-80、ST-81、TB-46a、PR-51、ST-83、ST-84、ST-86、ST-87、ST-88、ST-89、ST-91、ST-92、ST-93、ST-94、ST-102、ST-103、KB-84、ST-111、WD-49、PR-52a、ST-116、KB-88、VO-40、PY-121a、LC-33、ST-131、ST-141、ST-189、ST-190、PY-156 |
+| `jvm:<测试>` | JVM 上的测试（`:app:testDebugUnitTest`、`:app:testDebugUnitTestAt29` 的 Robolectric，`:lib:ime-eval:uatTest` 的引擎回放，`:lib:ime-core:test`，`:lib:keyboard-scene:jvmTest`），`uat.py jvm` 记录 | T9-01、PAN-09、ST-01、MN-20 |
 
 `skip:…`／`block:…` 只留给别的原因，记"跳过"／"阻塞"。
 
-现在共 797 条（P0 138、P1 602、P2 57）：模拟器上跑 107 条（其中 61 条在 JVM 上也断言，设备上留作冒烟或照跑），在别处跑 690 条（JVM 612、发版时 24、真机或手工 40、语音 14）。
+现在共 1106 条（P0 149、P1 829、P2 128）：模拟器上跑 179 条（其中 129 条在 JVM 上也断言，设备上留作冒烟或照跑），在别处跑 927 条（JVM 816、发版时 25、真机或手工 66、语音 20）。
 
 （2026-11 从 redroid 搬到模拟器时 `needs=` 改了两处：原来的 `emu:` 去掉，实体键盘用例不再单独跑；`release,redroid:` 改名 `release,scripted:`，意思不变：发版时脚本跑。）
 
 横屏是把屏幕改成 2340×1080（851 dp，`Device.rotate`，等到界面按新尺寸排好）；这是 redroid 时期的做法（它的显示不会真的转），模拟器上照旧，坐标不用重量。手写用 `scripts/hw_strokes.py`
-里的笔画在书写板上画字。装包时比较设备上的 APK 和 `app/build/outputs` 里最新的那个（同一个版本号会重新构建），不同就重装。
+里的笔画在字母区画字（工具栏「手写」开着时）。装包时比较设备上的 APK 和 `app/build/outputs` 里最新的那个（同一个版本号会重新构建），不同就重装。
 
 每次点、划之后只停很短（`PAUSE`：点 0.15 s、打字 0.25 s……），原来停顿（`OLD`）剩下的部分记在账上，
 下一次读界面前补齐：打完字马上读框里的字，看到的和原来一样（机器忙时网页框的字会晚到），连着点、中间不读界面的就不用等。
@@ -268,25 +275,25 @@ debug 包（要先有 arm64-v8a debug 包），只当宿主应用、把它自己
 
 有些用例的 **预期** 在 JVM 上就能完整断言：`app/src/test` 里的 `KeyboardHarness` 在 Robolectric 里造出整个键盘
 （真的输入法服务和 `InputView`，引擎换成 `FakeHostApi`，候选等用假事件推进来），设置页用 `MainActivity` 加同一个假引擎；
-样子用 Roborazzi 截图，和 `app/src/test/screenshots/` 里提交的金图比。测试方法上标 `@Uat("<编号>")`，用例 .md 里多一行
+样子用 Roborazzi 截图，和 `app/src/test/screenshots/` 里提交的金图比。测试方法上标 `@Uat("<编号>")`（keyboard-scene 的测试用它自己的 `org.fcitx.fcitx5.android.scene.Uat`），用例 .md 里多一行
 **JVM** 写测试名；整条搬走的，脚本里是 `needs="jvm:…"`，设备上不跑。还在设备上留一条冒烟的（看引擎和界面之间的胶水），
 .md 里写明。
 
 ```sh
-./gradlew :app:testDebugUnitTest :app:testDebugUnitTestAt29 :lib:ime-core:test :lib:ime-eval:uatTest
-                                                 # 四个都要跑：jvm 读这四处的结果；截图默认就比对（gradle.properties 的 roborazzi.test.verify）
+./gradlew :app:testDebugUnitTest :app:testDebugUnitTestAt29 :lib:ime-core:test :lib:ime-eval:uatTest :lib:keyboard-scene:jvmTest
+                                                 # 五个都要跑：jvm 读这五处的结果；截图默认就比对（gradle.properties 的 roborazzi.test.verify）
 ./gradlew :app:testDebugUnitTest --tests '*UatTest' -Proborazzi.test.record=true -Proborazzi.test.verify=false   # 改了样子后重录
 uat/tools/uat.py jvm                             # 读 JUnit 结果，按编号写 runs/<日期>-jvm-<版本>.md
 ```
 
 `jvm` 读的是结果目录里现有的 XML，不看它是哪次构建留下的：少跑一个任务，那些用例就记成上一次（可能是旧提交）的结果，
-不会报"没有结果"。所以在 `jvm` 前把四个任务一起跑（或先删掉 `build/test-results`）。
+不会报"没有结果"。所以在 `jvm` 前把五个任务一起跑（或先删掉 `build/test-results`）。
 
 发版的"全部 P0 + 改过的功能区"照旧逐条对号：设备的 run 文件和 `jvm` 的 run 文件两份都要绿。
 
 ## 实体键盘和语音
 
-实体键盘（17）的用例和别的用例一起跑：基线 `B0-实体` 用 `uat/tools/emu-keyboard.sh` 插上一个 uinput USB 键盘，
+实体键盘（17）的用例和别的用例一起跑：基线 `B0-实体` 用 `uat/tools/emu-keyboard.sh` 插上一个 uinput USB 键盘（Android 10 没有 `uinput` 命令，脚本改用 `hid` 命令，插的是同一个键盘），
 别的基线拔掉。语音（12）要导入语音包（运行器默认导入；`--no-voice` 只导文字包，语音用例单列为"在别处跑"）。
 语音片段（`uat/tools/voice-clips.py` 合成，在 `dev/uat-out/voice-clips/`，不进 git）由 debug 包的「片段麦克风」
 （`VoiceClipMic`）当作麦克风读到的声音（`Device.say`）：先 `content write` 写进 App 的 files，再

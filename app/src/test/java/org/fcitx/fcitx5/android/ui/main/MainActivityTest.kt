@@ -5,6 +5,7 @@
 package org.fcitx.fcitx5.android.ui.main
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.navigation.NavController
 import androidx.navigation.NavDestination
@@ -12,14 +13,20 @@ import androidx.navigation.NavGraph
 import androidx.navigation.NavGraphNavigator
 import androidx.navigation.NavHostController
 import androidx.navigation.Navigator
+import org.fcitx.fcitx5.android.FcitxApplication
 import org.fcitx.fcitx5.android.ui.main.settings.SettingsRoute
+import org.fcitx.fcitx5.android.ui.main.settings.openInputStreamOrThrow
+import org.fcitx.fcitx5.android.ui.main.settings.openOutputStreamOrThrow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.annotation.Config
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import java.io.File
+import java.io.IOException
 
 /**
  * MainActivity is exported: another app's intent must not open any page through the deep-link
@@ -73,5 +80,35 @@ class MainActivityTest {
         const val GRAPH = 1
         const val HOME = 2
         const val PAGE = 3
+    }
+
+    @Test
+    fun aFileIntoTheAppsOwnDirectoriesIsNotOpenedFromOutside() {
+        val ctx = RuntimeEnvironment.getApplication()
+        fun file(f: File) = Uri.fromFile(f)
+        assertTrue(MainActivity.importable(ctx, Uri.parse("content://downloads/1")))
+        assertTrue(MainActivity.importable(ctx, file(File("/sdcard/Download/words.scel"))))
+        assertFalse(MainActivity.importable(ctx, file(File(ctx.filesDir, "before-restore.fxlb"))))
+        assertFalse(MainActivity.importable(ctx, file(File(ctx.createDeviceProtectedStorageContext().dataDir, "files/x"))))
+        assertFalse(MainActivity.importable(ctx, file(File(ctx.getExternalFilesDir(null), "x"))))
+        // a path that climbs into them is taken where it leads: from a directory there is (on the JVM too, where
+        // /sdcard is not, and a missing one is climbed out of by name, past a link such as macOS's /var)
+        assertFalse(MainActivity.importable(ctx, Uri.parse("file:///usr/../" + ctx.filesDir.path.trimStart('/') + "/x")))
+        assertFalse(MainActivity.importable(ctx, Uri.parse("http://example.com/x.txt")))
+    }
+
+    // the pickers' pages read and write through PickedFiles, which holds every URI to the same rule (L2 security N5)
+    @Test
+    @Config(application = FcitxApplication::class)
+    fun aPickedFileIsOpenedByTheSameRule() {
+        val ctx = RuntimeEnvironment.getApplication()
+        val own = File(ctx.filesDir, "secret").apply { writeText("private") }
+        for (uri in listOf(Uri.fromFile(own), Uri.parse("http://example.com/x.txt"))) {
+            assertTrue(uri.toString(), runCatching { ctx.contentResolver.openInputStreamOrThrow(uri) }.exceptionOrNull() is IOException)
+            assertTrue(uri.toString(), runCatching { ctx.contentResolver.openOutputStreamOrThrow(uri) }.exceptionOrNull() is IOException)
+        }
+        assertEquals("private", own.readText())
+        val outside = File.createTempFile("picked", ".txt").apply { writeText("shared"); deleteOnExit() }
+        assertEquals("shared", ctx.contentResolver.openInputStreamOrThrow(Uri.fromFile(outside)).use { it.readBytes().decodeToString() })
     }
 }

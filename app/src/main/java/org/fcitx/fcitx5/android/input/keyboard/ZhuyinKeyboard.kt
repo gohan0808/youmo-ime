@@ -32,6 +32,7 @@ import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneEnvs
 import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneIcons
 import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneLayout
 import org.fcitx.fcitx5.android.input.popup.PopupAction
+import org.fcitx.fcitx5.android.input.scene.KeyRef
 import org.fcitx.fcitx5.android.input.scene.TextBoardState
 import org.fcitx.fcitx5.android.input.theme.KeyNames
 import org.fcitx.fcitx5.android.scene.KeyNode
@@ -69,7 +70,7 @@ class ZhuyinKeyboard(
     if (nine) nineLayout() else fullLayout(keyboardCompact()),
     // 注音九键's keys are named by their place in its own 4×5 grid (the tones in the first column), ⌫ by its role
     themeBoard = if (nine) KeyNames.ZHUYIN_NINE else KeyNames.ZHUYIN,
-) {
+), TypingKeys {
 
     companion object {
         const val NameNine = "ZhuyinNine"
@@ -138,6 +139,9 @@ class ZhuyinKeyboard(
         }
 
         private const val TONE = "tone-"
+
+        // a key's action written as the layout writes it: the symbol its face shows ([placeholder]'s `zhuyin`)
+        private const val ZHUYIN_ACTION = "action:zhuyin"
 
         /** The 分词 key's face while something is typed; else [PUNCTUATION]'s first, which it types. */
         internal const val SEPARATOR = "分词"
@@ -291,17 +295,16 @@ class ZhuyinKeyboard(
         canvas?.invalidateScene()
     }
 
-    // the input method shown, for whether 键盘手写 writes on the keys
+    // the input method shown, for whether the toolbar's 手写 writes on the keys
     private var imeName = ""
 
     override val keysIm: String get() = imeName
 
-    // no glide, no strokes: 键盘手写 alone, written over the symbol keys as the grouped keyboards' are. Their places
+    // no glide, no strokes: the toolbar's 手写 alone, written over the symbol keys as the grouped keyboards' are. Their places
     // are where a stroke may start (with none, GlideInput's down finds no key and nothing is written); the char is unread
     override val glide = glideInput(
         letters = { canvas?.shownKeys.orEmpty().filter { it.kind == "letter" }.map { ' ' to scenePlace(it.id, it.copy == 1) } },
         enabled = { false },
-        writes = { InputMethodCatalog.writesOnKeys(imeName) },
     ) { _, _ -> }
 
     override fun onInputMethodUpdate(ime: InputMethodEntry) {
@@ -313,6 +316,23 @@ class ZhuyinKeyboard(
     // a symbol's or a tone's code (the layout's action:zhuyin, action:tone-N) by what its key shows
     override val sceneTable = object : SceneKeyDef.Table {
         override fun action(name: String, node: KeyNode): KeyAction? = placeholder(name, node.label, nine)
+
+        // R25r3 F7962: action:zhuyin's code is made from the face as the key is made; a key kept through a face changed
+        // (a pack's `<variant>`, its layout refused and the app's own drawn) went on sending the last face's symbol
+        override fun reads(node: KeyNode): Any? = node.label.takeIf { ZHUYIN_ACTION in node.actions.values }
+    }
+
+    // 大千's symbol keys and 注音九键's group keys as the engine reads their codes: a tap goes with where it fell and
+    // the keys around it (061-neighbour-groups; 注音九键's since the user's 11-16, a few sentences typed on target
+    // going wrong taken for the slips read); not a tone's
+    override fun typingKeys(): List<Pair<Char, KeyRef>> = canvas?.shownKeys.orEmpty().mapNotNull { node ->
+        if (ZHUYIN_ACTION !in node.actions.values) return@mapNotNull null
+        val code = if (nine) {
+            ZhuyinKeys.GROUP_SYMBOLS.indexOf(node.label).takeIf { it >= 0 }?.let(Keyboard::zhuyinNineKey)
+        } else {
+            node.label?.singleOrNull()?.let { codeOf(it, nine = false) }
+        }
+        code?.let(Keyboard::keyedChar)?.let { it to KeyRef(node.id, node.copy == 1) }
     }
 
     // what the bottom row shows now (grouped-bottom.xml's when= and bindings, as the grouped keyboards'): an

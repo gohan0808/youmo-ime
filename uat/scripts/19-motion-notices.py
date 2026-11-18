@@ -11,7 +11,7 @@ case("MN-02", needs="jvm:MotionNoticeUatTest.habitsOffAndOnEachSaidTheNewInTheOl
 case("MN-03", needs="jvm:MotionNoticeUatTest.floatingAtTheLeftTheNoticeGoesRight")(lambda d: None)
 
 
-case("MN-04", needs="jvm:MotionNoticeUatTest.clipboardDeleteUndoneOnTheNoticeInEitherTheme")(lambda d: None)
+case("MN-04", needs="jvm:MotionNoticeUatTest.clipboardDeleteUndoneOnTheNoticeInEitherTheme、UndoChipTest.aNoticeWithUndoIsAsTallAsOneThatOnlySays")(lambda d: None)
 
 
 case("MN-10", needs="jvm:MotionNoticeUatTest.theDockedHandleUnderOrOverTheKeysTheKeysAsTall")(lambda d: None)
@@ -35,4 +35,10 @@ case("MN-22", needs="jvm:SettingsPagesUatTest.thePreviewsBarFollowsTheCandidateS
 case("MN-23", needs="jvm:BarUatTest.candidateSpacingFollowsTextSize")(lambda d: None)
 
 
-case("MN-21", needs="jvm:MotionNoticeUatTest.landscapeLargestCandidatesStillCappedAtSevenTenths")(lambda d: None)
+case("MN-21", needs="jvm:MotionNoticeUatTest.landscapeLargestCandidatesStillLeaveTheApp120dp")(lambda d: None)
+
+case("MN-24", needs="jvm:KotlinHostHandwritingTest.theHandwritingNoticeNotSeenIsToldAtTheNextStart")(lambda d: None)
+
+case("MN-25", needs="jvm:KotlinHostHandwritingTest.bothHandwritingNoticesAreToldEachOnce")(lambda d: None)
+
+case("MN-26", needs="jvm:ToastTest.aToastGoesAfterItsTime")(lambda d: None)

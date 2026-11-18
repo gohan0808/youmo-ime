@@ -32,6 +32,7 @@ import org.fcitx.fcitx5.android.data.theme.ThemeManager
 import org.fcitx.fcitx5.android.host.HostEvent
 import org.fcitx.fcitx5.android.input.InputView
 import org.fcitx.fcitx5.android.input.KeyboardHarness
+import org.fcitx.fcitx5.android.input.bar.ui.ToolButton
 import org.fcitx.fcitx5.android.input.floating.FloatingHandle
 import org.fcitx.fcitx5.android.input.keyboard.ImKeyboard
 import org.fcitx.fcitx5.android.input.keyboard.ImKeyboards
@@ -61,6 +62,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.File
 import kotlin.math.roundToInt
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardStyle
 
 /**
  * contract: data files the theme maker page reads (youmo-layout.json, youmo-icons.json and its blocks).
@@ -185,8 +187,11 @@ class ThemeMakerLayoutTest {
     private fun measure(shot: Shot, icons: MutableSet<String>): String {
         val q = shot.phone.qualifiers.let { if (shot.landscape) it.replace("-port-", "-land-").swapSides() else it }
         RuntimeEnvironment.setQualifiers(q)
-        prefs.set(ThemeManager.prefs.oneHanded, if (shot.mode == Mode.ONE_HANDED) OneHanded.Right else OneHanded.Off)
-        prefs.set(ThemeManager.prefs.floatingKeyboard, shot.mode == Mode.FLOATING)
+        when (shot.mode) {
+            Mode.ONE_HANDED -> prefs.setStyle(KeyboardStyle.ONE_HANDED, side = OneHanded.Right)
+            Mode.FLOATING -> prefs.setStyle(KeyboardStyle.FLOATING)
+            else -> prefs.setStyleDefault()
+        }
         return KeyboardHarness(PROBE, keyboards = ImKeyboards.Chosen(pinyin = shot.board.keyboard), codeRow = CodeRowStyle.Floating).use { h ->
             h.start()
             // the punctuation as pinyin types it on a new install (中文标点 on): ，。？！ on the nine keys' 1 and column, the
@@ -458,7 +463,9 @@ class ThemeMakerLayoutTest {
         }
 
         private fun icon(v: ImageView): JsonObject? {
-            val res = ImageView::class.java.getDeclaredField("mResource").apply { isAccessible = true }.getInt(v)
+            // a toolbar button's image is its own drawable, read anew (ToolButton.showOwn): the button says which
+            val res = (v.parent as? ToolButton)?.iconRes?.takeIf { it != 0 }
+                ?: ImageView::class.java.getDeclaredField("mResource").apply { isAccessible = true }.getInt(v)
             if (res == 0 || v.drawable == null) return null
             val name = v.resources.getResourceEntryName(res)
             icons += name
@@ -469,6 +476,8 @@ class ThemeMakerLayoutTest {
                 tint(v)?.let { putColor(it) }
                 // drawn turned this many degrees about its middle
                 v.rotation.roundToInt().takeIf { it % 360 != 0 }?.let { put("rot", it) }
+                // drawn mirrored left to right (the floating strip's resize arrow where it grows up and left)
+                if ((v as? FloatingHandle.MirroredIcon)?.mirrored == true) put("flip", true)
             }
         }
     }

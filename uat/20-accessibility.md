@@ -46,10 +46,6 @@
 - **操作**：摸每个键。
 - **预期**：共同的预期。
 
-### AX-08 [P1] 手写键盘探索触摸
-- **前提**：B0-手写，打开 TalkBack。
-- **操作**：摸书写板以外的每个键。
-- **预期**：共同的预期。
 
 ## 面板
 
@@ -68,11 +64,18 @@
 - **操作**：摸每个符号格子、左边的分类和底行的键。
 - **预期**：共同的预期；格子读符号本身（如「，」）。
 
-### AX-13 [P1] 触摸浏览时在键上划不写字
-- **前提**：B0-设置，**在键上划** 选 **键盘手写**，回测试页；打开 TalkBack。
+### AX-13 [P1] 触摸浏览时手写开着也不写字
+- **前提**：B0-手写；打开 TalkBack。
 - **操作**：在拼音键盘的字母上摸过去（手指移动超过小半个键）。
-- **预期**：不出笔迹、不写字，读屏照常读摸到的键。
-- **JVM**：`KeyHandwritingUatTest.notInAPasswordUrlOrEmailFieldNorEnglishNorWhileTalkBackExplores`（触摸浏览开着时不写）；设备上不跑。
+- **预期**：字母不变淡，不出笔迹、不写字，读屏照常读摸到的键（用户定：TalkBack 触摸浏览时不写，0.6.0 的在键上划也没有「键盘手写」了）。
+- **JVM**：`KeyHandwritingUatTest.notInAPasswordFieldNorEnglishNorQuickInputNorWhileTalkBackExplores`（触摸浏览开着时不写）；设备上不跑。
+
+### AX-17 [P1] 生僻字屏蔽的网格
+<!-- 061-rare-char-block.md §6.4 -->
+- **前提**：B0-设置；**词库与短语 → 生僻字屏蔽** 打开开关；打开 TalkBack。
+- **操作**：点一张卡片进去，摸顶上那条勾选条和几个格子；在一个格子上双击；摸右边的字母条；在一个格子上双击并按住，再双击隔一格的另一个格子；返回，点第二张卡片进去，摸右边的字母条。
+- **预期**：共同的预期；勾选条读组名、字数和「全部屏蔽 / 部分屏蔽 / 全部放行」；格子读成复选框：字和它的读音（多音字读出全部读音，如「荅，dā、dá」），屏蔽的读「已选中」；双击切换后读出的状态跟着变。双击并按住（读屏的长按，没有手指的位置）只切换这一格，之后点别的格子只切换那一格，不当成从按住的那格拖过去、把中间的格子也连着切换，不崩。换到第二组后字母条从这一组的第一个字母读起（不停在上一组翻到的地方；搜索后也一样）。
+- **JVM**：`RareCharsPageUatTest.thePageHoldsBackAndLetsThrough`（格子的 `AccessibilityNodeInfo` 是可勾选的 CheckBox、屏蔽时已勾选，读的是字和全部读音；勾选条的描述）、`RareCharsTouchTest.aLongPressWithNoFingerIsNoDrag`（没有手指位置的长按只切换一格，不拖）、`RareCharsTouchTest.newLettersAreAtTheirTop`（换组、搜索后字母条从头开始）；TalkBack 本身在设备上手工看。
 
 ## 长按候选
 
@@ -84,5 +87,43 @@
 ### AX-14 [P1] Shift 键叫「大小写」
 - **前提**：B0；系统语言简体中文、繁体中文（台湾）、English 各做一次。
 - **操作**：打开 TalkBack，摸全键盘左下的 Shift 键；关掉 TalkBack，打开 **按键 → 按键字符和快捷键 → 功能键** 页看这个键。
-- **预期**：简体下读「大小写」、功能键页写「大小写」；繁体下都是「大小寫」；English 下都是 Shift。
+- **预期**：简体下读「大小写」、功能键里写「大小写」；繁体下都是「大小寫」；English 下都是 Shift。
 - **JVM**：`ShiftKeyNameTest.theShiftKeyIsNamedOnItsCapAndToAScreenReader`（简体、繁体、英文三行；读屏读的和页面上写的是同一个字串）；设备上不跑。
+
+### AX-15 [P2] 编码行在输入框里：读屏读框里的拼音
+- **前提**：B-IF，打开 TalkBack。
+- **操作**：在「普通文本」框点 n i h a o，再选「你好」。
+- **预期**：TalkBack 读框里的变化，不卡、不重复念一长串；选字后读「你好」。是否逐字母念、念成什么，记在结果里（设计页 M16 待测）。
+- **JVM**：没有；在设备上手工跑。
+
+### AX-16 [P1] 读屏：读音行可双击展开；词卡的字行逐个读；返回读「返回 银行」；展开后焦点在新内容第一项；超过 8 个字的读音行读成文字
+- **前提**：B0，打开 TalkBack，「普通文本」框。
+- **操作**：打 yinhang，长按「银行」；摸读音行，双击；摸字行；双击「行」；摸返回行，双击；摸上屏、复制。打一整句，长按，摸第一行。
+- **预期**：读音行读「银行，yín háng，按钮，双击即可展开词卡」；双击后焦点在词卡的整词上（读「银行，读音 yín háng」）；字行各读「行，háng，部首 行，6 画」，双击看字卡；字卡上焦点在返回行，读「返回 银行」；上屏、复制各是一项；整句的读音行读成文字，不是按钮。
+- **JVM**：app `CandidateMenuUatTest.talkBackReadsTheLineTheRowsAndTheWayBackAndIsTakenToWhatOpened`（节点、描述、动作标签、48 dp，焦点只断言收到了 ACTION_ACCESSIBILITY_FOCUS）；焦点落在哪里在设备上看。
+
+### AX-18 [P1] 手写、单手、悬浮按钮读出是开关和开、关
+- **前提**：B0-手写，打开 TalkBack。
+- **操作**：摸工具栏的手写按钮；写一个字后摸候选栏上的手写按钮；打开单手、悬浮再摸它们的按钮；切到拼音，展开工具栏，摸输入习惯、简繁按钮（默认不固定在工具栏上，要展开才有；简繁只在拼音下出现）。
+- **预期**：读成开关（「手写，开关，已开」这类，各机型读法略有不同），关掉后读「未开」。工具栏的输入习惯、简繁按钮读名字，不读成开关。手写开着时摸字母区照旧读键、不写字（用户定：TalkBack 触摸浏览时不写，见 AX-13）。
+- **JVM**：`HandwritingUatTest.theCandidateBarsButtonIsLitWhileHandwritingIsOnAndTurnsItOff`（候选栏的手写按钮可勾选、已勾选；不是开关的按钮不读成开关）、`ToolButtonNodeTest.aButtonNamedForItsStateIsNoCheckableNode`（工具栏的输入习惯、简繁按钮不读成开关）；真机上再听一遍读法。
+
+### AX-19 [P1] 读屏：键盘样式两项、单手和悬浮按当时的方向读开关
+- **前提**：真机，打开 TalkBack；横屏样式没设过（横拿分体）。
+- **操作**：在 **外观 → 大小与样式** 摸 **竖屏键盘样式**、**横屏键盘样式**；横拿在 ⋯ 和工具栏上摸单手、悬浮；双击单手，键盘重建后摸单手旁的斜箭头；竖过来再摸 ⋯ 里的单手。
+- **预期**：两项读出名字和当前的样式；横拿分体时单手读「未开」，双击后键盘变单手，焦点落在单手按钮上，读「已开」；斜箭头读「退出单手模式」；竖过来 ⋯ 里的单手读「未开」（竖屏那项没变）。
+- **设备**：真机手工听（读法各机型不同）；开关的状态和名字由 `KeyboardStyleUatTest.theBarsOneHandedWhereSplitNotWhereFloating`、AX-18 的测试覆盖。
+
+### AX-20 [P1] 读屏触摸浏览时，展开候选上不画笔画，双指拖照旧翻页
+- **前提**：真机，B0，另外笔画筛选；打开 TalkBack。
+- **操作**：打 shi，双击 ⌄ 展开候选；单指摸过几个候选；双指上下拖；双击一个候选。
+- **预期**：单指摸读出候选，不发笔画；双指拖翻页（TalkBack 把双指拖当成一根手指的拖动交给键盘，这时不当笔画）；双击选上候选。关掉 TalkBack 后照 PY-145 画笔画。
+- **JVM**：`StrokePageUatTest.aScreenReadersTouchExplorationDrawsNone`；ime-core `PageStrokeTouchTest.aPageDrawsAsTheKeysDoAndNotWhereTheyDoNot`；真机上手工试一遍。
+
+### AX-21 [P1] 读屏：分组卡两个节点挨着读，选择卡是单选，折叠卡读展开收起
+<!-- 061-settings-cards.md §2.8 -->
+- **前提**：B0-设置，开着 TalkBack。
+- **操作**：生僻字屏蔽页从开关往后逐个滑；按键字符和快捷键页逐个滑顶上的键盘；点 a 打开编辑框，逐个滑。
+- **预期**：生僻字页依次读「扩展区，14,802 个，已屏蔽 14,802，按钮」「扩展区，14,802 个，全部屏蔽，复选框」「三级字，……，按钮」……（一张卡的两个挨着），样字和箭头不单独读；
+  键盘读「全键盘，单选按钮，已选中，改过 N 个键，8 项中的第 1 项」；编辑框读「长按菜单，首选 @，共 N 个，已展开」「上滑，长按首选 @，已收起」，双击展开后下一个就是卡里的第一个单选。
+- **JVM**：`GroupCardTest.a card read body then strip, the next card after this strip`、`ChoiceCardTest.the body is one node read as a radio button named by the keyboard`、`FoldCardTest.the title row is one button saying the summary and whether it is open`、`RareCharsCardsUatTest.theCardsAndTheLettersAreReadOut`（节点的类名、文字、说法、状态、顺序）；TalkBack 本身真机上手工听一次。

@@ -20,6 +20,7 @@ import org.fcitx.fcitx5.android.host.HostEvent
 import org.fcitx.fcitx5.android.input.KeyboardHarness
 import org.fcitx.fcitx5.android.input.SceneShownKey
 import org.fcitx.fcitx5.android.input.ShownKey
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardStyle
 import org.fcitx.fcitx5.android.input.keyboard.OneHanded
 import org.fcitx.fcitx5.android.input.keyboard.SpaceLongPressBehavior
 import org.fcitx.fcitx5.android.input.keys.KeyLists
@@ -245,6 +246,8 @@ class PanelKeysUatTest {
         prefs.set(AppPrefs.getInstance().keyboard.spaceKeyLongPressBehavior, SpaceLongPressBehavior.Enumerate)
         fun held(inputType: Int): List<String> {
             val h = harness(inputType)
+            // two to go between: with one, the prompt to add more (SpaceLongPressNextImTest)
+            h.api.enabledIme = arrayOf(KeyboardHarness.PINYIN, KeyboardHarness.ENGLISH)
             h.api.calls.clear()
             h.longPress(h.named("fn/space"))
             h.idle()
@@ -283,7 +286,7 @@ class PanelKeysUatTest {
     @Uat("KB-82")
     @Config(qualifiers = "w320dp-h568dp-port-xhdpi")
     fun aLayerOf16OnTheNarrowestOneHanded() {
-        prefs.set(ThemeManager.prefs.oneHanded, OneHanded.Right)
+        prefs.setStyle(KeyboardStyle.ONE_HANDED, side = OneHanded.Right)
         aLayerOf16()
     }
 

@@ -5,10 +5,10 @@
 (function (root) {
   'use strict';
 
-  // the comments of [xml] blanked (same length), so what is looked for is never found inside one
-  const uncommented = (xml) => xml.replace(/<!--[\s\S]*?-->/g, (c) => ' '.repeat(c.length));
-  const unescape = (v) => v.replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-  const escape = (v) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  // the XML text helpers are youmo-form's, one set for both (R25 web-8): the page and the tests load it first
+  const F = root.YoumoForm;
+  if (!F) throw new Error('youmo-maker needs youmo-form loaded first');
+  const { uncommented, unescape, escape } = F;
   // a file named by an attribute: either quote, spaces around '=' (as XML has it and the app reads it)
   const srcOf = (tag, attr) => new RegExp('<(' + tag + ')\\b[^>]*?\\b(' + attr + ')\\s*=\\s*(?:"([^"]+)"|\'([^\']+)\')', 'g');
   const fileOf = (m) => unescape(m[3] ?? m[4]);
@@ -28,22 +28,24 @@
 
   /** The <theme>'s name= of [xml], null for none. */
   function themeName(xml) {
-    const m = /<theme\b(?:[^>"']|"[^"]*"|'[^']*')*?\sname\s*=\s*("([^"]*)"|'([^']*)')/.exec(uncommented(xml));
-    return m ? unescape(m[2] ?? m[3]) : null;
+    const t = F.elements(xml, 'theme')[0];
+    const a = t && t.attrs.find((x) => x[0] === 'name');
+    return a ? a[1] : null;
   }
 
   /** [xml] with its <theme>'s name= [name] (one put in where it has none). */
   function withName(xml, name) {
-    const t = /<theme\b(?:[^>"']|"[^"]*"|'[^']*')*?\/?>/.exec(uncommented(xml));
+    const t = F.elements(xml, 'theme')[0];
     if (!t) return xml;
-    const tag = xml.slice(t.index, t.index + t[0].length);
+    const tag = t.tag;
     // its attributes one by one, so a ' name=' inside another's quoted value is never the one changed
     let at = null;
     for (const a of tag.matchAll(/(\s)([^\s=/>]+)\s*=\s*("[^"]*"|'[^']*')/g)) if (a[2] === 'name') { at = a; break; }
     const named = at
       ? tag.slice(0, at.index) + at[1] + 'name="' + escape(name) + '"' + tag.slice(at.index + at[0].length)
-      : tag.replace(/^<theme\b/, '<theme name="' + escape(name) + '"');
-    return xml.slice(0, t.index) + named + xml.slice(t.index + t[0].length);
+      // a function, not a string: a `$&` or `$'` in the name is the name's, never a replacement pattern
+      : tag.replace(/^<theme\b/, (open) => open + ' name="' + escape(name) + '"');
+    return xml.slice(0, t.start) + named + xml.slice(t.start + tag.length);
   }
 
   /** A new document of the app's theme [id] (engine's themeSource), named apart from it so an import adds a theme. */
@@ -92,8 +94,9 @@
     if (!read.ok) return read.problems.map((p) => ({ level: 'error', line: p.line || 0, message: p.message }));
     const name = read.theme.name;
     if (name == null || !L.isPlainFileName(name) || name.startsWith('.') || /#(light|dark)$/.test(name)) bad('主题名 "' + name + '" 不能做文件名');
-    // the app refuses a pack named as a built-in theme (ThemeFilesManager.packClash): the names the page is given
-    else if ((format.builtinNames || []).includes(name)) bad('主题名 "' + name + '" 是 App 内置主题的名字，App 不会收；换一个名字');
+    // the app refuses a pack named as a built-in theme or pack (ThemeFilesManager.packClash): the names the page is
+    // given, looked up as ThemePackFiles.builtinClash does, by the name and, for two versions, each version's ref
+    else if ([name, ...(read.theme.variants.length > 1 ? read.theme.variants.map((v) => name + '#' + v) : [])].some((n) => (format.builtinNames || []).includes(n))) bad('主题名 "' + name + '" 是 App 内置主题的名字，App 不会收；换一个名字');
     const xml = uncommented(d.xml);
     const named = new Set();
     for (const m of xml.matchAll(srcOf('picture|cut|font|icon|sound', 'src|file'))) named.add(fileOf(m) + '|' + m[1]);
@@ -153,13 +156,16 @@
     const enc = new TextEncoder();
     // the pack's layouts as the app takes them (ThemePackFiles.checkLayouts, ThemeAssetLimits.layouts; ThemePackLayouts.report)
     const names = Object.keys(d.layouts);
+    // the app's boards (BuiltInKeyData.BOARDS): one of those it does not read from a pack (PackLayouts.replaces) is one
+    // the user picks among their own layouts, made one of those once imported (061-custom-layout §11; one rule, not two)
+    const boards = new Set(E.layouts());
     for (const n of names) if (!n.endsWith('.xml') || !L.isPlainFileName(n)) bad('layouts/' + n + ' 不是 App 认得的布局文件名（<键盘>.xml）');
     if (names.length > lim.layouts) bad('自带的键盘布局 ' + names.length + ' 个，App 最多收 ' + lim.layouts + ' 个');
     for (const n of names) if (enc.encode(d.layouts[n]).length > lim.layoutBytes) bad('layouts/' + n + ' 超过 ' + lim.layoutBytes + ' 字节');
-    const boards = new Set(E.layouts());
     for (const n of names) {
       const id = n.replace(/\.xml$/, '');
-      if (!boards.has(id) && E.layoutSource(id) == null) out.push({ level: 'warning', line: 0, message: 'layouts/' + n + '：App 没有这个键盘，不会用它' });
+      if (boards.has(id) && !E.replaces(id)) out.push({ level: 'warning', line: 0, message: 'layouts/' + n + '：范围内的布局在 0.6.1 起要在布局列表里选（导入主题时放进 外观 → 布局，不再顶替这个键盘）' });
+      else if (!E.replaces(id)) out.push({ level: 'warning', line: 0, message: 'layouts/' + n + '：App 没有这个键盘，不会用它' });
     }
     // the app's ThemeAssetLimits.MAX_THEME_XML_BYTES
     const xmlBytes = enc.encode(d.xml).length;
@@ -181,8 +187,9 @@
    * Which of [d]'s files the page may decode: only images the theme names, each within its role's sides (the
    * picture's source, its cuts, a key's image: youmo-lib's decodeCaps), and all of them within DECODE_BUDGET, the
    * first named first. A pack's bytes are not trusted: a decode past the browser's memory takes the tab down.
+   * [only]: those roles alone (the layout page draws no picture: its keys' images only, the budget theirs).
    */
-  function decodableImages(L, format, d) {
+  function decodableImages(L, format, d, only = null) {
     const xml = uncommented(d.xml);
     const roles = new Map();
     const name = (n, role) => { if (!roles.has(n)) roles.set(n, role); };
@@ -193,6 +200,7 @@
     let spent = 0;
     const out = [];
     for (const [n, role] of roles) {
+      if (only && !only.includes(role)) continue;
       const bytes = d.files[n];
       const size = bytes && /\.(png|jpe?g|webp)$/i.test(n) ? L.imageSize(bytes) : null;
       if (!size || !L.decodable(size, L.decodeCaps(format, role))) continue;
@@ -201,6 +209,19 @@
       out.push(n);
     }
     return out;
+  }
+
+  // a file refused (youmo-lib's ThemeError codes) in words that say what to do: the theme maker's and the layout page's
+  function openError(e) {
+    switch (e && e.code) {
+      case 'limit': return '文件太大或文件太多，超过了 App 的限制';
+      case 'newer': return '它是更新版本的幽默输入法做的（' + e.detail + '），先刷新这个网页再试';
+      case 'older': return '它是很旧的版本（' + e.detail + '），先导入 App 再从 App 导出';
+      case 'not-theme': return '这不是主题文件（.theme 或 theme.xml）';
+      case 'missing': return '主题里写到的文件 ' + e.detail + ' 包里没有';
+      case 'bad': return '主题文件有错：' + e.detail;
+      default: return (e && e.message) || String(e);
+    }
   }
 
   const decode = (bytes) => new TextDecoder().decode(bytes);
@@ -422,12 +443,15 @@
     }
   }
 
-  /** IndexedDB as a draft store (pictures are too big for localStorage); null where the browser has none. */
-  function idbStore(idb) {
+  /**
+   * IndexedDB as a draft store (pictures are too big for localStorage); null where the browser has none. [name]: the
+   * page's own database (the layout maker keeps its draft apart from the theme maker's), its tabs' lock named after it.
+   */
+  function idbStore(idb, name = 'youmo-theme-maker') {
     if (!idb) return null;
     let db = null;
     const opened = () => (db ??= new Promise((ok, fail) => {
-      const r = idb.open('youmo-theme-maker', 1);
+      const r = idb.open(name, 1);
       r.onupgradeneeded = () => r.result.createObjectStore('kv');
       r.onsuccess = () => ok(r.result);
       r.onerror = () => fail(r.error);
@@ -445,7 +469,7 @@
       put: (k, v) => run('readwrite', (s) => s.put(v, k)),
       remove: (k) => run('readwrite', (s) => s.delete(k)),
       keys: () => run('readonly', (s) => s.getAllKeys()),
-      lock: locks ? (act) => locks.request('youmo-theme-maker-draft', act) : undefined,
+      lock: locks ? (act) => locks.request(name + '-draft', act) : undefined,
     };
   }
 
@@ -460,10 +484,28 @@
     { id: 'small', label: '小屏 720p', w: 720, h: 1280, density: 2 },
     { id: 'tablet', label: '平板 10"', w: 1600, h: 2560, density: 2 },
   ];
-  /** The keyboard's height in dp (the app's default, portrait and landscape). */
-  const KEYBOARD_DP = { portrait: 267, landscape: 200 };
+  /**
+   * The keyboard's height in dp, the app's default: upright 30% of a common phone; turned 标准's four rows, 48 dp on a
+   * phone, 56 dp on a large screen (a short side of 600 dp or more: a tablet, a foldable's inner screen;
+   * 061-landscape-height §5.1).
+   */
+  const KEYBOARD_DP = { portrait: 267, landscape: 192, landscapeLarge: 224 };
+  const LARGE_SHORT_SIDE_DP = 600;
+
+  /**
+   * The window [e] is drawn in as the app lays it out: its width in px across the device as held ([e].landscape: turned),
+   * 横屏 or not by the engine's answer (ScreenShape: turned, or 600 dp wide; a tablet upright is 横屏 throughout, its
+   * `@landscape` styles, sizes' second values and landscape cut as well as its height), the keyboard's height in px
+   * ([KEYBOARD_DP]).
+   */
+  function shape(E, e) {
+    const width = e.landscape ? Math.max(e.w, e.h) : Math.min(e.w, e.h);
+    const landscape = !!E.screenLandscape(!!e.landscape, Math.round(width / e.density));
+    const dp = !landscape ? KEYBOARD_DP.portrait : Math.min(e.w, e.h) / e.density >= LARGE_SHORT_SIDE_DP ? KEYBOARD_DP.landscapeLarge : KEYBOARD_DP.landscape;
+    return { landscape, width, height: Math.round(dp * e.density) };
+  }
   const FORMS = ['normal', 'compact', 'floating', 'left', 'right', 'split', 'flat'];
-  const BOARDS = ['qwerty', 'nine', 'k14', 'k18', 'zhuyin', 'zhuyin-nine', 'number', 'symbols', 'handwriting'];
+  const BOARDS = ['qwerty', 'nine', 'k14', 'k18', 'zhuyin', 'zhuyin-nine', 'number', 'symbols'];
 
   /**
    * The preview's environment (060-render-p3 §5.1 预览环境): the device, the board and its form; the field and the
@@ -474,9 +516,30 @@
     device: 'oneplus-6t', w: 1080, h: 2340, density: 2.625, landscape: false, board: 'qwerty', form: 'normal', dark: false, shift: 'none',
     field: 'text', ime: 'pinyin', show: '', bar: 'idle', panel: '',
   };
+  /**
+   * A draft's kept environment [kept] (keepDraft's) as the page can show it now: a choice its form does not offer
+   * ([offered]: a key of ENV to its select's values) the default's, as 0.6.0's 手写 board, gone since (a board the engine
+   * does not have draws nothing and leaves the form's select empty); a device it does not list `custom` (its size kept);
+   * a size not a positive number, or a value of another type, the default's.
+   */
+  function restoreEnv(kept, offered) {
+    const k = kept && typeof kept === 'object' ? kept : {};
+    const e = Object.assign({}, ENV);
+    for (const key of Object.keys(ENV)) {
+      const v = k[key];
+      if (typeof v !== typeof ENV[key]) continue;
+      if (typeof v === 'number' && !(Number.isFinite(v) && v > 0)) continue;
+      if (offered[key] && !offered[key].includes(v)) {
+        if (key === 'device') e.device = 'custom';
+        continue;
+      }
+      e[key] = v;
+    }
+    return e;
+  }
   /** The fields and input methods the environment offers: the engine's (Selector.FIELDS, Selector.IMS). */
   const FIELDS = ['text', 'password', 'url', 'number', 'email'];
-  const IMES = ['pinyin', 'shuangpin', 'english', 'wubi', 'cangjie', 'handwriting'];
+  const IMES = ['pinyin', 'shuangpin', 'english', 'wubi', 'cangjie'];
 
   /**
    * Chinese punctuation as the app ships it (`punc.mb.zh_CN`), each key to its first, the one typed: what a new install
@@ -490,17 +553,13 @@
   };
 
   /**
-   * [e] (the page's choices) as the engine's EnvJson: the keyboard's width and height in px, the form's flags, and
+   * [e] (the page's choices) as the engine's EnvJson: the window's [shape], the form's flags, and
    * Chinese punctuation (ZH_PUNCTUATION) for any input method but English, as on a new install.
    */
-  function envJson(e) {
-    const across = e.landscape ? Math.max(e.w, e.h) : Math.min(e.w, e.h);
-    const out = {
-      width: across,
-      height: Math.round((e.landscape ? KEYBOARD_DP.landscape : KEYBOARD_DP.portrait) * e.density),
-      density: e.density,
-    };
-    if (e.landscape) out.landscape = true;
+  function envJson(E, e) {
+    const s = shape(E, e);
+    const out = { width: s.width, height: s.height, density: e.density };
+    if (s.landscape) out.landscape = true;
     if (e.dark) out.dark = true;
     if (e.shift && e.shift !== 'none') out.shift = e.shift;
     if ((e.field && e.field !== 'text') || (e.ime && e.ime !== 'pinyin')) out.input = { field: e.field || 'text', ime: e.ime || 'pinyin' };
@@ -514,7 +573,71 @@
   }
 
   /**
-   * What is wrong with [d] drawn on [board] in [env] (EnvJson): `[{level: "error"|"warning", line, message}]`,
+   * A `.layout` file's [bytes] as its text, the one opener of the theme maker's 打开 .layout… and the layout maker's
+   * (LM.openText): UTF-8 (its byte-order mark gone, its line ends \n), within the app's [max] bytes (§2.6); throws with
+   * what the page says otherwise, a zip (a .theme) said to be one. [size]: the file's, where [bytes] is only its start
+   * (a file far past the limit is not read whole to be refused).
+   */
+  function layoutText(bytes, max, size = bytes.length) {
+    if (bytes.length >= 2 && bytes[0] === 0x50 && bytes[1] === 0x4b) throw new Error('这是主题包（.theme），不是 .layout 布局文件');
+    if (size > max) throw new Error('文件 ' + size + ' 字节，布局最大 ' + Math.round(max / 1024) + ' KB');
+    let text;
+    try {
+      text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    } catch (e) {
+      throw new Error('不是 UTF-8 文本');
+    }
+    // Windows' line ends as the page's: the lines the layout maker adds (a <meta>) are \n, a textarea gives \n back
+    return text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+  }
+
+  /**
+   * [text] (a layout's) with each key's face a layout maker before L8 wrote of three letters or more (`{group:hjk}`,
+   * W2's merge: LayoutReader refuses it, its GROUP_ARG is one or two) written as that page writes it now, the letters'
+   * capitals (LE.groupLabel): `{xml, keys}`, how many changed. Only where the key's letters= are those letters: another
+   * face is the user's own. Both pages' openers run it (review R26 D8; F8459: 打开 .layout here showed a line error for
+   * a file of then, nothing said why).
+   */
+  function oldGroupFaces(text) {
+    let out = text;
+    let keys = 0;
+    // from the last, so each key found is still where it was found
+    for (const k of F.elements(text, 'key').reverse()) {
+      const a = Object.fromEntries(k.attrs);
+      const m = /^\{group:([a-z;]{3,})\}$/.exec(a.label || '');
+      if (!m || (a.letters || '').replace(/ /g, '') !== m[1]) continue;
+      // the label= attribute itself, the tag's attributes gone through whole (a "label=…" inside another's value is that value)
+      const at = [...k.tag.matchAll(/(\s+)([\w:.-]+)\s*=\s*("[^"]*"|'[^']*')/g)].find((x) => x[2] === 'label');
+      if (!at) continue;
+      const tag = k.tag.slice(0, at.index) + at[1] + 'label="' + m[1].toUpperCase() + '"' + k.tag.slice(at.index + at[0].length);
+      out = out.slice(0, k.start) + tag + out.slice(k.start + k.tag.length);
+      keys++;
+    }
+    return { xml: out, keys };
+  }
+
+  /**
+   * A `.layout` file's [bytes] as 环境 › 键盘 draws the theme on it (061-custom-layout §10): `{id, name, layout}`, the
+   * layout as the engine's readOwnLayout reads it, `oldFaces` its group keys' faces of a page before L8 drawn as now
+   * (oldGroupFaces: the file itself the app still refuses); throws with what the page says otherwise (a zip, past the
+   * app's size, not UTF-8, one that does not read: its first problem; one of a built-in board's id). A layout the
+   * checker would refuse otherwise is still drawn.
+   */
+  function openLayout(E, bytes) {
+    const read = oldGroupFaces(layoutText(bytes, E.layoutFormat().limits.bytes));
+    const r = E.readOwnLayout(read.xml);
+    if (!r.ok) {
+      const p = r.problems[0];
+      throw new Error((p && p.line ? '第 ' + p.line + ' 行：' : '') + (p ? p.message : '读不出'));
+    }
+    // the app's own board of this id is what 键盘 lists already, and a style picked on it would be that board's: the app's
+    // import refuses it too (LayoutCheck id-built-in)
+    if (E.layoutSource(r.layout.id) != null) throw new Error('id「' + r.layout.id + '」和 App 自带的键盘重名，App 不会导入它：换一个 id');
+    return { id: r.layout.id, name: r.layout.name, layout: r.layout, oldFaces: read.keys };
+  }
+
+  /**
+   * What is wrong with [d] drawn on [board] (an app board's id, or a layout of the user's as readOwnLayout reads it) in [env] (EnvJson): `[{level: "error"|"warning", line, message}]`,
    * the theme's own, then the scene's; `theme` and `scene` where they were made. An [env] with `marks` is drawn with
    * those whole (none of the defaults filled in for a member it leaves out); one without, with the board's default
    * marks (defaultMarksOf).
@@ -533,7 +656,8 @@
     add('error', r.problems);
     add('warning', r.warnings);
     if (!r.ok) return { problems, theme: null, scene: null };
-    const layout = layoutOf(E, d, board, (list) => add('warning', list));
+    // a layout of the user's (环境 › 键盘 › 打开 .layout, 061-custom-layout §10) drawn as it is: the pack's own boards only replace the app's
+    const layout = typeof board === 'string' ? layoutOf(E, d, board, (list) => add('warning', list)) : board;
     const marks = env.marks ? null : defaultMarksOf(E, layout, env);
     const drawn = marks ? Object.assign({}, env, { marks }) : env;
     const s = E.buildScene(layout, r.theme, drawn, measurer || E.fixedMeasurer());
@@ -563,26 +687,52 @@
   }
 
   /**
-   * The keyboard [board] is drawn with: the pack's own `layouts/<board>.xml` where it has one that reads (its includes
+   * The keyboard [board] is drawn with: the pack's own `layouts/<board>.xml` where it has one the app reads (PackLayouts.replaces: 注音's, the emoji's…) that reads (its includes
    * from the pack's other files there, else the app's), else the app's (its id). One that does not read is [warn]ed
-   * of, the app's drawn, as the app does (ThemePackLayouts: logged, its own drawn).
+   * of, the app's drawn, as the app does (ThemePackLayouts: logged, its own drawn). One taken is drawn as the app takes
+   * it: its keys' long press, corner and swipes the app's keys' of their names (主题只管外观), what it writes of them
+   * [warn]ed of, file by file, with the lines.
    */
   function layoutOf(E, d, board, warn) {
     const own = d.layouts[board + '.xml'];
-    if (own == null) return board;
+    // a board the app draws its own of since 0.6.1 (26 键, 14/18 键…: the pack's is one of the user's layouts once imported)
+    if (own == null || !E.replaces(board)) return board;
     const fragments = Object.create(null);
-    // the pack's fragments the app reads: only under an id of its own (ThemePackLayouts.read)
-    for (const [n, t] of Object.entries(d.layouts)) if (n !== board + '.xml' && n.endsWith('.xml') && E.layoutSource(n.slice(0, -4)) != null) fragments[n.slice(0, -4)] = t;
-    const l = E.readLayout(own, fragments);
+    // the pack's fragments the app reads: those the board includes, only under an id of its own (ThemePackLayouts.taken,
+    // .read); never the pack's other boards, keyboards that fail it read as fragments
+    for (const inc of F.elements(own, 'include')) {
+      const src = Object.fromEntries(inc.attrs).src;
+      if (src && src !== board && E.replaces(src) && typeof d.layouts[src + '.xml'] === 'string') fragments[src] = d.layouts[src + '.xml'];
+    }
+    const l = E.readLayout(own, fragments, board);
     if (!l.ok) {
       warn(l.problems.map((p) => ({ line: 0, message: 'layouts/' + board + '.xml' + (p.line ? ' 第 ' + p.line + ' 行' : '') + '：' + p.message + '（App 会用自己的这个键盘）' })));
       return board;
     }
     // as typable as the app's, else the app's drawn (ThemePackLayouts.judge, the same rule: PackLayouts)
     const why = E.refuses(board, l.layout);
-    if (why == null) return l.layout;
+    if (why == null) {
+      warn(ignoredNotice(l.ignored));
+      return l.layout;
+    }
     warn([{ line: 0, message: 'layouts/' + board + '.xml：App 不会用它（' + why + '），会用自己的这个键盘' }]);
     return board;
+  }
+
+  /**
+   * What a pack's layout writes of its keys held or swiped that the app does not take ([ignored], readLayout's), one
+   * warning a file: its lines, each once, in order.
+   */
+  function ignoredNotice(ignored) {
+    const lines = new Map();
+    for (const i of ignored || []) {
+      if (!lines.has(i.file)) lines.set(i.file, new Set());
+      if (i.line) lines.get(i.file).add(i.line);
+    }
+    return [...lines].map(([file, set]) => {
+      const at = set.size ? '第 ' + [...set].sort((a, b) => a - b).join('、') + ' 行的' : '';
+      return { line: 0, message: 'layouts/' + file + '.xml：' + at + '长按、角标、滑动写法不起作用（0.6.1 起主题只管样子，这些跟着键的名字，在 App 的 按键 → 按键字符和快捷键 里设）' };
+    });
   }
 
   /**
@@ -592,10 +742,10 @@
    */
   function iconsOf(E, base, d, cache) {
     const out = Object.assign({}, base);
-    const attr = (tag, n) => { const m = new RegExp('\\s' + n + '\\s*=\\s*(?:"([^"]*)"|\'([^\']*)\')').exec(tag); return m ? unescape(m[1] ?? m[2]) : null; };
-    for (const m of uncommented(d.xml).matchAll(/<icon\b(?:[^>"']|"[^"]*"|'[^']*')*>/g)) {
-      const name = attr(m[0], 'name');
-      const bytes = d.files[attr(m[0], 'src')];
+    for (const e of F.elements(d.xml, 'icon')) {
+      const a = Object.fromEntries(e.attrs);
+      const name = a.name;
+      const bytes = d.files[a.src];
       if (!name || !bytes) continue;
       if (!cache.has(bytes)) {
         let r = null;
@@ -686,6 +836,6 @@
 
   root.YoumoMaker = {
     THEME_XML, UNDO_LIMIT, DEVICES, KEYBOARD_DP, FORMS, BOARDS, ENV, FIELDS, IMES, ZH_PUNCTUATION,
-    doc, themeName, withName, fromBuiltin, PICTURE_SAVE, DECODE_BUDGET, pictureFile, saveProblems, decodableImages, open, save, same, History, keepDraft, draft, dropDraft, idbStore, envJson, check, layoutOf, exportCheck, animatedWebp, animatedStill, keepsAnimated, iconsOf, exampleDoc,
+    doc, themeName, withName, fromBuiltin, PICTURE_SAVE, DECODE_BUDGET, pictureFile, saveProblems, decodableImages, openError, open, save, same, History, keepDraft, draft, dropDraft, idbStore, shape, envJson, restoreEnv, check, layoutText, oldGroupFaces, openLayout, layoutOf, ignoredNotice, exportCheck, animatedWebp, animatedStill, keepsAnimated, iconsOf, exampleDoc,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

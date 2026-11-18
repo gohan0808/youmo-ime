@@ -4,10 +4,9 @@
  */
 package org.fcitx.fcitx5.android.input.keyboard.canvas
 
-import android.content.res.Configuration
 import android.view.View
-import org.fcitx.fcitx5.android.data.theme.ThemeManager
-import org.fcitx.fcitx5.android.input.floating.FloatingKeyboard
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardArea
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardStyles
 import org.fcitx.fcitx5.android.input.keyboard.inInputMethod
 import org.fcitx.fcitx5.android.input.keyboard.keyboardCompact
 import org.fcitx.fcitx5.android.scene.engine.Env
@@ -55,8 +54,9 @@ object SceneEnvs {
 
     /**
      * [view]'s keys at [width] × [height] px in [look] ([dark] its theme's): landscape as the screen is,
-     * compact as the height setting is (KeyboardHeightCap), floating's text scale only in the input
-     * method (not a settings page's preview), [split] where the keyboard splits its letters.
+     * compact as the height setting is (KeyboardHeightLevels.isCompact), floating's text scale only in the input
+     * method (not a settings page's preview), [split] where the keyboard splits its letters. Floating resized, the
+     * keys drawn all as much bigger or smaller; not [resized], a bar's (its number row): the bars only get wider (Q6).
      */
     fun of(
         view: View,
@@ -69,20 +69,18 @@ object SceneEnvs {
         shift: Shift = Shift.None,
         texts: Texts = Texts(),
         marks: MarkSettings = MarkSettings(),
+        resized: Boolean = true,
     ): Env {
         val context = view.context
-        val config = view.resources.configuration
-        val floating = if (ThemeManager.prefs.floatingKeyboard.getValue() && context.inInputMethod()) {
-            val screen = config.screenWidthDp
-            FloatingKeyboard.textScale(FloatingKeyboard.widthDp(screen), screen).toDouble()
-        } else {
-            null
-        }
+        val floating = if (context.inInputMethod() && KeyboardStyles.floating(context)) KeyboardArea.floatingSize(KeyboardArea.screen(context)) else null
+        // floating resized, its keys' gaps, corners, text and marks all as much bigger or smaller: a dp of the scene's
+        // that many px, so the scene in dp is the default size's and the keys keep their shape (061-floating-resize §2.1)
+        val resize = if (resized) floating?.resize ?: 1f else 1f
         return Env(
-            width.toDouble(), height.toDouble(), view.resources.displayMetrics.density.toDouble(),
-            landscape = config.orientation == Configuration.ORIENTATION_LANDSCAPE,
+            width.toDouble(), height.toDouble(), view.resources.displayMetrics.density.toDouble() * resize,
+            landscape = KeyboardArea.landscape(context),
             compact = keyboardCompact(),
-            floating = floating,
+            floating = floating?.textScale?.toDouble(),
             split = split,
             oneHanded = SplitKeyboard.Dock.FULL,
             dock = SplitKeyboard.Dock.FULL,

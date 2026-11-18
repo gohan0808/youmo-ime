@@ -106,6 +106,15 @@ class XmlTest {
             assertIs<Parsed.Failed>(Xml.parse("<a x=\"$r\"/>"), r)
         }
         Xml.parse("<a x=\"&#x10FFFF;\"/>").ok()
+        // written as they are: dropped, before a reference in the value and after one, and between elements, so a value is
+        // only ever XML's characters and a file 0.6.0 wrote or read with one still reads (R26 F8187)
+        for (c in listOf('\u0000', '\u0001', '\u000B', '\u001F', '￾', '￿')) {
+            assertEquals("ab", Xml.parse("<a x=\"a${c}b\"/>").ok()["x"], c.code.toString())
+            assertEquals("&b", Xml.parse("<a x=\"&amp;${c}b\"/>").ok()["x"], c.code.toString())
+            assertEquals("a&b", Xml.parse("<a x=\"a${c}&amp;b\"/>").ok()["x"], c.code.toString())
+            Xml.parse("<a> $c </a>").ok()
+        }
+        for (c in listOf('\t', '\n', '\r', ' ', '\uFFFD', '\uFEFF')) assertTrue(Xml.allows(c), c.code.toString())
     }
 
     @Test
@@ -114,5 +123,22 @@ class XmlTest {
         assertIs<Parsed.Failed>(Xml.parse("<a>" + " ".repeat(Xml.MAX_CHARS) + "</a>"))
         assertIs<Parsed.Failed>(Xml.parse("<!-- a -- b --><a/>"))
         assertEquals("a", Xml.parse("\uFEFF<a/>").ok().name)
+    }
+
+    // where each element and value is, asked for (a pack's qwerty.xml rewritten in place, PackSeparator)
+    @Test
+    fun offsetsWhereAskedFor() {
+        val text = "<!-- <x a=\"no\"/> -->\n<a x = 'one'\n   y=\"t&amp;o\"><b z=\">\"/> </a>"
+        val root = Xml.parse(text, offsets = true).ok()
+        val a = root.offsets!!
+        assertEquals(text.indexOf("<a"), a.from)
+        assertEquals(text.indexOf("><b"), a.close)
+        assertEquals(text.length, a.to)
+        assertEquals("one", text.substring(a.values.getValue("x")))
+        assertEquals("t&amp;o", text.substring(a.values.getValue("y")))
+        val b = root.children.single().offsets!!
+        assertEquals("<b z=\">\"/>", text.substring(b.from, b.to))
+        assertEquals(text.indexOf("/> </a>"), b.close)
+        assertEquals(null, Xml.parse(text).ok().offsets)
     }
 }

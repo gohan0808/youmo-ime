@@ -7,9 +7,13 @@ package org.fcitx.fcitx5.android.uat
 import androidx.preference.PreferenceManager
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
 import org.fcitx.fcitx5.android.data.prefs.ManagedPreference
+import org.fcitx.fcitx5.android.data.theme.ThemeManager
 import org.fcitx.fcitx5.android.input.keyboard.KeyMarkPosition
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardStyle
+import org.fcitx.fcitx5.android.input.keyboard.OneHanded
 import org.fcitx.fcitx5.android.input.keyboard.SwipeLayersChoice
 import org.fcitx.fcitx5.android.input.keys.First
+import org.fcitx.fcitx5.android.input.keys.ItemMark
 import org.fcitx.fcitx5.android.input.keys.KeyLists
 import org.fcitx.fcitx5.android.input.keys.UserList
 import org.fcitx.fcitx5.android.input.picker.PickerWindow
@@ -39,9 +43,17 @@ class PrefsRule : ExternalResource() {
     override fun before() {
         found = HashMap(store.all)
         set(AppPrefs.getInstance().internal.lastPickerType, PickerWindow.Key.Emoji.name)
+        // the symbol panel opens on the category picked last, which a test without this rule may have left
+        set(AppPrefs.getInstance().internal.symbolPanelCategory, "")
         // the floating keyboard's spot, which a drag's end writes: another test's drag moved the theme maker's
         // floating shots (ThemeMakerLayoutTest)
-        AppPrefs.getInstance().internal.let { set(it.floatingKeyboardX, it.floatingKeyboardX.defaultValue); set(it.floatingKeyboardY, it.floatingKeyboardY.defaultValue) }
+        // and its width, 竖屏 and 横屏 each their own (061-floating-resize)
+        AppPrefs.getInstance().internal.run {
+            listOf(
+                floatingKeyboardX, floatingKeyboardY, floatingPortraitX, floatingPortraitY, floatingLandscapeX, floatingLandscapeY,
+                floatingPortraitWidthDp, floatingLandscapeWidthDp,
+            ).forEach { set(it, it.defaultValue) }
+        }
     }
 
     fun <T : Any> set(pref: ManagedPreference<T>, value: T) {
@@ -53,11 +65,12 @@ class PrefsRule : ExternalResource() {
     /**
      * A key's long press set as 按键字符和快捷键 sets it (`key_lists`, 060-keys-unify): by its name (`full/q`, `t9/2`,
      * `fn/comma`; KeyId.of), its whole list [items] (a row's letters and digit too, 060-row-unlock), its [first] (the swipe's, the corner's) the default's
-     * unless given, or [off]; the other keys as they are. The store is put back after the test, key_lists with it.
+     * unless given, or [off], its items' [marks] (061-text-variables §3); the other keys as they are. The store is put
+     * back after the test, key_lists with it.
      */
-    fun setList(name: String, items: List<String> = emptyList(), first: String? = null, off: Boolean = false) {
+    fun setList(name: String, items: List<String> = emptyList(), first: String? = null, off: Boolean = false, marks: Map<String, ItemMark> = emptyMap()) {
         val pref = AppPrefs.getInstance().internal.keyLists
-        val list = if (off) UserList.Off else UserList(off = false, items = items, first = first?.let(First::Literal) ?: First.Default)
+        val list = if (off) UserList.Off else UserList(off = false, items = items, first = first?.let(First::Literal) ?: First.Default, marks = marks)
         // as stored, none left out as a default: a list turned off is kept where no default is told here
         set(pref, KeyLists.of((KeyLists.parse(pref.getValue())?.lists.orEmpty()) + (KeyId.of(name) to list)).serialize())
     }
@@ -92,6 +105,18 @@ class PrefsRule : ExternalResource() {
         set(AppPrefs.getInstance().keyboard.swipeUp, up)
         set(AppPrefs.getInstance().keyboard.swipeDown, down)
     }
+
+    /**
+     * 键盘样式 [style] on both shapes, or on the one [landscape] says (TestStyles); [side] where 单手 is at. Put back
+     * with the store after the test.
+     */
+    fun setStyle(style: KeyboardStyle, landscape: Boolean? = null, side: OneHanded? = null) {
+        side?.let { set(ThemeManager.prefs.oneHandedSide, it) }
+        TestStyles.set(style, landscape)
+    }
+
+    /** No style stored: each shape's default by its width (竖屏 普通; 横屏 split from 600 dp). */
+    fun setStyleDefault() = TestStyles.clear()
 
     /** [key] stored as [value] as it is, of no setting this version declares (0.5's long presses): put back after the test. */
     fun setStored(key: String, value: String) = store.edit().putString(key, value).commit()

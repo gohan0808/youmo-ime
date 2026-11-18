@@ -5,9 +5,11 @@
 package org.fcitx.fcitx5.android.scene.keys
 
 import org.fcitx.fcitx5.android.scene.engine.MarkContent
+import org.fcitx.fcitx5.android.scene.layout.BuiltInKeyData
 import org.fcitx.fcitx5.android.scene.layout.Fragment
 import org.fcitx.fcitx5.android.scene.layout.Include
 import org.fcitx.fcitx5.android.scene.layout.Key
+import org.fcitx.fcitx5.android.scene.layout.KeyData
 import org.fcitx.fcitx5.android.scene.layout.Layout
 import org.fcitx.fcitx5.android.scene.layout.Row
 import org.fcitx.fcitx5.android.scene.layout.Text
@@ -19,16 +21,17 @@ import org.fcitx.fcitx5.android.scene.layout.Text
  */
 object DefaultMarks {
 
-    /** [layout]'s keys and its [fragments]' (by id) on [variant] (else the one its family says). */
+    /** [layout]'s keys and its [fragments]' (by id) on [variant] (else the one its family says), their [nodes] as given (a user's layout's: [ownNodes]). */
     fun shortcuts(
         layout: Layout,
         fragments: Map<String, Fragment>,
         variant: KeyboardVariant = variantOf(layout),
         punctuation: Map<String, String> = emptyMap(),
         firstUp: Boolean = true,
+        nodes: List<Pair<String, NodeFacts>> = nodes(layout, fragments),
     ): Map<String, MarkContent> {
         val marks = LinkedHashMap<String, MarkContent>()
-        for ((name, facts) in nodes(layout, fragments)) {
+        for ((name, facts) in nodes) {
             val id = KeyId.of(name)
             // a key of `mark="false"` (a character's, not a function's) draws no first of its defaults'
             val list = KeyDefaults.of(id, variant, facts)?.takeUnless { facts.markOff && !id.isFunction }
@@ -73,17 +76,17 @@ object DefaultMarks {
 
     /**
      * The variant a layout's family stands for, its default input method's. The 14 and 18 keys are told apart by the
-     * layout's id (`k18`): a theme pack replaces a keyboard only under that keyboard's id (PackLayouts.judge), so no
-     * pack's 18 keys reach here under another.
+     * app's keyboard the layout is of, [basedOn] (`k18`): a theme pack's is of its own id (PackLayouts.judge), which its
+     * callers pass whatever `based-on=` it writes; a user's layout of the one it was made from (061-custom-layout §5.3),
+     * its `based-on=`, whatever its own id.
      */
-    fun variantOf(layout: Layout): KeyboardVariant = KeyboardVariant(
+    fun variantOf(layout: Layout, basedOn: String = layout.basedOn ?: layout.id): KeyboardVariant = KeyboardVariant(
         when (layout.family) {
             "letters" -> KeyboardVariant.Form.Full
             "nine" -> KeyboardVariant.Form.Nine
-            "grouped" -> if (layout.id == "k18") KeyboardVariant.Form.Grouped18 else KeyboardVariant.Form.Grouped14
+            "grouped" -> if (basedOn == "k18") KeyboardVariant.Form.Grouped18 else KeyboardVariant.Form.Grouped14
             "zhuyin" -> KeyboardVariant.Form.ZhuyinFull
             "zhuyin-nine" -> KeyboardVariant.Form.ZhuyinNine
-            "handwriting" -> KeyboardVariant.Form.Handwriting
             "number" -> KeyboardVariant.Form.Number
             else -> KeyboardVariant.Form.Panel
         },
@@ -108,8 +111,9 @@ object DefaultMarks {
                 typing = KeyDefaults.typing(a.role, a.kind, (a.label as? Text.Literal)?.text ?: a.label?.let { "_" }, a.actions["preview"]),
                 popup = key.popup,
                 letters = key.letters?.group,
-                themeFirst = a.actions["swipe-up"] ?: (a.alt as? Text.Literal)?.text,
-                place = if (key.letters != null) place++ else -1,
+                layoutFirst = a.actions["swipe-up"] ?: (a.alt as? Text.Literal)?.text,
+                // KeyData's where it set one (a theme's or a user's layout: the app's key of its name's), else counted
+                place = if (key.letters != null) (place++).let { key.place ?: it } else -1,
                 function = a.kind == "function",
                 markOff = a.mark == false,
             )
@@ -118,6 +122,36 @@ object DefaultMarks {
         }
         return out.distinctBy { it.first }
     }
+
+    /**
+     * [layout]'s [nodes] as a user's layout's keys have them (061-custom-layout §19.2; L6 review S2, team-lead's decision):
+     * a key of a name of the app's is that key of the app's, its long press and corner the app's board's node of the
+     * name's ([appBoard]), whatever letters= or alt= the layout writes (LayoutCheck's `held` tells of them); a name of
+     * its own, what the layout writes. [basedOn]: the board KeyData held it to, its own `based-on` (R26 F8117). [board]
+     * reads one of the app's boards, its fragments with it, by its id.
+     */
+    fun ownNodes(
+        layout: Layout,
+        fragments: Map<String, Fragment>,
+        basedOn: String? = layout.basedOn,
+        board: (String) -> Pair<Layout, Map<String, Fragment>>?,
+    ): List<Pair<String, NodeFacts>> {
+        val read = HashMap<String, Map<String, NodeFacts>>()
+        return nodes(layout, fragments).map { (name, facts) ->
+            val id = appBoard(name, basedOn) ?: return@map name to facts
+            name to (read.getOrPut(id) { board(id)?.let { (l, f) -> nodes(l, f).toMap() }.orEmpty() }[name] ?: facts)
+        }
+    }
+
+    /** The app's board key [name] is of, looked for as KeyData looks: [basedOn]'s, then [KeyData.ORDER]'s, then any other's by id; null where none has it. */
+    fun appBoard(name: String, basedOn: String?): String? {
+        val boards = BuiltInKeyData.BOARDS
+        if (basedOn != null && boards[basedOn]?.named?.containsKey(name) == true) return basedOn
+        return LOOKED_IN.firstOrNull { boards[it]?.named?.containsKey(name) == true }
+    }
+
+    // [appBoard]'s boards after the based-on, made once: asked of every node of a layout on the main thread (R26 F8296)
+    private val LOOKED_IN by lazy { (KeyData.ORDER + BuiltInKeyData.BOARDS.keys.sorted()).distinct() }
 
     // a send= that is a character (`q`, `,`, `:`) rather than an action (`sym:BackSpace`, `action:zhuyin`)
     private fun textOf(send: String?): String? {

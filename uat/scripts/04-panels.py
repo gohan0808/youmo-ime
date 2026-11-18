@@ -19,6 +19,38 @@ case("PAN-04", needs="jvm:PanelUatTest.symbolPanelTypesAndCloses")(lambda d: Non
 case("PAN-05", needs="jvm:PanelUatTest.lockedPanelStaysForSeveral")(lambda d: None)
 
 
+@case("PAN-30")
+def pan30(d):
+    # 「（」 on the device, the first page of 中文 (《 is further down; it and the others: PanelUatTest, AutoPairsTest)
+    d.open_page("text")
+    d.clear()
+    ime(d, "符")
+    ime(d, "中文")
+    time.sleep(0.4)
+    if "（" not in ime_texts(d):
+        raise Blocked(f"「中文」里没有「（」：{ime_texts(d)[:40]}")
+    ime(d, "（")
+    t = d.field_text() or ""
+    check(t == "（）", f"点「（」后框里「{t}」")
+    d.press("bksp", after=0.5)
+    t2 = d.field_text() or ""
+    check(t2 == "", f"⌫ 后框里「{t2}」")
+    return f"「{t}」，⌫ 后「{t2}」"
+
+
+case("PAN-31", needs="jvm:PanelUatTest.theClosingOneFromThePanelStepsOverTheOnePutIn")(lambda d: None)
+
+
+case("PAN-32", needs="jvm:PanelUatTest.inAPhoneNumbersFieldThePadsBracketsAreAlone")(lambda d: None)
+case("PAN-34", needs="jvm:PanelUatTest.inAnAddressTheKeysClosingOneStepsOverThePanels")(lambda d: None)
+
+
+case("PAN-33", needs="jvm:PanelUatTest.offOrInAPasswordThePanelsBracketIsAlone")(lambda d: None)
+
+
+case("PAN-29", needs="jvm:PanelUatTest.thePanelOpensOnTheRecentlyUsedTillACategoryIsPicked、PanelUatTest.theCategoryPickedIsKeptForTheNextStart、PickerDataTest.everySymbolCategoryIsFoundAgainByItsId、PickerDataTest.theEnglishTabHasNoDigitsButTheEnglishCommaAndFullStop")(lambda d: None)
+
+
 case("PAN-07", needs="jvm:PanelUatTest.recentHasTheLastSymbolFirst")(lambda d: None)
 
 
@@ -114,7 +146,7 @@ def pan23(d):
         if n:
             break
         # from 70% to 30% of the panel's height, at its middle: the grid, above the picker's bottom row
-        # (a quarter of the panel: ABC，⌫); no screen size assumed
+        # (a quarter of the panel: 返回，⌫); no screen size assumed
         w = s.find(rid="input_window", where="ime")
         if not w:
             raise Blocked("颜文字面板不在")

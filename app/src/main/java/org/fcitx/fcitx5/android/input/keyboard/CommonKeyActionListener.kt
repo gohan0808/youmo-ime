@@ -31,6 +31,7 @@ import org.fcitx.fcitx5.android.input.popup.PopupComponent
 import org.fcitx.fcitx5.android.input.dialog.AddMoreInputMethodsPrompt
 import org.fcitx.fcitx5.android.input.dialog.InputMethodPickerDialog
 import org.fcitx.fcitx5.android.input.cursor.CursorRange
+import org.fcitx.fcitx5.android.input.keyboard.KeyAction.BackspaceDownAction
 import org.fcitx.fcitx5.android.input.keyboard.KeyAction.BeginSelectionSwipeAction
 import org.fcitx.fcitx5.android.input.keyboard.KeyAction.BeginSwipeSelectAction
 import org.fcitx.fcitx5.android.input.keyboard.KeyAction.CommitAction
@@ -90,6 +91,16 @@ class CommonKeyActionListener :
     // the next input method: each on its own keyboard, the nine keys' English one of English's (I1)
     private suspend fun HostApi.nextInputMethod() = enumerateIme()
 
+    // the language key's and the space's long press alike (audit-061 app-input-8): with one input method
+    // there is no next, so the prompt to add one rather than nothing happening
+    private suspend fun HostApi.nextInputMethodOrPrompt() {
+        if (enabledIme().size < 2) {
+            service.lifecycleScope.launch { service.showDialog(AddMoreInputMethodsPrompt.build(context)) }
+        } else {
+            nextInputMethod()
+        }
+    }
+
     /**
      * What is typed put in first ([FcitxInputMethodService.commitAndReset]), then [then]: whether
      * the field is an address's read now, as the key is pressed, not on fcitx's thread.
@@ -104,13 +115,13 @@ class CommonKeyActionListener :
 
     // [asIs] is asked on fcitx's side too: whether the field is an address's is read before, as the key is pressed
     private fun typeOrSend(asIs: (im: () -> String, composing: () -> Boolean, tableKeys: () -> Set<Char>) -> String?, sent: suspend HostApi.() -> Unit) =
-        typeAsIsOrSend(asIs, { service.postFcitxJob(it) }, { service.commitOverEngine(it) }, sent)
+        typeAsIsOrSend(asIs, { service.postFcitxJob(it) }, { service.commitOverEngine(it, typed = true) }, sent)
 
     /**
      * Tap to talk, started or stopped: the bar's microphone or a key's shortcut. What is said goes
      * in as the emoji's does (a pinyin being typed committed first, not overwritten).
      */
-    fun voiceTap() = VoiceFeature.tap(inputView) { listener.onKeyAction(CommitAction(it), KeyActionListener.Source.Keyboard) }
+    fun voiceTap() = VoiceFeature.tap(inputView) { listener.onKeyAction(CommitAction(it, voice = true), KeyActionListener.Source.Keyboard) }
 
     private fun select(range: CursorRange) {
         lineReversed = false
@@ -197,39 +208,35 @@ class CommonKeyActionListener :
     }
 
     val listener: KeyActionListener by lazy {
-        KeyActionListener { action, _ ->
+        KeyActionListener { action, source ->
             // another key acting (a second finger) ends a 滑选 under way: its steps no longer select
             if (action !is BeginSwipeSelectAction && action !is SwipeSelectAction) endSwipeSelect(lifted = action is EndSwipeSelectAction)
             when (action) {
                 // as the address keys are: through the engine a digit would pick a candidate, _ be ——
                 is HostKeyAction -> {
                     val address = service.inAddressField
-                    val n = EngineState.keySent()
                     typeOrSend(keyAsIs(action.act, address, EngineState::shuangpinScheme)) {
-                        EngineState.keyTaken(n)
-                        sendKey(action.act, action.states.states, action.code)
+                        sendKey(action.act, action.states.states, action.code, touch = action.touch)
                     }
                 }
                 // a keypad's too: through the engine KP_1 is 1, which picks a candidate
                 is SymAction -> {
                     val address = service.inAddressField
-                    val n = EngineState.keySent()
+                    val hold = action.hold
                     typeOrSend(symAsIs(action.sym.sym, address, EngineState::shuangpinScheme)) {
-                        EngineState.keyTaken(n)
-                        sendKey(action.sym, action.states)
+                        // a held ⌫'s repeat, in its turn: not sent once what was typed as the hold began is gone (BackspaceHold)
+                        if (hold == null || hold.repeat(composingCached)) {
+                            sendKey(action.sym, action.states, touch = action.touch)
+                        }
                     }
                 }
-                is CommitAction -> service.commitOverEngine(action.text, action.replacing)
+                // what is typed as ⌫ goes down, in its turn: a hold begun so stops once that is deleted (BackspaceHold)
+                is BackspaceDownAction -> service.postFcitxJob { action.hold.press(composingCached) }
+                is CommitAction -> service.commitOverEngine(action.text, action.replacing, voice = action.voice, typed = true)
                 // the engine sends the key that commits its word, carrying the glide, itself (HostApi.offerGlide)
-                is GlideAction -> {
-                    val n = EngineState.keySent()
-                    service.postFcitxJob {
-                        EngineState.keyTaken(n)
-                        offerGlide(action.glide)
-                    }
-                }
+                is GlideAction -> service.postFcitxJob { offerGlide(action.glide) }
                 // the field's own commands after what is typed is in, on the main thread where its editor is
-                is ShortcutAction -> when ((action.shortcut as? KeyShortcut.Command)?.command) {
+                is ShortcutAction -> when (val command = (action.shortcut as? KeyShortcut.Command)?.command) {
                     // 清除 drops what is typed, committing nothing; 恢复 leaves it be. The field's then, as
                     // input may move on to another before the host answers
                     KeyCommand.Clear -> {
@@ -244,25 +251,20 @@ class CommonKeyActionListener :
                     KeyCommand.QuickInput -> afterPendingInput { triggerQuickPhrase() }
                     // only a swipe's, which selects as it moves (BeginSwipeSelectAction): a tap's is nothing
                     KeyCommand.SwipeSelect -> {}
-                    else -> afterPendingInput {
-                        ContextCompat.getMainExecutor(context).execute { shortcutRunner.run(action.shortcut) }
+                    // a stroke set on a key's swipe (KeyCommand.stroke): the engine's key, as one drawn on the keys
+                    // is (BaseKeyboard's glide), whatever 在键上划 is; the engine has it do nothing with nothing typed
+                    else -> when (val stroke = command?.stroke) {
+                        null -> afterPendingInput {
+                            ContextCompat.getMainExecutor(context).execute { shortcutRunner.run(action.shortcut) }
+                        }
+                        else -> listener.onKeyAction(SymAction.stroke(stroke), source)
                     }
                 }
                 is QuickPhraseAction -> afterPendingInput { triggerQuickPhrase() }
                 is UnicodeAction -> afterPendingInput { triggerUnicode() }
                 is LangSwitchAction -> {
                     when (langSwitchKeyBehavior) {
-                        LangSwitchBehavior.Enumerate -> {
-                            service.postFcitxJob {
-                                if (enabledIme().size < 2) {
-                                    service.lifecycleScope.launch {
-                                        service.showDialog(AddMoreInputMethodsPrompt.build(context))
-                                    }
-                                } else {
-                                    nextInputMethod()
-                                }
-                            }
-                        }
+                        LangSwitchBehavior.Enumerate -> service.postFcitxJob { nextInputMethodOrPrompt() }
                         LangSwitchBehavior.ToggleActivate -> {
                             service.postFcitxJob {
                                 toggleIme()
@@ -326,11 +328,11 @@ class CommonKeyActionListener :
                         // the engine first forgets what it committed, maybe deleted with the
                         // selection: the cursor reports of both are predicted and bring no Context
                         BackspaceSwipeBehavior.ReleaseEffect.DeleteSelection -> {
-                            service.postFcitxJob { reset() }
+                            service.postFcitxJob { reset(drop = true) }
                             service.deleteSelection()
                         }
                         BackspaceSwipeBehavior.ReleaseEffect.ResetComposition ->
-                            service.postFcitxJob { reset() }
+                            service.postFcitxJob { reset(drop = true) }
                         BackspaceSwipeBehavior.ReleaseEffect.None -> {}
                     }
                 }
@@ -346,9 +348,7 @@ class CommonKeyActionListener :
                 is SpaceLongPressAction -> {
                     when (val behavior = spaceKeyLongPressBehavior) {
                         SpaceLongPressBehavior.None -> {}
-                        SpaceLongPressBehavior.Enumerate -> service.postFcitxJob {
-                            nextInputMethod()
-                        }
+                        SpaceLongPressBehavior.Enumerate -> service.postFcitxJob { nextInputMethodOrPrompt() }
                         SpaceLongPressBehavior.ToggleActivate -> service.postFcitxJob {
                             toggleIme()
                         }
@@ -356,7 +356,7 @@ class CommonKeyActionListener :
                         // hold to talk: the keyboard stays, the key's finger followed till it lifts
                         SpaceLongPressBehavior.Voice -> if (behavior.talks(PackStore.ready(PackKind.VOICE), service.inPasswordField)) {
                             VoiceFeature.hold(inputView, action.pointer) { text ->
-                                listener.onKeyAction(KeyAction.CommitAction(text), KeyActionListener.Source.Keyboard)
+                                listener.onKeyAction(KeyAction.CommitAction(text, voice = true), KeyActionListener.Source.Keyboard)
                             }
                         }
                     }
@@ -448,7 +448,7 @@ internal fun typeAsIsOrSend(
     post {
         val im = inputMethodEntryCached.uniqueName
         // as commitAndReset reads it
-        val composing = clientPreeditCached.isNotEmpty() || inputPanelCached.preedit.isNotEmpty()
+        val composing = composingCached
         // only a table's, while something is typed, as readsAsKey asks for them: another input method has none, not asked across threads
         val keys = if (composing && InputMethodCatalog.hasTableKeys(im)) tableKeys(im) else emptySet<Char>()
         if (asIs({ im }, { composing }, { keys }) == null) {

@@ -10,9 +10,9 @@
 
 ### TB-02 [P1] 展开工具栏
 - **前提**：B0；工具栏是收起的（别的测试留下展开的，先点最左边的 **<** 收起）。
-- **操作**：点工具栏最左边的 **>**。
-- **预期**：依次出现撤销、重做、文本编辑（光标图标）、剪贴板、…。
-- **JVM**：`ToolbarUatTest.expandingTheToolbar`（展开工具栏出现各按钮，再点收回）；设备上不跑。
+- **操作**：点工具栏最左边的 **>**；再点 **<** 收起；横屏再展开、收起一次。
+- **预期**：依次出现撤销、重做、文本编辑（光标图标）、剪贴板、…。整条栏分成一样宽的格子（竖屏手机约十格）：最左的 **<** 占第一格，右边的表情、手写、语音、收起占最后几格，工具栏的按钮和 … 从 **<** 后面一格挨一格排；竖屏默认正好排满，没有空隙；横屏格子多，工具栏用不完的格子空在 … 后面：工具栏和 … 靠左、右边的按钮靠右，中间空着（有意的，两手分开按）。展开、收起时最左的菜单键和右边的按钮不挪、不变宽（竖屏、横屏都是）。
+- **JVM**：`ToolbarUatTest.expandingTheToolbar`（展开工具栏出现各按钮，再点收回）、`ToolbarSpacingUatTest.theBarsButtonsAreInSlotsOfOneWidthOpenOrShut`（收起、展开时栏上的按钮都在一样宽的格子里，竖屏十格排满，菜单键和右边的位置、宽度收起展开都一样）、`theBarsEndsStayAsTheToolbarOpensLandscape`（横屏）、`ToolbarConfigTest.theBarIsSplitIntoEqualSlotsTheToolbarsOverflowInMore`（ime-core：格子数、格宽）；设备上不跑。
 
 ### TB-03 [P1] 撤销和重做
 - **前提**：B0，打出「你好」。
@@ -124,11 +124,11 @@
 
 ## 单手、悬浮键盘
 
-### TB-20 [P1] 单手模式缩到一边，换边、恢复全宽
+### TB-20 [P1] 单手模式缩到一边，换边、退出单手模式
 - **前提**：B0（竖屏）。
 - **操作**：在工具栏 **⋯** 里点 **单手模式**；点旁边空白里的箭头；再点斜箭头。
-- **预期**：键盘连同工具栏缩到屏幕宽度约八成，靠右；空出的左边有箭头和斜箭头两个按钮；点箭头后键盘换到左边，按钮到右边；点斜箭头后恢复全宽；再在 ⋯ 里点 **单手模式**，键盘回到左边。单手时点 n i h a o 空格，框里是「你好」。
-- **JVM**：`ToolbarUatTest.oneHandedToASideAcrossAndBack`（单手模式靠一边、换边、退出）；设备上不跑。
+- **预期**：键盘连同工具栏缩到屏幕宽度约八成，靠右；空出的左边有箭头和斜箭头两个按钮；点箭头后键盘换到左边，按钮到右边；斜箭头读「退出单手模式」，点了恢复全宽；再在 ⋯ 里点 **单手模式**，键盘回到左边。单手时点 n i h a o 空格，框里是「你好」。打着拼音时开、关单手，拼音和候选都还在，键盘只是滑过去。设置页 **竖屏键盘样式** 跟着变单手、普通，**横屏键盘样式** 不变。
+- **JVM**：`ToolbarUatTest.oneHandedToASideAcrossAndBack`（单手模式靠一边、换边、退出）、`KeyboardStyleUatTest.normalAndOneHandedSlideTheSameView`（普通 ↔ 单手不重建、拼音不结束、只写竖屏那项）；设备上不跑。
 
 ### TB-21 [P1] 单手时符号、表情面板和剪贴板也是同样宽
 - **前提**：B0，按 TB-20 开着单手模式（靠右）。
@@ -139,19 +139,26 @@
 ### TB-22 [P1] 悬浮键盘：浮在应用上，拖到哪停在哪
 - **前提**：B0（竖屏）。
 - **操作**：在工具栏 **⋯** 里点 **悬浮键盘**；按住键盘最下面的拖动条往屏幕上半部分拖，松手；点键盘外露出来的「句子」框；再按住 a 键不松手。
-- **预期**：键盘变小（约屏幕宽度七成）、带阴影、四角跟按键一样圆（角上的按键不被切掉），字母和下面的数字不挨在一起（y 和 6 分得开），工具栏展开时图标和平常一样大、⋯ 也看得到，最下面是一条窄的拖动条（中间一根短横条，右边斜箭头），浮在页面上，页面不被顶起；拖到哪里就停在哪里；点键盘外的「句子」框照常把焦点移过去；按住 a 时放大的"a"出现在手指正上方（跟着拖动后的键盘，没有错位）。
+- **预期**：键盘变小（约屏幕宽度七成）、带阴影、四角跟按键一样圆（角上的按键不被切掉），字母和下面的数字不挨在一起（y 和 6 分得开），工具栏分成一样宽的格子（比停靠时窄一点，图标和平常一样大），右边的表情、手写、语音、收起都在；展开时工具栏的按钮排在中间的格子里，⋯ 跟在后面看得到，放不下的不左右滑，收进 ⋯ 的面板（见 TB-68），展开、收起时菜单键和右边的按钮不挪、不变宽，最下面是一条窄的拖动条（中间一根短横条，右边往下到底的箭头，左边调大小的斜双箭头），浮在页面上，页面不被顶起；拖到哪里就停在哪里；点键盘外的「句子」框照常把焦点移过去；按住 a 时放大的"a"出现在手指正上方（跟着拖动后的键盘，没有错位）。
+- **JVM**：`FloatingUatTest.theToolbarsOverflowIsInMoresPanelFloatingAndResizedToTheLeast`（悬浮和调到最小 260 dp 时栏上的按钮都在格子里，展开时工具栏的按钮按顺序、⋯ 在最后，放不下的排在 ⋯ 面板最前面）、`BarUatTest.candidateTextSizeChangesBarNotKeys`（28sp 时格子里放一个工具栏按钮和 ⋯，其余从 ⋯ 面板打开）、`FloatingUatTest.theBarsEndsAreAllThereAndStayFloatingAndResizedToTheLeast`（悬浮和调到最小时菜单键和右边的按钮收起展开不动）；设备上照跑（看样子、拖动和长按气泡）。
 
-### TB-23 [P1] 悬浮键盘下次打开和转屏后还在原处
+### TB-23 [P1] 悬浮键盘下次打开还在原处；竖屏、横屏各停各的
 - **前提**：B0，按 TB-22 开着悬浮键盘并拖到屏幕左上角附近。
-- **操作**：点系统返回收起键盘，再点「普通文本」框；把设备转成横屏，再转回竖屏。
-- **预期**：重新弹出后还在左上角；横屏时停在同一个角（左上），转回竖屏也是。
-- **JVM**：`FloatingUatTest.leftInACornerItIsThereNextTimeAndAfterARotation`（拖到左上角，再弹出还在原处；横屏、竖屏下新起的键盘也在左上角）；设备上留作冒烟：Robolectric 转屏不重排已显示的键盘，真转屏只在设备上看。
+- **操作**：点系统返回收起键盘，再点「普通文本」框；把设备转成横屏（横屏键盘样式没设过，横过来停在底部：在 ⋯ 里再点 **悬浮键盘**），把横屏的悬浮键盘拖到右上角；转回竖屏，再转成横屏。
+- **预期**：重新弹出后还在左上角；横屏第一次悬浮时在升级前（0.6.0）最后停的地方，没有就在底部中间，不跟着竖屏的左上角；拖到右上角后，转回竖屏还是悬浮、在左上角，再转成横屏在右上角（竖屏、横屏的样式、位置和大小各记各的）。
+- **JVM**：`FloatingUatTest.leftInACornerItIsThereNextTimeAndAfterARotation`（拖到左上角，再弹出还在原处；横屏没放过时在底部，拖到右上角后竖屏还在左上角、横屏在右上角）、`FloatingStoreTest`（没存过时竖横都读 0.6.0 的位置）；设备上留作冒烟：Robolectric 转屏不重排已显示的键盘，真转屏只在设备上看。
 
 ### TB-24 [P1] 悬浮键盘放回底部
 - **前提**：B0，按 TB-22 开着悬浮键盘。
-- **操作**：点横条右边的斜箭头。
-- **预期**：键盘回到屏幕底部、全宽，页面又被顶起；工具栏 **⋯** 里 **悬浮键盘** 是关着的。
-- **JVM**：`FloatingUatTest.theDockButtonPutsItBack`（点斜箭头后悬浮键盘关掉，键盘回到底部全宽）；设备上不跑。
+- **操作**：点横条右边往下到底的箭头。系统语言换成从右到左的（阿拉伯语、希伯来语）再开悬浮键盘，看横条两端。
+- **预期**：键盘回到屏幕底部、全宽，页面又被顶起；工具栏 **⋯** 里 **悬浮键盘** 是关着的。从右到左的语言下，放回底部的按钮仍在横条右端，调大小按钮在左端，两个不叠在一起。
+- **JVM**：`FloatingUatTest.theDockButtonPutsItBack`（点往下的箭头后悬浮键盘关掉，键盘回到底部全宽）、`FloatingHandleTest.rightToLeftTheDockButtonStaysAtTheRightEnd`（从右到左排：放回底部的按钮贴右端，调大小按钮贴左端）；设备上不跑。
+
+### TB-65 [P1] 工具栏的单手、悬浮按钮按当时的方向亮灭
+- **前提**：B0-横屏（横屏样式没设过、分体）；按 TB-42 把 **悬浮键盘**、**单手模式** 放到工具栏上。
+- **操作**：展开工具栏看两个按钮；点 **单手模式**，再看；点回来，点 **悬浮键盘**，再看；转到竖屏看。
+- **预期**：分体时有单手模式按钮（不亮），点了亮起；悬浮时悬浮按钮亮起、没有单手按钮；竖屏（普通）两个都不亮。
+- **JVM**：`KeyboardStyleUatTest.theBarsOneHandedWhereSplitNotWhereFloating`（横屏分体时工具栏有单手，悬浮时有悬浮、没有单手）、`KeyboardStyleUatTest.fromTheBarTheFocusIsOnTheNewViewsOneHandedButton`（分体时点工具栏的单手：重建后按钮读已开，读屏焦点在新视图的单手按钮上；点回分体也是）；设备上不跑。
 
 ## 计算结果
 
@@ -199,7 +206,7 @@
 
 ### TB-53 [P2] 平面键时悬浮键盘竖屏、横屏的四角
 - **前提**：B0-设置，**外观 → 大小与样式 → 按键样式** 里 **按键边框** 选「无边框」（键平铺）。
-- **操作**：点「普通文本」框，在工具栏 **⋯** 里点 **悬浮键盘**，看四角；转成横屏再看；看完 **按键边框** 改回「跟随主题」。
+- **操作**：点「普通文本」框，在工具栏 **⋯** 里点 **悬浮键盘**，看四角；转成横屏，在 ⋯ 里再点 **悬浮键盘**（横屏的样式另记），再看；看完 **按键边框** 改回「跟随主题」。
 - **预期**：竖屏、横屏时键盘背景的四角都和外框一样圆（背景不露出外框的角）。
 - 真机或模拟器上手工跑（看图；keyboard-scene `FloatingKeyboardCornerTest` 在 `:lib:keyboard-scene:check` 里查同一件事，`uat.py jvm` 不记录），不在自动跑里。
 
@@ -230,7 +237,7 @@
 ### TB-39 [P2] 悬浮键盘拖到屏幕最顶，撤销提示在键盘下方，仍点得到
 <!-- learning: U-82 -->
 - **前提**：B0，按 TB-22 开着悬浮键盘。
-- **操作**：按住拖动条一直往上拖到屏幕顶边，松手；点 s h i，长按「是」选 **屏蔽**、确认（截图，记下提示的位置）；点提示里的 **撤销**；点 ⌫ 删掉拼音，再点 s h i。再横屏，悬浮键盘和屏幕一样高时点 s h i，长按「是」选 **屏蔽**（截图），点提示里的 **撤销**，点 ⌫ 删掉拼音再点 s h i。
+- **操作**：按住拖动条一直往上拖到屏幕顶边，松手；点 s h i，长按「是」选 **屏蔽**、确认（截图，记下提示的位置）；点提示里的 **撤销**；点 ⌫ 删掉拼音，再点 s h i。再横屏（在 ⋯ 里再开一次悬浮键盘，横屏的样式另记），悬浮键盘和屏幕一样高时点 s h i，长按「是」选 **屏蔽**（截图），点提示里的 **撤销**，点 ⌫ 删掉拼音再点 s h i。
 - **预期**：键盘上方没地方放提示，它在悬浮键盘下方（提示顶边不高于键盘底边），不盖候选，整条都在屏幕里、不被导航栏挡住（整条在导航栏上方）；**撤销** 点得到，撤销后候选里又有「是」。横屏那次提示在键盘朝屏幕中间的一侧（贴左在右边、贴右在左边；两边都放不下时在键盘顶部，压在键盘上），整条都在屏幕里、不被导航栏挡住，**撤销** 点得到，撤销后候选里又有「是」。
 - **备注**：「不被导航栏挡住」看截图判断（脚本只查屏幕边）。横屏那步手动做（模拟器或手机）；规则由 `UndoChipPlacementTest.floatingItGoesOnTheKeyboardsSideTowardTheMiddle` 的 "pinned left/right" 和 "with no room anywhere it goes over the keyboard's top" 两行覆盖；横屏贴左的位置 MN-03 在设备上查。
 - **JVM**：`FloatingUatTest.atTheTopTheUndoIsBelowAndTappable`（拖到最顶时撤销提示在键盘下方且点得到；横屏见 landscapeAsTallAsTheScreenTheUndoStillShown）；设备上不跑。
@@ -250,7 +257,7 @@
 ### TB-43 [P1] ⋯ 面板里的项放到工具栏上，和面板里点一样
 - **前提**：B0，按 TB-42 在工具栏按钮里勾上 **不用我的输入习惯**、**单手模式**、**简繁切换**。
 - **操作**：在拼音下展开工具栏，点 **简体**（简繁）、**单手模式**、**不用我的输入习惯**（截图）；再把 **主题**、**输入法设置**、**清掉最近**、**悬浮键盘**、**键盘** 放上来各点一下（**键盘** 在拼音下点，再换到五笔看）；悬浮时把十来个按钮都放到右边。
-- **预期**：简繁只在输入法有简繁切换时出现，点了和 ⋯ 里点一样切到繁体；单手模式打开；输入习惯关掉（按钮亮起，和面板里一样）。悬浮键盘或分体时没有单手模式按钮。主题、输入法设置打开对应设置页，清掉最近弹出时间段，悬浮键盘切成悬浮且按钮亮起。**键盘** 弹出和 ⋯ → 键盘 一样的列表（拼音的四种键盘，用着的打勾），选一个就换；五笔没有键盘可选，按钮不出现。没改过工具栏按钮的、0.5 以前存的工具栏，**键盘** 在工具栏这一半、不勾。右边放不下的挪进展开的工具栏，不盖住菜单键，… 照样在。
+- **预期**：简繁只在输入法有简繁切换时出现，点了和 ⋯ 里点一样切到繁体；单手模式打开；输入习惯关掉（按钮亮起，和面板里一样）。悬浮时没有单手模式按钮（分体时有）。主题、输入法设置打开对应设置页，清掉最近弹出时间段，悬浮键盘切成悬浮且按钮亮起。**键盘** 弹出和 ⋯ → 键盘 一样的列表（拼音的四种键盘，用着的打勾），选一个就换；五笔没有键盘可选，按钮不出现。没改过工具栏按钮的、0.5 以前存的工具栏，**键盘** 在工具栏这一半、不勾。右边的按钮一个不少，太多时一起变窄，不盖住菜单键，… 照样在。
 - **JVM**：`ToolbarUatTest.thePanelsTogglesOnTheBar`（简繁出现条件和动作、亮起；单手、输入习惯的开关、亮起、读屏名）、`thePanelsOthersOnTheBar`、`floatingTheBarFitsAndHasNoOneHanded`、`KeyboardPickerUatTest.theKeyboardButtonOnTheBarIsThePanelsPicker`（工具栏上的键盘按钮弹出同一个选择器，选了就换；五笔下没有这个按钮）；旧配置不勾见 `ToolbarConfigTest`；设备上不跑。
 
 ### TB-44 [P1] 剪贴板条目切词，点一块选中，上屏只上这一块
@@ -321,3 +328,87 @@
 - **操作**：点候选栏上复制的建议；等框里排好字。再把测试台重新打开（框又是空的）、点「多行」，打开剪贴板面板，点最上面这一条。
 - **预期**：两次框里都是整段 29.7 万字，开头结尾都对（以前超过约 25 万字时一个字也粘不上）。粘贴时框所在的应用要排一两秒版，
   这期间应用和键盘都不动，排完恢复。
+
+### TB-55 [P1] 新装时常驻区是表情、手写、语音、收起
+- **前提**：B0（新装）。
+- **操作**：看工具栏；点 › 展开，看 **工具栏按钮** 设置页。
+- **预期**：常驻区依次是表情、手写、语音、收起（0.6.1 起手写钉在常驻区）；工具栏按钮页有「手写」一行；英文、密码框里手写按钮变灰，英文里留在原处（TB-67）。
+- **JVM**：`ToolbarConfigTest.handwritingIsPinnedByDefaultAndGreyedWhereItDoesNotWrite`（ime-core：默认钉上，不写字的地方变灰留在原处，见 TB-67）、`HandwritingUatTest.theToolbarsButtonTurnsHandwritingOffAndOn`（工具栏上的手写按钮开关）；设备上 HW-41 一起看。
+
+### TB-56 [P1] 主题的 `toolbar:selected` 颜色给开着的手写按钮
+- **前提**：B0-设置，导入一个写了 `<style select="toolbar:selected" fill="…" icon-color="…"/>` 的主题。
+- **操作**：回测试页打开手写，看工具栏的手写按钮。
+- **预期**：开着时按钮是 `toolbar:selected` 的底色和图标颜色（和单手、悬浮开着时一样），关掉后回到平常的样子。
+- **JVM**：`BarToolbarThemeTest.theToolbarAndTheCodeAreTheThemes`（开着的按钮用 toolbar:selected 的底色和图标色）；设备上不跑。
+
+### TB-57 [P2] 格子放不下时一起变窄，右边一个不少
+- **前提**：B0-设置，**外观** 里候选字号调到 28sp（360dp 宽按平常的按钮宽只放得下 7 格）。
+- **操作**：回测试页看工具栏；点 › 展开；再收起。把候选字号调回来，开悬浮键盘，按住拖动条左端的按钮调到最小（260 dp），再看一次。
+- **预期**：右边的表情、手写、语音、收起都在，格子跟着变窄（图标不变小，除非窄得放不下），一个也不挪进展开的工具栏；中间至少留两格（收起时放剪贴板提示、算式，展开时一个工具栏按钮和 ⋯）；展开、收起时它们不挪、不变宽；手写照样能点开、关。
+- **JVM**：`ToolbarConfigTest.everyPinnedOneStaysAtTheRight`、`theBarIsSplitIntoEqualSlotsTheToolbarsOverflowInMore`（ime-core）、`FloatingUatTest.theBarsEndsAreAllThereAndStayFloatingAndResizedToTheLeast`（260 dp 时右边四个都在）、`ToolbarUatTest.floatingTheBarFitsAndHasNoOneHanded`（右边放九个也都在）；设备上不跑。
+
+### TB-58 [P1] 悬浮键盘拖左下角的按钮调大小：键和字一起等比变，栏只变宽
+- **前提**：B0（竖屏），悬浮键盘开着，拖动条在下面，先把键盘往上拖到屏幕中间。
+- **操作**：看拖动条左端调大小按钮的斜双箭头；按住它往左下拖一段，松手；再往右上拖回去一段，松手。打字时候选栏出来再看。再把键盘拖回屏幕最底下，按住调大小按钮往左上拖一段；设置 → 外观里 **悬浮键盘拖动条** 改成"上面"，把键盘拖到屏幕最顶上，往左下拖一段。
+- **预期**：往左下拖时整个键盘跟着手指变大，右上角不动；每个键变宽也变高，键上的字、角上的小字、键之间的缝、键盘的圆角一起按同样比例变大，键的形状不变；工具栏、候选栏、拖动条只变宽，高度和候选字号不变（栏变窄时右边的按钮一起变窄（TB-57），栏上放不下的工具栏按钮收进 ⋯ 的面板（TB-68））。往右上拖时一起变小。拖的时候键盘不闪、不跳，松手后不再变一下。停在最底下时往左上拖也能放大：右下角不动、键盘往上长，松手后仍贴着底边；拖动条在上面、停在最顶上时右上角不动、往下长。调大小按钮的斜双箭头指着当时变大的方向：停在屏幕中间是 ⤢（右上到左下），停在最底下是 ⤡（左上到右下）；拖动条在上面时反过来，停在最顶上是 ⤢，其余是 ⤡；拖动、调完大小后马上变。右边放回底部的按钮是往下到底的箭头，没有斜线。
+- **JVM**：`FloatingUatTest.resizedAllOfItIsAsMuchBiggerOrSmallerTheBarsOnlyWider`（键区高、q 键宽高、圆角同一比例，栏高不变、栏宽跟着，右上角不动）、`atTheBottomWhereItFirstFloatsItGrowsUpItsBottomRightStaying`、`theStripOnTopAtTheTopItGrowsDownItsTopRightStaying`、ime-core `FloatingKeyboardTest.atTheRoomsEdgeOnTheStripsSideItGrowsTheOtherWay`、`resizedItsKeysAndTextGoWithItsWidth`、`theHandleMovedAlongTheDiagonalResizesIt`、`FloatingUatTest.theResizeArrowPointsTheWayItGrows`、`theResizeArrowWithTheStripOnTop`（贴底 ⤡、中间 ⤢，拖着往下时变回 ⤡；拖动条在上面时贴底 ⤡、贴顶 ⤢）；设备上留作冒烟（拖动跟手、右上角不动）。
+
+### TB-59 [P1] 调大小有上下限，不出屏幕，到头振一下
+- **前提**：B0（竖屏），悬浮键盘开着，在屏幕中间；**按键振动** 开着。
+- **操作**：按住调大小按钮一直往右上拖到底；再一直往左下拖到底（拖过屏幕左边）。
+- **预期**：最小到 260 dp 宽就不再变小（拖动条上的三样：调大小按钮、短横、放回底部的按钮仍放得下）；放大时到屏幕左边或底部、或停靠键盘那么宽就停住，键盘不被推着走，也不出屏幕；到最小、最大时各振一下（「按键振动」关着时不振）。最小时各面板（工具栏、候选、展开的候选、数字、九键、符号、表情、剪贴板、语音）都排得下、能用，键上手写也写得了。
+- **JVM**：`FloatingUatTest.resizedNoSmallerThan260NorPastTheScreen`、ime-core `FloatingKeyboardTest.aResizeStopsAtItsBoundsAndTheScreensEdgesAndSaysSo`、`itIsResizedWithinItsBounds`（平板横屏按高度到头）；设备上不跑（最小时各面板 0.6.1 实现时在模拟器上截图看过）。
+
+### TB-60 [P1] 竖屏、横屏的悬浮大小各记各的
+- **前提**：竖屏、横屏键盘样式都是悬浮；按 TB-58 把竖屏的调小。
+- **操作**：转成横屏看悬浮键盘大小；在横屏把它调大一些；转回竖屏，再转成横屏。
+- **预期**：横屏第一次是默认大小（和 0.6.0 横屏一样），不跟竖屏变小；横屏调大后，竖屏还是调小的那个大小，横屏还是调大的那个。
+- **JVM**：`FloatingUatTest.uprightAndTurnedEachTheirOwnSize`；设备上留作冒烟：Robolectric 转屏是新起的键盘，真转屏在设备上看。
+
+### TB-61 [P2] 从 0.6.0 升级：位置竖屏、横屏都保留，大小和 0.6.0 一样；调过的大小记住
+- **前提**：0.6.0 里悬浮键盘拖到过左上角，升级到 0.6.1。
+- **操作**：竖屏、横屏各打开一次悬浮键盘看位置和大小；按 TB-58 把竖屏的调小一些；点系统返回收起键盘，再点输入框；点拖动条右边往下的箭头放回底部，再在 ⋯ 里点 **悬浮键盘**；在设置里 **停止输入法** 后再打开。
+- **预期**：升级后竖屏、横屏都先停在 0.6.0 的左上角，大小和 0.6.0 一样，一个像素不差；调小后每次悬浮都是调过的大小，停在原来的地方；放回底部时是平常的停靠键盘（不受调大小影响）。
+- **JVM**：`FloatingUatTest.itsSizeIsKeptShownAgainAndDockedAndFloatingAgain`、`FloatingStoreTest.neverKeptEitherWayItIsWhere060LeftIt`、`FloatingStoreTest.eachWayKeepsItsOwnAndTheOldKeysAreLeft`、ime-core `FloatingKeyboardTest.neverResizedItIsAsItWas`；设备上不跑。
+
+### TB-62 [P2] 打字打到一半调大小，打的字不丢
+- **前提**：悬浮键盘开着，在屏幕中间。
+- **操作**：打 `nihao` 不选候选；拖调大小按钮调小再调大；接着打 `ma` 选第一个候选。另开手写（工具栏 **手写**）写一个字不上屏，再调一次大小。再把 **停笔多久算写完一个字** 设成最长（很长），在键上写一笔、笔迹还在时马上调大小，然后再写一个字。
+- **预期**：调大小前后编码行的拼音和候选栏里的候选都还在，接着打能选上；手写写的字还在编码行里。键盘不重新生成（不闪）。写到一半调大小时，键上的笔迹消失，已写的笔画像停了笔一样识别，认出的字留在编码行里；接着写的字从头另认，不和调大小前的笔画连在一起。
+- **JVM**：`FloatingUatTest.resizedWhileTypingWhatIsTypedStays`（同一个输入视图，候选还在）、`KeyHandwritingUatTest.resizedWhileWritingThePieceIsDoneItsReadingStays`（写一笔后调大小：笔迹清掉、这一段按停笔识别交出去，下一笔另起一段）；设备上不跑。
+
+### TB-63 [P2] 调大小按钮看得清，跟着主题；读屏能放大、缩小，到头时说出来
+- **前提**：悬浮键盘开着，在屏幕中间；浅色、深色主题各一个；拖动条在下面、上面各看一次（设置 **悬浮键盘拖动条**）。
+- **操作**：看拖动条两端的按钮；开 TalkBack，把焦点移到拖动条左端的按钮，听它念什么；打开操作菜单（三指点按或上下滑），选 **放大**、**缩小**，一直选 **缩小** 到不能再小。再放回底部重新悬浮（停在底部默认位置），选 **放大**。
+- **预期**：调大小按钮和右边放回底部的按钮一个颜色，浅色、深色主题和拖动条在上、在下都看得清；主题包写了 `floating-resize` 的 `<icon>` 时画主题的图（往左上长时左右翻过来画，和自带的斜双箭头一样）。读屏念「调整悬浮键盘大小」；每选一次放大或缩小，键盘大一成或小一成并记住；到最小时振一下并念「已是最小」，到最大时念「已是最大」。停在底部默认位置时放大，底边不动、往上长（右下角不动），和拖着调大小一样。
+- **JVM**：`BarIconsThemeTest.thePanelsButtonsDoingACommandsJobAreTheThemes`（主题的 `floating-resize`）、`FloatingUatTest.talkBacksBiggerAndSmallerATenthEachAndSaidAtTheLimit`（从底部默认位置放大、缩小，到头时说出来）、ime-core `FloatingKeyboardTest.talkBacksStepIsATenth`；设备上不跑。
+
+### TB-64 [P2] 主题图标的按钮开着时用「开着」的图标颜色；简繁两态各自的图；冷启动不先闪自带的图
+- **前提**：B0-设置，跟随系统深色模式关；一个主题包带 `one-handed`、`trad-simp-off`、`undo` 的 `<icon>`，和 `<style select="toolbar:selected" icon-color="…"/>`；工具栏里放上简繁。
+- **操作**：点这个主题，点开工具栏点单手，看单手按钮；点简繁换成繁体再换回；收起键盘，在设置里 **停止输入法** 后重新打开测试页的输入框，看工具栏打开那一刻。
+- **预期**：单手开着时主题的图用 `toolbar:selected` 的图标颜色，关掉回到平常的颜色；简体时是主题的 `trad-simp-off`，繁体时是自带的（`trad-simp` 没写）。重开键盘时主题写了的图标不会先画一下自带的再换成主题的（读完前空着），没写的马上画自带的。
+- **JVM**：`BarIconsThemeTest.aToggleOnDrawsItsIconInTheSelectedColour`（像素）、`BarIconsThemeTest.tradSimpsTwoStatesAreTwoNames`、`BarIconsThemeTest.aThemesIconNotReadYetIsNothingTillItIsNeverTheAppsFirst`（读完前空着、预读）；设备上不跑。
+
+### TB-66 [P1] 从 0.6.0 升级、改过工具栏按钮的，手写也在右边
+- **前提**：0.6.0 里在 **工具栏按钮** 改过（比如去掉剪贴板），常驻区是表情、语音、收起；装 0.6.1 升级（不清数据）。
+- **操作**：打开测试页的输入框看工具栏；去 **工具栏按钮** 把手写去勾，重启输入法（设置里 **停止输入法** 后再打开）再看。
+- **预期**：升级后右边是表情、手写、语音、收起，手写能点开、关；去勾以后重启不会再加回来。没改过工具栏的升级后本来就是这四个。
+- **JVM**：`ToolbarConfigTest.aBarArrangedBeforeHandwritingGetsItAfterTheEmoji`（ime-core）、`AppPrefsTest.aBarArrangedBeforeHandwritingGetsIt`（每次启动看一次，自己去掉的不加回，0.6.0 的备份恢复后也加）；设备上不跑。
+
+### TB-67 [P1] 英文里手写按钮留在原处、变灰，中英切换栏上不动
+- **前提**：B0（默认工具栏，右边是表情、手写、语音、收起）。
+- **操作**：在拼音下看工具栏（收起、展开各截一张）；切到英文再看；点一下灰的手写；开读屏摸一下它；切回拼音。
+- **预期**：英文里手写按钮还在原来的格子里，变灰；栏上别的按钮位置、宽度都不变（收起、展开都是）。点灰的手写不打开手写，键盘上方提示「这里不能手写：英文和密码框里没有手写」；读屏读「手写，这里用不了」。切回拼音后手写恢复原样，能点开、关。密码框里也一样是灰的（密码框里没有语音，右边的按钮会挪）。深色、浅色和带图标的主题里灰的都看得出。手写在工具栏那段、栏上放不下排进 ⋯ 面板时也一样：英文里灰着、读「手写，这里用不了」，拼音里开着时亮起。
+- **JVM**：`ToolbarConfigTest.handwritingIsPinnedByDefaultAndGreyedWhereItDoesNotWrite`（ime-core：英文里格子和按钮都一样，只标成用不了）、`ToolbarSpacingUatTest.englishGreysHandwritingInItsPlaceAndNothingMoves`（位置不变、变灰、点了提示、读屏名）、`ToolbarMoreUatTest.handwritingInMoresPanelIsGreyedAndLitAsOnTheBar`（面板里灰着、亮起）；设备上不跑（灰的样子看截图）。
+
+### TB-68 [P1] 栏上放不下的工具栏按钮收进 ⋯ 面板，点了一样用
+- **前提**：B0，开悬浮键盘，按住拖动条左端的按钮调到最小（260 dp）。
+- **操作**：点 › 展开工具栏；点 ⋯；点面板最前面的 **文本编辑**；回来再点 ⋯ → **剪贴板**。
+- **预期**：展开的工具栏不左右滑：中间的格子按顺序放得下几个放几个（最小时只有撤销），⋯ 跟在后面；放不下的（重做、文本编辑、剪贴板）按原来的顺序排在 ⋯ 面板最前面，图标、名字和工具栏上一样；点了和在工具栏上点一样（文本编辑、剪贴板面板打开）。悬浮键盘调大后格子多了，它们回到工具栏上、面板里不再出现。
+- **JVM**：`FloatingUatTest.theToolbarsOverflowIsInMoresPanelFloatingAndResizedToTheLeast`（300 dp、260 dp 时放不下的按顺序在面板最前面，从面板打开文本编辑）、`ToolbarUatTest.theToolbarButtonsPageSetsTheBar`（停靠时勾上快速输入、放不下，在面板最前面）、`ToolbarConfigTest.theBarIsSplitIntoEqualSlotsTheToolbarsOverflowInMore`（ime-core）、`ToolbarMoreUatTest.theSmallestBarsMiddleHoldsAClipAndASum`（最小时中间的剪贴板提示、算式不盖住按钮）；设备上不跑。
+
+### TB-69 [P1] 工具栏那段一个都显示不了时，菜单键就是 ⋯
+- **前提**：B0-设置，**工具栏按钮** 页把「以下一直显示在栏的右边」上面的都去掉勾。
+- **操作**：回测试页看工具栏；点最左边的按钮；开读屏摸它；复制一段字让剪贴板提示出来，再点它；开悬浮键盘再看一次。再把 **手写** 拖到分隔线上面勾上，切到英文看。
+- **预期**：最左是 ⋯（不是 ›），点了直接打开状态面板，没有展开的工具栏；读屏念「更多」；剪贴板提示亮着时点它也是开面板；悬浮时一样；右边的按钮照旧。手写在工具栏那段时，英文里它灰着也算显示得了：菜单键还是 ›，展开有灰的手写和 ⋯。
+- **JVM**：`ToolbarConfigTest.aToolbarWithNothingToShowIsMoreAlone`（ime-core：没勾、勾的用不上、灰的手写、右边很多）、`ToolbarMoreUatTest.aToolbarWithNothingToShowHasMoreForTheMenuKey`（菜单键是 ⋯、读「更多」、点了开面板、剪贴板提示时也是、不展开）；设备上不跑。

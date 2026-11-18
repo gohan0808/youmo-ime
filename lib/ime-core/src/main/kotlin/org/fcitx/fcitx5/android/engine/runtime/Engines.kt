@@ -4,11 +4,12 @@
  */
 package org.fcitx.fcitx5.android.engine.runtime
 
-import org.fcitx.fcitx5.android.engine.InputMethodCatalog.HANDWRITING
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog.PINYIN
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog.PINYIN_KEYS_OWN
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog.SHUANGPIN
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog.TABLES
+import org.fcitx.fcitx5.android.engine.InputMethodCatalog.ZHUYIN
+import org.fcitx.fcitx5.android.engine.InputMethodCatalog.ZHUYIN_NINE
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog.glides
 import org.fcitx.fcitx5.android.engine.data.NgramModel.Companion.NO_WORD
 import org.fcitx.fcitx5.android.engine.english.EnglishSession
@@ -34,9 +35,12 @@ import org.fcitx.fcitx5.android.engine.platform.LogFile
 import org.fcitx.fcitx5.android.engine.platform.UserFiles
 import org.fcitx.fcitx5.android.engine.platform.jvm.JvmClock
 import org.fcitx.fcitx5.android.engine.platform.jvm.JvmThreads
+import org.fcitx.fcitx5.android.engine.reading.CandidateCard
 import org.fcitx.fcitx5.android.engine.reading.CandidateReadings
+import org.fcitx.fcitx5.android.engine.reading.CardReading
 import org.fcitx.fcitx5.android.engine.reading.CharCard
 import org.fcitx.fcitx5.android.engine.reading.ReadingStyle
+import org.fcitx.fcitx5.android.engine.reading.WordCard
 import org.fcitx.fcitx5.android.engine.rerank.MatrixKernel
 import org.fcitx.fcitx5.android.engine.session.Action
 import org.fcitx.fcitx5.android.engine.session.Choice
@@ -45,11 +49,15 @@ import org.fcitx.fcitx5.android.engine.session.Session
 import org.fcitx.fcitx5.android.engine.session.Snapshot
 import org.fcitx.fcitx5.android.engine.stroke.StrokeFilter
 import org.fcitx.fcitx5.android.engine.table.TableKeyboard
+import org.fcitx.fcitx5.android.engine.user.CharGate
 import org.fcitx.fcitx5.android.engine.user.DictionaryFile
+import org.fcitx.fcitx5.android.engine.user.RareGrid
 import org.fcitx.fcitx5.android.engine.user.WordLists
+import org.fcitx.fcitx5.android.input.voice.VoiceEdits
 import org.fcitx.fcitx5.android.input.voice.VoiceHomophones
 import java.io.Closeable
 import java.io.IOException
+import java.io.OutputStream
 import java.util.concurrent.Executor
 
 /**
@@ -117,6 +125,21 @@ class Engines(
      * given, this module's tests fail on one ([HostThread.ofTests]); the app gives its own.
      */
     private val offHostThread: ((String) -> Unit)? = HostThread.ofTests(),
+    /**
+     * Told once, at the first thing learned that did not reach the disk (no [userDir], the learning
+     * record not opened, a write of it refused): what is learned from then on may live in memory
+     * alone, gone with the process, which the user is to be told ([LearnLog]). Told once by each
+     * learning record opened (one more as the host is made anew, the record not opened put in memory):
+     * once a process is the app's to keep.
+     */
+    unkept: () -> Unit = {},
+    /**
+     * A seam for tests: how the learning record is opened for appends. A test's refuses a
+     * write, as a full disk would (EnginesRecordFaultTest, EnginesOlderTableLogTest); the app gives none.
+     * A constructor's argument handed down to the record's store, as its `openAppend`, in place of the
+     * setters on the store the tests used to reach for (0.6.1 audit engine-12).
+     */
+    openAppend: (LogFile) -> OutputStream = LogFile::append,
 ) : Closeable {
 
     private val hostThread = HostThread(offHostThread)
@@ -162,6 +185,8 @@ class Engines(
         /** The common words' file as read ([CommonWords.format]), and where the keyboard's deleting one goes, as [savePhrases]. */
         val commonWords: String = "",
         val saveCommonWords: (CommonWords) -> Unit = {},
+        /** 生僻字屏蔽's file as read ([org.fcitx.fcitx5.android.engine.user.RareChoice.format]); empty for none, off. */
+        val rareChars: String = "",
     )
 
     private val assets = EngineAssets(blobs, onError, kernel, emojiShows, textShows)
@@ -200,9 +225,16 @@ class Engines(
         first = { keyboards[pairs.shownSession(it)]?.first ?: 0 },
         addresses = addresses,
         putAddresses = putAddresses,
+        unkept = unkept,
+        openAppend = openAppend,
     )
 
     private val words: LexiconFacade = LexiconFacade(lexicon, english, assets, tables, learner) { settings }
+
+    // 语音先问再记: what voice put in the field, followed as the user changes it; on Engines, not a
+    // session, as a word added drops the sessions (061-voice-learn-from-edits.md, review R8)
+    private val simplified by lazy(LazyThreadSafetyMode.NONE) { simplifier() }
+    private val voiceEdits = VoiceEditsGlue(words, lexicon, assets) { simplified.simplify(it) }
 
     /**
      * Does [op] (PLAN §2.8) in [im], the input method in use; [act] has the host send a long
@@ -230,6 +262,8 @@ class Engines(
         set(value) {
             hostThread.check()
             learner.useHabits = value
+            // voice's text not followed while off, nor what was before (review S4)
+            if (!value) voiceEdits.end()
         }
 
     /** [LexiconFacade.userWords]. */
@@ -258,6 +292,25 @@ class Engines(
 
     /** [LexiconFacade.voiceHomophones]. */
     fun voiceHomophones(words: List<UserWord>): VoiceHomophones = checked { this.words.voiceHomophones(words) }
+
+    /** The tests' own gate in place of the user's choice of 生僻字屏蔽 ([UserLexicon.gateOverride]); read at the next [reload]. */
+    internal var rareGate: CharGate?
+        get() = lexicon.gateOverride
+        set(value) {
+            lexicon.gateOverride = value
+        }
+
+    /** How many times the words held back were found ([UserLexicon.heldMade]): for the tests. */
+    internal val rareHeldMade: Int get() = lexicon.heldMade
+
+    /** How many times 生僻字屏蔽's grid walked a merged dictionary ([LexiconFacade.mergedWalks]): for the tests. */
+    internal val rareMergedWalks: Int get() = words.mergedWalks
+
+    /** [LexiconFacade.rareHeld]. */
+    fun rareHeld(texts: Collection<String>): Set<String> = checked { words.rareHeld(texts) }
+
+    /** [LexiconFacade.rareGrid]. */
+    fun rareGrid(): RareGrid? = checked { words.rareGrid() }
 
     /** [LexiconFacade.voiceHomophonesAllowed]. */
     fun voiceHomophonesAllowed(spans: List<VoiceHomophones.Span>): BooleanArray = checked { words.voiceHomophonesAllowed(spans) }
@@ -320,8 +373,8 @@ class Engines(
     // by the session made in its place ([HandwritingSession.latestPiece])
     private var inkEndedBefore = HandwritingSession.NO_PIECE
 
-    // every handwriting session made: handwriting's own and those written over the keys ([InkOver])
-    private fun handwritingOf(s: Session): HandwritingSession? = (s as? HandwritingSession) ?: (s as? InkOver)?.handwritingMade
+    // every handwriting session made: those written over the keys ([InkOver])
+    private fun handwritingOf(s: Session): HandwritingSession? = (s as? InkOver)?.handwritingMade
 
     // the most of [of] over them and what the dropped ended, no list made: the pad asks at every stroke ([inkEnded])
     private inline fun inkMost(of: (HandwritingSession) -> Int): Int =
@@ -329,9 +382,6 @@ class Engines(
 
     // the latest piece any of them heard of: one made now starts with it ended, a pad numbering its pieces on across them
     private fun latestPiece(): Int = inkMost { it.latestPiece }
-
-    // the session [im]'s ink goes to: handwriting's own, or the one [im] shows (a pair's keyed one)
-    private fun inkedSession(im: String) = if (im == HANDWRITING) im else pairs.shownSession(im)
 
     // the input method's session as made, under what [SessionFactory.make] wraps it in (InkOver, StrokeFilter), whichever order
     private tailrec fun innermost(s: Session): Session = when (s) {
@@ -409,7 +459,7 @@ class Engines(
     private var ownKeys = false
 
     // a layout's own keyboard's code or tap: none but that keyboard reads it
-    private fun isOwnKeysCode(c: Int) = c in NineKeyLetters.CUSTOM_BLOCK || c in Keyboard.PLACES
+    private fun isOwnKeysCode(c: Int) = OwnKeysTurn.isCode(c)
 
     private val latin = LatinSync { w -> assets.englishData?.let { it.id(w) != NO_WORD } == true }
 
@@ -438,10 +488,54 @@ class Engines(
             val shown = pairs[im]?.showing ?: keyboard(im).showing
             return annotated(im, shown.copy(commit = "", deleteBefore = 0, handled = true, refines = false, picked = false))
         }
+        // 联想 on show: a pick of it is no word typed (VoiceEdits); the session's record of its last
+        // commit, a new one of which says how what this commits was typed
+        val predicting = (pairs[im]?.showing ?: keyboards[im]?.showing)?.predicting == true
+        // looked for only while voice's text is followed: nothing else reads it
+        val following = voiceEdits.edits.open
+        val shownBefore = if (following) pairs.shownSession(im) else null
+        val recordBefore = shownBefore?.let { sessions[it]?.lastCommit }
+        // handwriting shown before it: what this commits is the handwriting's, not the input method's typing
+        val inkingBefore = shownBefore != null && (sessions[shownBefore] as? InkOver)?.inking == true
         val s = pairs[im]?.onEvent(event, arg, learning, payload)
             ?: keyboard(im).onEvent(if (event == EngineEvent.HARD_CHAR) EngineEvent.CHAR else event, arg, learning, payload)
+        // the session that typed it, shown before the event or after it: a new record of its last commit says
+        // how. One shown only after has no record before to compare, so one left from an earlier commit of it
+        // may be read; readingOf takes that only where it spells what went in (the same word, typed so then)
+        val reading = if (s.commit.isEmpty() || !following) null else
+            VoiceEditsGlue.readingOf(s.commit, listOf(shownBefore, pairs.shownSession(im)).firstNotNullOfOrNull { id -> sessions[id]?.lastCommit?.takeIf { it !== recordBefore } })
+        voiceEdits.answered(im, event, s, predicting, learning, reading, inkingBefore)
         return annotated(im, s)
     }
+
+    /**
+     * Voice's [text], one talk's, in the field, [before] the cursor read once it was in (null: not
+     * read): followed as the user changes it ([VoiceEdits.said]) where the user's habits are used; else
+     * nothing is followed. Told only where the app asks (its switch on, a field that learns: review S6;
+     * else [voiceEditsEnd]); [hinted]: the once-only hint said already, not looked for (review S7).
+     */
+    fun voiceSaid(text: String, before: String?, hinted: Boolean) = checked {
+        voiceEdits.edits.hinted = hinted
+        if (learner.useHabits) voiceEdits.edits.said(text, before) else voiceEdits.end()
+    }
+
+    /** The app put [text] in the field: [VoiceEdits.putIn]. */
+    fun voicePutIn(text: String): VoiceEdits.Reply = checked { voiceEdits.edits.putIn(text) }
+
+    /** The field read as the prompt is to show: [VoiceEdits.confirm]. */
+    fun voiceConfirm(before: String?, after: String?): VoiceEdits.Ask? = checked { voiceEdits.edits.confirm(before, after) }
+
+    /** Nothing of voice's text followed any more: another field, input finished. */
+    fun voiceEditsEnd() = checked { voiceEdits.end() }
+
+    /** Whether voice's edits hold the user's words read for them: for tests (review F8342). */
+    internal val voiceEditsHoldWords: Boolean get() = voiceEdits.holdsWords
+
+    /** 「记住」 tapped: [ask]'s word added by hand; false if it does not read so (nothing added). */
+    fun voiceRemember(ask: VoiceEdits.Ask): Boolean = checked { voiceEdits.remember(ask) }
+
+    /** Its 撤销: [word] taken off the added words, nothing forgotten (UserLexicon.unAdd). */
+    fun voiceForget(word: String) = checked { voiceEdits.forget(word) }
 
     // 候选词注音 of the reading for each candidate shown: the factory's, whose pinyin blocks a polyphone by its parts in the one shown
     private val candidateReadings get() = factory.candidateReadings
@@ -472,30 +566,104 @@ class Engines(
      */
     private fun readingAndHint(im: String, session: Session?, index: Int, text: String, hint: String): Pair<List<String>, String> {
         val style = settings.candidateReading
-        val above = if (im in pairs) hintAbove(im, index, text, hint, if (style == ReadingStyle.OFF) ReadingStyle.PINYIN else style) else emptyList()
+        val above = above(im, index, text, hint, if (style == ReadingStyle.OFF) ReadingStyle.PINYIN else style)
         if (above.isNotEmpty()) return above to ""
-        return (if (session == null) emptyList() else read(im, session, index, text, style)) to hint
+        return (if (session == null) emptyList() else read(session, index, text, style)) to hint
     }
 
-    // the candidate at [index] of [session]'s as 候选词注音 writes it: handwriting's last character with all its readings
-    private fun read(im: String, session: Session, index: Int, text: String, style: ReadingStyle): List<String> {
-        val before = if (im == HANDWRITING) session.lookedUp(index) else null
+    /**
+     * The candidate [text] at [index] of [session]'s, [hint] its hint, read in [style] (not [ReadingStyle.OFF]) as
+     * [readingAndHint] reads it while 候选词注音 is on: the same two steps, so a held candidate's card ([card]) and the
+     * bar never read a character apart (a misreading's true reading, 角色 jué sè, by its hint; any other as typed).
+     */
+    private fun readingsOf(im: String, session: Session, index: Int, text: String, hint: String, style: ReadingStyle): List<String> =
+        above(im, index, text, hint, style).ifEmpty { read(session, index, text, style) }
+
+    // a pinyin's or 双拼's hint that is a reading, drawn above the candidate (readingAndHint)
+    private fun above(im: String, index: Int, text: String, hint: String, style: ReadingStyle): List<String> =
+        if (im in pairs) hintAbove(im, index, text, hint, style) else emptyList()
+
+    // the candidate at [index] of [session]'s as 候选词注音 writes it: handwriting's last character with all its readings.
+    // Only while it shows handwriting: pinyin's own lookedUp (by parts, by strokes) is read as typed
+    private fun read(session: Session, index: Int, text: String, style: ReadingStyle): List<String> {
+        val before = if ((session as? InkOver)?.inking == true) session.lookedUp(index) else null
         return if (before != null) candidateReadings.allOf(text, style, before) else candidateReadings.of(text, style, session.readingOf(index))
     }
 
     /**
-     * The card of the [index]th of [im]'s candidates ([paged], of the page shown: the paged window's), [text]:
-     * a character looked up (handwriting's, by its parts or strokes: [Session.lookedUp]); null for any
-     * other, or if [text] is no longer there.
+     * What the menu of the [index]th of [im]'s candidates ([paged], of the page shown: the paged window's) heads
+     * with ([CandidateCard]), [text] the candidate as the app shows it ([shown] converts the engine's so: 繁體's
+     * 銀行 of 银行, as [learning]'s menu checks it); null if it is no longer there or has no Han character in it.
+     * A character looked up (handwriting's, by its parts or strokes: [Session.lookedUp]) has its card; any other
+     * its reading as [readingsOf] reads it, of the engine's text, the characters the shown text's where they are
+     * as many. More than [WordCard.MAX_CHARS] Han characters, its reading alone, nothing looked up.
+     * Measured 2026-11-14 on the API 36 emulator, the Mac under other builds (load 40+), 50 runs a held candidate,
+     * the median: a character 0.1–0.8 ms, a word of 2 or 8 characters 0.2–0.9 ms, a sentence of 9 (its line
+     * alone) 0.2–0.4 ms, a prediction 0.2 ms, the slowest of 50 mostly under 3 ms but single runs of 15–145 ms
+     * (the host's load: short words too); a custom phrase of 200 characters, read by its text, 2.2–3.9 ms, a tenth
+     * of the runs 38 ms or more. [charCardOf], a word's row tapped: 0.05 ms (061-word-card-impl-report.md).
      */
-    fun charCard(im: String, index: Int, text: String, paged: Boolean = false): CharCard? = checked {
-        val shown = pairs.shownSession(im)
-        val session = sessions[shown] ?: return@checked null
-        val at = index + if (paged) keyboards[shown]?.first ?: 0 else 0
+    fun card(im: String, index: Int, text: String, paged: Boolean = false, shown: (String) -> String = { it }): CandidateCard? = checked {
+        val id = pairs.shownSession(im)
+        val session = sessions[id] ?: return@checked null
+        val at = index + if (paged) keyboards[id]?.first ?: 0 else 0
+        val c = session.candidates(at, 1).firstOrNull() ?: return@checked null
+        if (c.text != text && shown(c.text) != text) return@checked null
         // the text first: what lookedUp reads is what candidates read up to
-        if (session.candidates(at, 1).firstOrNull()?.text != text) return@checked null
-        val before = session.lookedUp(at) ?: return@checked null
-        CharCard.of(text, before, candidateReadings, assets.pinyinData.charReadings, assets.charInfo, assets.strokes())
+        session.lookedUp(at)?.let { before -> CharCard.of(text, before, candidateReadings, assets.pinyinData.charReadings, assets.charInfo, assets::strokes) }
+            ?.let { return@checked CandidateCard.Looked(it) }
+        val han = WordCard.hanCount(c.text)
+        if (han == 0) return@checked null
+        // the shown characters where each is one of the engine's (国 國), else the engine's throughout
+        val chars = if (text.codePointCount(0, text.length) == c.text.codePointCount(0, c.text.length)) text else c.text
+        val style = lineStyle(id)
+        if (han > WordCard.MAX_CHARS) return@checked CandidateCard.Line(text, longLine(im, session, at, c, chars, style))
+        val pinyin = readingsOf(im, session, at, c.text, c.hint, ReadingStyle.PINYIN)
+        val zhuyin = readingsOf(im, session, at, c.text, c.hint, ReadingStyle.ZHUYIN)
+        val word = WordCard.of(chars, pinyin, zhuyin, assets.charInfo)
+        val line = word.line(style)
+        if (han > 1 || chars.codePointCount(0, chars.length) > 1) return@checked CandidateCard.Word(line, word)
+        val row = word.rows.single()
+        val card = charCardOf(chars, row.reading) ?: return@checked null
+        CandidateCard.Char(candidateReadings.lineOf(c.text, if (style == ReadingStyle.ZHUYIN) row.zhuyin else row.pinyin, style), card)
+    }
+
+    /**
+     * A long candidate's line ([CandidateCard.Line]): read as the bar reads it; past [WordCard.LINE_CHARS] Han
+     * characters (a custom phrase of a paragraph) its first whole words up to so many alone, then …: what is
+     * read is what costs (the 200 of one, 2–4 ms, a tenth of the runs 38 ms or more, read whole). The two steps
+     * of [readingsOf] still: a hint that is a reading (all Han, a syllable each: cheap) is the bar's, so its first
+     * so many; else the cut part read by the session's words, as the bar reads those.
+     */
+    private fun longLine(im: String, session: Session, at: Int, c: Choice, chars: String, style: ReadingStyle): String {
+        if (WordCard.hanCount(c.text) <= WordCard.LINE_CHARS) return WordCard.line(chars, readingsOf(im, session, at, c.text, c.hint, style))
+        // the words the session read it as, those wholly in; none (a first word longer than that alone) or none
+        // known, so many characters, read by their text
+        val words = session.readingOf(at)?.takeIf { w -> w.joinToString("") { it.text } == c.text }
+        val kept = words?.let { w ->
+            var han = 0
+            w.takeWhile { han += WordCard.hanCount(it.text); han <= WordCard.LINE_CHARS }.takeIf { it.isNotEmpty() }
+        }
+        val cut = kept?.joinToString("") { it.text } ?: WordCard.firstHan(c.text, WordCard.LINE_CHARS)
+        val count = cut.codePointCount(0, cut.length)
+        val shown = chars.substring(0, chars.offsetByCodePoints(0, count))
+        // a hint's readings are one a code point of an all-Han text: the cut part's the first so many
+        val readings = above(im, at, c.text, c.hint, style).take(count).ifEmpty { candidateReadings.of(cut, style, kept) }
+        return WordCard.line(shown, readings) + " " + CandidateReadings.MORE
+    }
+
+    /**
+     * The card of [char], one Han character, [reading] the one first ([CharCard.of]): a word card's row tapped.
+     * Of the data alone, not the session: the same whatever the candidates are now.
+     */
+    fun charCardOf(char: String, reading: CardReading?): CharCard? = checked {
+        CharCard.of(char, "", candidateReadings, assets.pinyinData.charReadings, assets.charInfo, assets::strokes, first = reading)
+    }
+
+    // the compact line's style: 候选词注音's; off, zhuyin on the zhuyin keyboards (the user, 2026-11-14, Q6), else pinyin
+    private fun lineStyle(session: String): ReadingStyle = when (settings.candidateReading) {
+        ReadingStyle.OFF -> if (session == ZHUYIN || session == ZHUYIN_NINE) ReadingStyle.ZHUYIN else ReadingStyle.PINYIN
+        else -> settings.candidateReading
     }
 
     // a character's several readings hinted are drawn as the one it has after what was put before it (Session.lookedUp)
@@ -540,6 +708,7 @@ class Engines(
         said: Boolean = false,
     ): Boolean {
         hostThread.check()
+        voiceEdits.context(before, learning, cleared, after, selected, said)
         return field.context(im, before, learning, cleared, learnFlags, started, after, selected, said)
     }
 
@@ -588,22 +757,18 @@ class Engines(
     /** Makes [im]'s session if it is not yet (its data read), for a caller that tells its failure from another's (the bridge's latches). */
     fun make(im: String) {
         hostThread.check()
-        session(inkedSession(im))
+        session(pairs.shownSession(im))
     }
 
     /**
      * Handwriting's session made for [ink], what the pad read or a piece of it finished, which the
-     * [Keyboard.INK] sent with it ([shown]) shows; with none sent, handwriting not the input method,
-     * held for the next ([HandwritingSession.hold]). [im] the input method written on: handwriting, or
-     * one written on over its keys ([InkOver], its handwriting made now). On the fcitx thread.
+     * [Keyboard.INK] sent with it ([shown]) shows; with none sent held for the next
+     * ([HandwritingSession.hold]). [im] the input method written on over its keys ([InkOver], its
+     * handwriting made now). On the fcitx thread.
      */
-    fun ink(ink: Action.Ink, shown: Boolean, im: String = HANDWRITING) {
+    fun ink(ink: Action.Ink, shown: Boolean, im: String) {
         hostThread.check()
-        val s = when (val made = session(inkedSession(im))) {
-            is HandwritingSession -> made
-            is InkOver -> made.handwriting()
-            else -> return
-        }
+        val s = (session(pairs.shownSession(im)) as? InkOver)?.handwriting() ?: return
         if (!shown) s.hold(ink)
     }
 
@@ -612,13 +777,9 @@ class Engines(
      * phrase or Unicode over handwriting, filtered the key; the field had lost focus) is held for the
      * next, as an [ink] told with no key is, so its piece is not lost. On the fcitx thread.
      */
-    fun inkSent(ink: Action.Ink, im: String = HANDWRITING) {
+    fun inkSent(ink: Action.Ink, im: String) {
         hostThread.check()
-        val s = when (val made = sessions[inkedSession(im)]) {
-            is HandwritingSession -> made
-            is InkOver -> made.handwritingMade
-            else -> null
-        } ?: return
+        val s = (sessions[pairs.shownSession(im)] as? InkOver)?.handwritingMade ?: return
         if (!s.took(ink)) s.hold(ink)
     }
 
@@ -639,14 +800,7 @@ class Engines(
         }
     }
 
-    /**
-     * Whether [im] has input of its own typed, not what is written over its keys ([InkOver.typing]): then
-     * the keyboard starts no stroke there (KeyInkGesture.mayWrite). False where nothing is written over
-     * the keys. On the fcitx thread.
-     */
-    fun typedOnKeys(im: String): Boolean = checked { (sessions[inkedSession(im)] as? InkOver)?.typing == true }
-
-    /** The latest piece of handwriting ended ([HandwritingSession.ended]; of those written over the keys too, [InkOver]), for the pad to wipe; on the fcitx thread. */
+    /** The latest piece of handwriting ended ([HandwritingSession.ended], of those written over the keys: [InkOver]), for the pad to wipe; on the fcitx thread. */
     val inkEnded: Int get() = checked { inkMost { it.ended } }
 
     /** Candidates of [im]'s input, from the [from]th, at most [count]; none if it has no session yet. */

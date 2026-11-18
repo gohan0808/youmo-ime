@@ -46,7 +46,8 @@ class KeyShortcutRunner(
 
     fun run(shortcut: KeyShortcut) {
         when (shortcut) {
-            is KeyShortcut.Text -> service.commitOverEngine(shortcut.text)
+            // one of variables filled in as it is run (061-text-variables §2.4); filling in nothing, nothing typed
+            is KeyShortcut.Text -> shortcut.typed(KeyClock.calendar()).takeIf { it.isNotEmpty() }?.let { service.commitOverEngine(it) }
             is KeyShortcut.Command -> run(shortcut.command)
             KeyShortcut.None -> {}
         }
@@ -84,12 +85,22 @@ class KeyShortcutRunner(
             KeyCommand.SwipeSelect -> {}
             KeyCommand.Clipboard -> windowManager.attachWindow(ClipboardWindow())
             // a key's swipe opens it in CommonKeyActionListener, as 符's long press; from here (a menu's) the same
-            KeyCommand.QuickInput -> service.postFcitxJob { triggerQuickPhrase() }
+            // what is typed put in first, as 符's long press does: else its pinyin is the keyword's start, and the
+            // full keyboard's Shift still 分词 over it
+            KeyCommand.QuickInput -> {
+                val address = service.inAddressField
+                service.postFcitxJob {
+                    with(service) { commitAndReset(address) }
+                    triggerQuickPhrase()
+                }
+            }
             KeyCommand.Emoji -> windowManager.attachWindow(PickerWindow.Key.Emoji)
             KeyCommand.Voice -> voice()
             KeyCommand.TradSimp -> tradSimp()
             KeyCommand.ChooseKeyboard -> chooseKeyboard()
             KeyCommand.HideKeyboard -> service.requestHideSelf(0)
+            // the engine's keys, sent by the listener as a stroke drawn is (CommonKeyActionListener): nothing here
+            KeyCommand.StrokeHeng, KeyCommand.StrokeShu, KeyCommand.StrokePie, KeyCommand.StrokeDian, KeyCommand.StrokeZhe -> {}
         }
     }
 
@@ -103,13 +114,14 @@ class KeyShortcutRunner(
         val kept = if (typing != null) {
             // a field not read is said cleared, those before it broken off as for one not kept.
             // A sensitive field's keys the host kept back itself (HostCore.clearTyped): nothing of it here
-            typing.keys?.let { read()?.let { now -> EditPlan.Cleared(now, emptyList(), typing) } }
+            // with a side not given, text committed there since cannot be told by the field: not whole, as a clear of text is
+            typing.keys?.let { read()?.let { now -> EditPlan.Cleared(now.field, emptyList(), typing, whole = now.beforeGiven && now.afterGiven) } }
         } else {
             val now = read() ?: return
             // a field kept from learning is kept from this too: nothing of it remembered
             val sensitive = service.inSensitiveField
             val range = service.currentInputSelection
-            val clearing = EditPlan.clear(now, range.start, range.end, READ_LIMIT, sensitive)
+            val clearing = EditPlan.clear(now.field, range.start, range.end, READ_LIMIT, sensitive, now.beforeGiven, now.afterGiven)
             if (clearing.steps.isEmpty()) return
             apply(clearing.steps)
             clearing.cleared
@@ -124,9 +136,10 @@ class KeyShortcutRunner(
 
     fun restore() {
         val field = service.startedField
-        val back = field?.let { read()?.let { now -> cleared.take(field, now, typing()) } } ?: return service.say(R.string.nothing_to_restore)
+        // a side not given reads as nothing on it: where that does not match what a clear left, take forgets the clears kept
+        val back = field?.let { read()?.let { now -> cleared.take(field, now.field, typing()) } } ?: return service.say(R.string.nothing_to_restore)
         val typed = back.typed as? HostCore.Retyping
-        if (typed == null) return apply(back.restore)
+        if (typed == null) return apply(back.restoreAt(service.currentInputSelection.let { minOf(it.start, it.end) }))
         // the input method changed since, its keyboard, or the field: said, the clear gone all
         // the same (review S4)
         val keyboard = keyboardOf(typed.im)
@@ -136,26 +149,36 @@ class KeyShortcutRunner(
     }
 
     // the field around its selection as a clear reads it; null without one, or where the app gives
-    // neither side (no text read is no empty field: review S2)
-    private fun read(limit: Int = READ_LIMIT): EditPlan.Field? {
+    // neither side (no text read is no empty field: review S2). A side the app gives none of is read as
+    // nothing on it, as [EditPlan.clear] takes it: what the other side gave is cleared and put back (an
+    // app with no text before its cursor returned null here for all it had after it: KB-88). [bothSides]:
+    // null where either is not given, for what asks whether the field is empty
+    private fun read(limit: Int = READ_LIMIT, bothSides: Boolean = false): Read? {
         val ic = service.currentInputConnection ?: return null
-        return EditPlan.Field(
-            ic.getTextBeforeCursor(limit, 0)?.toString() ?: return null,
-            ic.getSelectedText(0)?.toString() ?: "",
-            ic.getTextAfterCursor(limit, 0)?.toString() ?: return null,
-        )
+        val before = ic.getTextBeforeCursor(limit, 0)?.toString()
+        val after = ic.getTextAfterCursor(limit, 0)?.toString()
+        if (if (bothSides) before == null || after == null else before == null && after == null) return null
+        return Read(EditPlan.Field(before.orEmpty(), ic.getSelectedText(0)?.toString() ?: "", after.orEmpty()), before != null, after != null)
     }
 
-    // a character each side tells an empty field: the field read only with nothing selected
-    private fun nothingToTake(start: Int, end: Int) =
-        start == end && EditPlan.nothingToTake(start, end, read(1), service.currentInputEditorInfo?.toEditorTraits()?.isRawKeyInput == true)
+    // [field] with which sides the app gave: one not given is "" in it, which [EditPlan.clear] is told
+    private class Read(val field: EditPlan.Field, val beforeGiven: Boolean, val afterGiven: Boolean)
+
+    // a character each side tells an empty field: the field read only with nothing selected. A side not
+    // read is no empty one: the field is then taken whole, as one not read at all
+    private fun nothingToTake(start: Int, end: Int) = start == end &&
+        EditPlan.nothingToTake(start, end, read(1, bothSides = true)?.field, service.currentInputEditorInfo?.toEditorTraits()?.isRawKeyInput == true)
 
     private fun fieldEdge(keyCode: Int) = service.sendCombinationKeyEvents(
         keyCode,
         ctrl = fieldEdgeCtrl(service.currentInputEditorInfo?.toEditorTraits()?.isRawKeyInput == true),
     )
 
-    private fun apply(steps: List<EditPlan.Step>) = EditPlan.apply(steps, editor, ::menu)
+    // done past the session: a commit waiting can no longer be read back (CommitCheck.moved)
+    private fun apply(steps: List<EditPlan.Step>) {
+        if (steps.isNotEmpty()) service.changedPastSession()
+        EditPlan.apply(steps, editor, ::menu)
+    }
 
     private fun menu(action: EditPlan.Menu) = service.performContextMenuAction(
         when (action) {

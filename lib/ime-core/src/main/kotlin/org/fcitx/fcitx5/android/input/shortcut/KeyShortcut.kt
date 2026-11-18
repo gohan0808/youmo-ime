@@ -4,16 +4,25 @@
  */
 package org.fcitx.fcitx5.android.input.shortcut
 
+import org.fcitx.fcitx5.android.engine.phrase.TextVariables
+import java.util.Calendar
+
 /** What a key's swipe does on its shortcut layer: a command, a piece of text, or nothing. */
 sealed interface KeyShortcut {
 
     data class Command(val command: KeyCommand) : KeyShortcut
 
-    /** Committed as it is, spaces and line breaks too. */
-    data class Text(val text: String) : KeyShortcut {
+    /**
+     * Committed as it is, spaces and line breaks too; with [variables] (061-text-variables §2.4), its `$year` and the
+     * like filled in as it is run ([typed]) or drawn.
+     */
+    data class Text(val text: String, val variables: Boolean = false) : KeyShortcut {
         init {
             require(text.isNotEmpty())
         }
+
+        /** What it types at [now]: filled in where it has [variables], at most [MAX_TEXT] chars; else its text. */
+        fun typed(now: Calendar): String = if (variables) clip(TextVariables.expand(text, now), MAX_TEXT) else text
     }
 
     /** Set to nothing: a swipe this way is taken as a tap (a character key's) or as before (a function key's). */
@@ -35,7 +44,7 @@ sealed interface KeyShortcut {
  * line whose key no command has any more is skipped, the key back to its preset, and the line gone
  * the next time the shortcuts are saved). Offered in this order, grouped by [group].
  */
-enum class KeyCommand(val key: String, val group: Group) {
+enum class KeyCommand(val key: String, val group: Group, val stroke: Char? = null) {
     SelectAll("select_all", Group.Edit),
     Copy("copy", Group.Edit),
     Cut("cut", Group.Edit),
@@ -56,9 +65,21 @@ enum class KeyCommand(val key: String, val group: Group) {
     Voice("voice", Group.Panel),
     TradSimp("trad_simp", Group.Switch),
     ChooseKeyboard("choose_keyboard", Group.Switch),
-    HideKeyboard("hide_keyboard", Group.Switch);
+    HideKeyboard("hide_keyboard", Group.Switch),
 
-    enum class Group { Edit, Panel, Switch }
+    /*
+     * A stroke for 笔画筛选 (issue #4): the same as one drawn on the keys, [stroke] one of 横竖撇点折 as
+     * Strokes.KEYS has them, whether 在键上划 is 笔画筛选 or not; with nothing typed, or in an input
+     * method that filters by none, nothing (the engine's StrokeFilter, which never asks how it came).
+     * Fixed as set: never the stroke the candidates would want next.
+     */
+    StrokeHeng("stroke_h", Group.Stroke, 'h'),
+    StrokeShu("stroke_s", Group.Stroke, 's'),
+    StrokePie("stroke_p", Group.Stroke, 'p'),
+    StrokeDian("stroke_n", Group.Stroke, 'n'),
+    StrokeZhe("stroke_z", Group.Stroke, 'z');
+
+    enum class Group { Edit, Panel, Switch, Stroke }
 
     /** Whether it reads the field's text out: not run in a password, which the editor will not give. */
     val readsField: Boolean get() = this == Copy || this == Cut

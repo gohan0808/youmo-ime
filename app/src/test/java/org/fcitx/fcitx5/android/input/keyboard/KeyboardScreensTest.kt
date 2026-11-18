@@ -4,9 +4,12 @@
  */
 package org.fcitx.fcitx5.android.input.keyboard
 
+import org.fcitx.fcitx5.android.Uat
 import org.fcitx.fcitx5.android.assertRows
 import org.fcitx.fcitx5.android.input.keyboard.KeyboardArea.NavBar
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -49,9 +52,55 @@ class KeyboardScreensTest {
         },
     )
 
+    @Test
+    @Uat("LS-49")
+    fun aLargeScreenIsTheDisplaysShortSideNotTheWindows() {
+        // a 601 × 962 dp tablet at 2x, its 48 dp bar at the bottom both ways (API 29–34 leave it out of the window):
+        // turned the window is 553 dp high, yet the display's short side, 601, says large (061-landscape-height §5.1)
+        val (up, turned) = KeyboardArea.screensOf(1202, 1924, 2f, NavBar(96, 0), NavBar(96, 0), 0, roundDp = true)
+        assertEquals(1202 - 96, turned.heightPx)
+        assertEquals(601 to 601, up.shortSideDp to turned.shortSideDp)
+        assertTrue(up.large && turned.large)
+        // a phone's 393: not large either way; the status bar and the input method's bar each way as given
+        val (pu, pt) = KeyboardArea.screensOf(1080, 2340, 2.75f, NavBar(132, 0), NavBar(0, 132), 0, roundDp = false,
+            statusBar = { if (it) 66 else 132 }, imeNav = { if (it) 0 else 132 })
+        assertFalse(pu.large || pt.large)
+        assertEquals(listOf(132, 132, 66, 0), listOf(pu.statusBarPx, pu.imeNavPx, pt.statusBarPx, pt.imeNavPx))
+    }
+
     private companion object {
         const val D = 2.625f
     }
+
+    // 横屏 of each, upright and turned (ScreenShape: turned, or 600 dp wide either way)
+    private fun shapes(w: Int, h: Int, density: Float = D, round: Boolean = true, nowDp: Int? = null) =
+        KeyboardArea.screensOf(w, h, density, NavBar.NONE, NavBar.NONE, 0, round, nowDp).let { (up, turned) ->
+            "${up.widthDp}/${up.landscape}" to "${turned.widthDp}/${turned.landscape}"
+        }
+
+    @Test
+    @Uat("LS-37")
+    fun eachScreenIsLandscapeAsWideAsItIs() = assertRows(
+        "aPhone" to { assertEquals("393/false" to "851/true", shapes(1080, 2340, density = 2.75f)) },
+        // a foldable unfolded, 673 × 841 dp: 横屏 both ways up, held either way now
+        "aFoldableUnfolded" to { assertEquals("673/true" to "841/true", shapes(1767, 2208)) },
+        "aFoldableUnfoldedTurnedNow" to { assertEquals("673/true" to "841/true", shapes(2208, 1767)) },
+        // its outer screen, a phone's
+        "aFoldableFolded" to { assertEquals("412/false" to "891/true", shapes(1082, 2340)) },
+        "aTablet" to { assertEquals("800/true" to "1280/true", shapes(1600, 2560, density = 2f)) },
+    )
+
+    @Test
+    fun theScreenHeldNowIsAsTheConfigurationSaysOnTheEdge() = assertRows(
+        // 1574 px at 2.625 is 599.6 dp: 599 truncated (API 29), the configuration's 600 for the one held now
+        "truncatedAlone" to { assertEquals("599/false" to "841/true", shapes(1574, 2208, round = false)) },
+        "theConfigurationsWidth" to { assertEquals("600/true" to "841/true", shapes(1574, 2208, round = false, nowDp = 600)) },
+        "roundedTheSame" to { assertEquals("599/false" to "841/true", shapes(1574, 2208, round = false, nowDp = 599)) },
+        // held turned now: the configuration's is the turned one's (842 of 841.1), the upright one's worked out
+        "notTheOneHeldNow" to { assertEquals("599/false" to "842/true", shapes(2208, 1574, round = false, nowDp = 842)) },
+        // an activity's half of a split screen is no rounding: the display's own width kept
+        "farOffIsNoRounding" to { assertEquals("599/false" to "841/true", shapes(1574, 2208, round = false, nowDp = 300)) },
+    )
 
     private val buttons = NavBar(0, 126)
     private fun other(now: NavBar, landscape: Boolean, mode: Int = 0) = KeyboardArea.otherBar(now, landscape, D, mode) { buttons }

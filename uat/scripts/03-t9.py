@@ -3,7 +3,7 @@
 
 import time
 
-from uat import case, check, first, script
+from uat import case, check, choose, first, home, keys_at, script
 
 
 def t9(d, digits, gap=0.35, after=0.6):
@@ -136,6 +136,7 @@ case("T9-56d", needs="jvm:NineKeysUatTest.digitsInFullLiftAWordUnderPartMultiTap
 
 
 case("T9-57", needs="jvm:StrokeFilterUatTest.nineKeysWangThenADot")(lambda d: None)
+case("T9-65", needs="jvm:StrokeFilterUatTest.keyiThenAHengPutsTwoCharactersAloneRightAfterTheFirst")(lambda d: None)
 
 
 case("T9-58", needs="jvm:T9UatTest.theGlobeGoesToEnglishOnItsOwnKeyboard")(lambda d: None)
@@ -322,3 +323,71 @@ case("T9-61", needs="jvm:ZhuyinShortcutsUatTest.zhuyinNinesGroupsHaveNoneUntilOn
 
 
 case("T9-63", needs="jvm:SettingsPagesUatTest.anEditedNineKeysLongPressKeepsItsLettersWhenTheyChange")(lambda d: None)
+case("T9-64", needs="jvm:EnginesWordCardTest")(lambda d: None)
+
+
+# ---------------------------------------------------------------- 按偏的键按落点读 (061-neighbour-correction)
+
+
+case("T9-66", needs="jvm:NeighbourSlipTest.theNineKeysReadADigitAsTheOneItWasTappedTowards、NeighbourTouchTest.theNineKeysDigitsGoWithTheirPlaceButNotOneNorZero")(lambda d: None)
+
+
+case("T9-67", needs="jvm:PinyinSessionSlipTest.theNineKeysCodeShowsTheSyllableAsMeant")(lambda d: None)
+
+
+@case("T9-68", base="B0-九键")
+def t968(d):
+    # the second 9 tapped at 8% of its height, toward 6 above it: 96, wo, 我 first; both in the middle not
+    keys_at(d, "99", [None, (0.5, 0.08)])
+    c = d.cands()
+    code = d.preedit()
+    d.shot("kb", "9、9 靠上边缘：首选「我」，编码行是 wo")
+    d.clear()
+    keys_at(d, "99", [None, None])
+    mid = d.preedit()
+    d.clear()
+    check(c[:1] == ["我"] and code.replace(" ", "") == "wo", f"第二个 9 靠 6 点：编码行「{code}」，候选 {c[:6]}")
+    check(mid.replace(" ", "") != "wo", f"两个 9 都点在正中，编码行是「{mid}」")
+    return f"靠边「{code}」{c[:3]}；正中「{mid}」"
+
+
+@case("T9-69", base="B0-九键", mutates=True)
+def t969(d):
+    home(d, "通用输入")
+    choose(d, "在键上划", "笔画筛选")
+    d.open_page("text")
+    d.clear()
+    dp = d.dpx()
+    t9(d, "9264")
+    k = d.keys(refresh=True)
+    one, three = k["1"], k["3"]
+    before = d.preedit()
+    # a 横 from 1 across 2 to 3, as one starting on 2
+    d.swipe(one, (three[0], one[1]), 250, after=0.8)
+    heng = d.preedit()
+    d.shot("kb", "9264 后从 1 往右划到 3：编码行末尾是一笔横")
+    d.clear()
+    t9(d, "9264")
+    # a 点 from 1 down and right, 40dp each way
+    d.swipe(one, (one[0] + int(40 * dp), one[1] + int(40 * dp)), 200, after=0.8)
+    dian = d.preedit()
+    d.clear()
+    t9(d, "9264")
+    # straight up from 1, 40dp: a stroke read as none, dropped; 1's up slot (the first candidate) not reached
+    d.swipe(one, (one[0], one[1] - int(40 * dp)), 200, after=0.8)
+    up = d.preedit()
+    up_typed = d.field_text() or ""
+    d.clear()
+    # a tap on 1 while typing: the separator as ever (T9-05's 94 1 26, xi'an)
+    t9(d, "94")
+    d.tap(one, 0.4)
+    t9(d, "26")
+    sep = d.preedit()
+    typed = d.field_text() or ""
+    cands = d.cands()
+    d.clear()
+    check(heng.endswith("一") and heng[:-1].rstrip() == before.rstrip(), f"9264（{before!r}）后从 1 划到 3，编码行「{heng}」，末尾不是一笔横")
+    check(dian.endswith("丶"), f"9264 后从 1 往右下划，编码行「{dian}」，末尾不是一点")
+    check(up.rstrip() == before.rstrip() and not up_typed, f"9264（{before!r}）后在 1 上往上划，编码行「{up}」、框里「{up_typed}」，上滑打出了东西")
+    check(sep.replace(" ", "") == "xi'an" and "西安" in cands and not typed, f"94 1 26：编码行「{sep}」、候选 {cands[:6]}、框里「{typed}」，1 不是分词")
+    return f"横：「{heng}」；点：「{dian}」；上滑：「{up}」；94 1 26：「{sep}」"

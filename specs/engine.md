@@ -6,8 +6,8 @@ measurement that decided it.
 
 ## What every Chinese input method has
 
-Each Chinese input method the app ships (全拼, 双拼, 九键, the code tables, handwriting, and any added
-later) has the same five, decided 2026-10-14; a new one is not done without them:
+Each Chinese input method the app ships (全拼, 双拼, 九键, the code tables, handwriting over them, and any added
+later) has the same six (five decided 2026-10-14, the sixth 0.6.1's); a new one is not done without them:
 
 1. **The word model** (the pinyin data's n-gram) in ranking, after the text before the cursor.
 2. **The sentence models** as the 性能档位 has them: none (low), the small one at each key (medium),
@@ -17,6 +17,16 @@ later) has the same five, decided 2026-10-14; a new one is not done without them
    `learning` is off (a password).
 5. **The user's lexicon**: their words, added and blocked (`WordLists`), found and ranked as the
    dictionary's are; a blocked word never offered.
+6. **生僻字屏蔽** (0.6.1, `dev/design/061-rare-char-block.md`): a character of a group held back
+   (`CharLevels`: 三级, 繁体, 其它表外, 扩展区; 一级/二级 never), or held one by one, is never offered,
+   predicted, put in a sentence or committed alone, nor any word with it. One gate on `UserLexicon`
+   (`held()`/`gate()`: `CharGate` by text, `HeldWords` by word id, rebuilt only when the data or the choice
+   changed) behind the "is this word blocked?" each input method already asks
+   (`UserModel.blocked*`, `UserLexicon.isBlocked*`), plus the tables, handwriting, strokes, 拆字 and
+   voice by text. Held back is a view: the user's words stay. `RareCharContractTest` types each way a
+   candidate comes (keys and glide) through hold → let through → hold on one `Engines`, ime-eval's
+   `RareCharsUatTest` every `LISTED` Chinese input method on the real data (specs/testing.md says
+   which covers what); a new input method is not done until it passes there.
 
 All have them: the pinyins, handwriting (2026-10-14) and the code tables (2026-10-14, `TableLanguage`;
 see Tables for where a table's order may move).
@@ -32,18 +42,18 @@ they share the large model's slices at a pause (`session/RefineSlices`) too.
 | `pinyin` | Turning keys into syllables: `Syllables` (every syllable, append-only ids), `SpellingIndex`, `PinyinSegmenter` / `ShuangpinSegmenter` / `T9Segmenter` → `SyllableGraph` (the spelling index and the nine keys' tables made once for the settings that shape them, `SettingsMemo`); `Fuzzy`, `Typo`, `KeyNeighbours`, `ShuangpinScheme`, `NineKeyLetters`, `LatinWords` (the dictionary's Latin words) and `UserLatinWords` (English's learned words, its dictionary's aside, which `Engines.syncLatin` lists in the user model spelt by letters before a key of 全拼's: U-31 §3) |
 | `lattice` | Turning syllables into text: `PinyinDecoder` (word lattice + beam search), `Penalties`, `WordScorer`, `UserWords`, `LayerPrior`, `Predictor` (联想), `TextWords` (the model's words in text the engine did not commit), `CoarseWords` |
 | `rerank` | The sentence models: `SentenceModel` (char-level transformer, int8 safetensors), `Reranker` (`SentencePicker` / `SentenceRefiner`), `MatrixKernel` (the hot loop; the app runs it in C++, `NativeMatrixKernel`), `Safetensors`, `Json` |
-| `user` | Learning: `UserModel` (counts of words and pairs, words made from pieces), `UserScorer` (mixes them into the model), `SyllableTrie` (the learned words by syllables), `Counts`, `HabitCounts` (the counts from the learning record), `WordLists` (added and blocked by hand; the text export (`exportWords`, `WordImport`) writes a blocked word `!text pin'yin`, an emoji's its word's reading read back by `WordLists.blockedEntry`, and English's `!@en word` (`WordListFiles.ENGLISH_BLOCK_MARK`: no reading, and letters alone read as pinyin) into `EnglishBlocks`; a table hides a word blocked everywhere (`UserLexicon.isBlockedWord`) only where it is of Han or of ASCII letters and digits: an emoji blocked in pinyin's reading stays in a code table; `blockedEntry` relaxes the syllable a code point only for a text of no Han nor ASCII letter or digit (ℹ️ too; the edge on purpose: a word of other letters, Cyrillic or accented Latin, is read as an emoji is, its syllables as given, and a table does not hide it); a build before this one reads neither back, and loses a block of an emoji of more or fewer code points than syllables from `words.blocked` too; the user dictionary's export is a learning backup since 0.3.1 (`BackupOp.Copy`, WD-10), which its import restores; an earlier build's text export, which `UserLexicon.exportWords` still writes for the tests, has added words as `词 pin'yin`, blocked ones with a `!` before them, learned ones with a `~` apart before them and their count after them (`~ 词 pin'yin 3.0`: apart, an older version's parser reads the line as two words and skips it, rather than adding a word `~词`; picked into the base, `WordListFiles.baseLines` takes the word without the count, and only from an export: `baseLine` alone drops a `~` line); both imports read `~` only after `WordListFiles.EXPORT_MARK`, the file's first non-blank line (byte order mark and spaces aside), as `WordListFiles.exportMark` tells it for `baseLines`, the user dictionary's import and `isOwnExport` alike; `isOwnExport` and `exportMark(old = true)` also take an older export's header, and say whether the user dictionary's import adds a list's words back (another list's are imported words, below); the default target dictionary asks `isUserExport` (`isOwnExport`, or a `!` line); the user dictionary's import makes those words the user's once each in the learning record (`Mine.TAKEN_IN`), the exported count as uses on the day (`~ 词 pin'yin 3.0` comes back at 3, under one as one), skipping any that are added, blocked or already learned; an older export has no `~`, so its learned words come back as added), `WordPack` |
+| `user` | Learning: `UserModel` (counts of words and pairs, words made from pieces), `UserScorer` (mixes them into the model), `SyllableTrie` (the learned words by syllables), `Counts`, `HabitCounts` (the counts from the learning record), `WordLists` (added and blocked by hand; the text export (`exportWords`, `WordImport`) writes a blocked word `!text pin'yin`, an emoji's its word's reading read back by `WordLists.blockedEntry`, and English's `!@en word` (`WordListFiles.ENGLISH_BLOCK_MARK`: no reading, and letters alone read as pinyin) into `EnglishBlocks`; a table hides a word blocked everywhere (`UserLexicon.isBlockedWord`) only where it is of Han or of ASCII letters and digits: an emoji blocked in pinyin's reading stays in a code table; `blockedEntry` relaxes the syllable a code point only for a text of no Han nor ASCII letter or digit (ℹ️ too; the edge on purpose: a word of other letters, Cyrillic or accented Latin, is read as an emoji is, its syllables as given, and a table does not hide it); a build before this one reads neither back, and loses a block of an emoji of more or fewer code points than syllables from `words.blocked` too; the user dictionary's export is a learning backup since 0.3.1 (`BackupOp.Copy`, WD-10), which its import restores; an earlier build's text export, which `UserLexicon.exportWords` still writes for the tests, has added words as `词 pin'yin`, blocked ones with a `!` before them, learned ones with a `~` apart before them and their count after them (`~ 词 pin'yin 3.0`: apart, an older version's parser reads the line as two words and skips it, rather than adding a word `~词`; picked into the base, `WordListFiles.baseLines` takes the word without the count, and only from an export: `baseLine` alone drops a `~` line); both imports read `~` only after `WordListFiles.EXPORT_MARK`, the file's first non-blank line (byte order mark and spaces aside), as `WordListFiles.exportMark` tells it for `baseLines`, the user dictionary's import and `isOwnExport` alike; `isOwnExport` and `exportMark(old = true)` also take an older export's header, and say whether the user dictionary's import adds a list's words back (another list's are imported words, below); the default target dictionary asks `isUserExport` (`isOwnExport`, or a `!` line); the user dictionary's import makes those words the user's once each in the learning record (`Mine.TAKEN_IN`), the exported count as uses on the day (`~ 词 pin'yin 3.0` comes back at 3, under one as one), skipping any that are added, blocked or already learned; an older export has no `~`, so its learned words come back as added), `WordPack`, 生僻字屏蔽's `RareChoice` (the user's file `pinyin/rarechars.txt`: groups held, characters let through or held one by one; parsed and written keeping lines and groups it does not know, a later version's read as off and never written), `CharGate` (a text held?), `HeldWords` (the dictionary's words held, a bitmap by id), `RareGrid` (the page's characters with readings, copied off the engine in one call) |
 | `table` | Code tables (五笔, 仓颉, 自然码, 二笔, 五笔拼音): `TableDictionary`, `TableSession`, `PinyinLookUp` (拼音反查: a decorator over the pinyin session the table hands every action while it is on), `TableOptions`, `PhraseRules` (组词规则), `SavedPhrases` (the phrases an older build saved, from the learning record), `SharedWords`, `TableLanguage` (the five a table shares with pinyin), `TableText` (reading a table's sources), `IndexCounts` |
 | `glide` | Glide typing over Chinese keys: `Glide`, `GlideLayout` (the keys' places), `GlidePath`, `GlideSession`, `PinyinGlide` (a path → pinyin readings, full, 双拼, nine keys), `TableGlide` (→ a table's codes), `GlideReading` |
 | `english` | `EnglishData`, `EnglishDecoder` (keys → words with slips), `GlideDecoder` (a glide's path → words), `EnglishSession` (Gboard-like word-at-a-time typing, autocorrect, glides), `EnglishPhrases` (the custom phrases among its candidates, A1), `EnglishUser` (the user's words, a view of `learn.log`), `Corrections` (a field's last corrections, for a tap back), `EnglishText`, `Misspellings`, `EnglishDataBuilder` (compiles `english.data`) |
 | `stroke` | `Strokes` (by strokes, and a character's orders, `ordersOf`/`startsWith`), `StrokeLookup` (`u` then `h s p n z` inside pinyin), `StrokeFilter` (笔画筛选: a stroke drawn on the keyboard filters what pinyin shows) |
-| `handwriting` | `HandwritingSession` (the input method), `InkOver` (written on over another input method's keys), `HandwritingDecoder` (the characters written read as a sentence with the pinyin model and the user's words), `InkRecognizer` (the character's two recognizers run as their training code runs them, over `InkNet`s the app supplies), `InkFeatures` (what each recognizer reads of the strokes, equal to the training code's) |
-| `phrase` | `CustomPhrases` (libime's `customphrase` format, with date/time variables; keys kept lower case; `place`: each phrase a candidate of its own at its order, text, never learned; in a table, a code reached by a phrase alone shows it but commits it only by a tap (space, a selection key, a key no code starts, a key past the longest code drop the code: `TableSession`); a decoder's candidate of the same text stays where it is ranked and learned, the phrase not listed again after it (U-66); `CustomPhrases.BUILT_IN`: the date, time and weekday under `rq`, `sj`, `xq`, as keys on full pinyin's keyboards only (26, 18, 14, nine: `Segmenter.spellsFullPinyin`), under a key the user file has none of (in 双拼 `sj` and `xq` spell syllables), never in a table nor English; on a keyed keyboard `PhraseKeys` reads the keys (A1: a keyed keyboard's input as the keys' letters, each code any of its key's, an upper-case letter itself, a syllable taken off the bar its letters (`KeyedSegmenter.takenAs`: 双拼's the scheme's keys), separators skipped; `PhraseBook.typed`: what is offered and the keys an input reads, every phrase of them offered by order, then key, then file order); setting `BuiltInPhrases`, on 通用输入, off: none of them, the user's own as before), `PhraseBook` (a delete from the keyboard under such a key first copies that key's built-in phrases into the user file, so a deleted one stays off; a pin goes to the learning record, not here; `builtInsOf`: the words 日期, 时间, 星期 (`WORD_KEYS`) bring the built-in ones still on in every Chinese input method, placed by `EmojiCandidates` before the word's emoji, never twice where the input is the key itself); `CommonWords`/`CommonWordBook` (常用词, dev/design/060-common-words.md: a word, its syllables and up to 9 replacements, the file `pinyin/commonwords.txt` an export's text, `# youmo-common-words 1` then `text[pinyin]` and the replacements tab-separated; keys a word's whole pinyin, its first three syllables' when longer than three, its initials (each syllable's first letter, `zh`/`ch`/`sh` too) when of two or more, each as the session spells a syllable (`Segmenter.typedAs`: 双拼 the scheme's taught keys); `PinyinSession.place` puts the replacements of the words whose key is the input exactly (a keyed keyboard's through `PhraseKeys`) first, before a pin and a phrase of order 1, whole before first three before initials, each text once, as text never learned; only pinyin sessions, zhuyin's two (`Kinds.ZHUYIN_NINE`, `Kinds.ZHUYIN_DACHEN`) not, and only with the habits on (`SessionFactory`), read from `Engines.Additions.commonWords`, saved through `saveCommonWords`); `EmojiData` (`engine/emoji.data`: the emoji panel's groups and the words emoji stand for) and `EmojiCandidates` (a word's emoji after the first two candidates, pinyin's and a table's alike; a table's word alone on its code commits itself as ever, and its emoji and built-in phrases come first in the 联想 after it, `TableSession.pickOffered` replacing the word (`Snapshot.deleteBefore`, in code points) — the offer ends with any other key or pick: setting `Emoji`, those the phone cannot draw left out by `Engines.emojiShows`); `Chaizi` (`engine/chaizi.data`: characters by the pinyin of their parts, full pinyin's after `u`, setting `Chaizi`, those the phone's font lacks left out by `Engines.textShows`) and `AsideCandidates` (where pinyin puts both: the emoji after the first two, the characters first) |
-| `data` | File formats: `DataFile` (the container), `PinyinData`, `CodeTable`, `NgramTables`, `BitPacked`, `EliasFano` (the trigram runs' starts; a lookup costs more, so not for the unigrams'), `Quantizer`, `StringTable`, `WordIndex`, `PinyinDataBuilder`, `CodeTableReader`, `NgramWords`, `SortedKeys`, readers of text sources, `Misreadings`, `DataAge` |
-| `store` | `RecordFormat` / `RecordStore`: append-only logs with CRC'd records, compacted by rename (over a `LogFile`); `ReplaceFile` (a file written whole, put in place by rename) |
+| `handwriting` | `HandwritingSession` (the characters written; made by `SessionFactory` for an `InkOver` and ime-eval, no input method of its own since 0.6.1), `InkOver` (written on over another input method's keys), `HandwritingDecoder` (the characters written read as a sentence with the pinyin model and the user's words), `InkRecognizer` (the character's two recognizers run as their training code runs them, over `InkNet`s the app supplies), `InkFeatures` (what each recognizer reads of the strokes, equal to the training code's) |
+| `phrase` | `TextVariables` (the date/time variables `$year`, `${minute}`, `$$`: one scan for `expand`, the editor's `problems` and its help table; a phrase's `#` text, a key's long press item and swipe text of variables alike), `CustomPhrases` (libime's `customphrase` format, its date/time variables `TextVariables`'s; keys kept lower case; `place`: each phrase a candidate of its own at its order, text, never learned; in a table, a code reached by a phrase alone shows it but commits it only by a tap (space, a selection key, a key no code starts, a key past the longest code drop the code: `TableSession`); a decoder's candidate of the same text stays where it is ranked and learned, the phrase not listed again after it (U-66); `CustomPhrases.BUILT_IN`: the date, time and weekday under `rq`, `sj`, `xq`, as keys on full pinyin's keyboards only (26, 18, 14, nine: `Segmenter.spellsFullPinyin`), under a key the user file has none of (in 双拼 `sj` and `xq` spell syllables), never in a table nor English; on a keyed keyboard `PhraseKeys` reads the keys (A1: a keyed keyboard's input as the keys' letters, each code any of its key's, an upper-case letter itself, a syllable taken off the bar its letters (`KeyedSegmenter.takenAs`: 双拼's the scheme's keys), separators skipped; `PhraseBook.typed`: what is offered and the keys an input reads, every phrase of them offered by order, then key, then file order); setting `BuiltInPhrases`, on 通用输入, off: none of them, the user's own as before), `PhraseBook` (a delete from the keyboard under such a key first copies that key's built-in phrases into the user file, so a deleted one stays off; a pin goes to the learning record, not here; `builtInsOf`: the words 日期, 时间, 星期 (`WORD_KEYS`) bring the built-in ones still on in every Chinese input method, placed by `EmojiCandidates` before the word's emoji, never twice where the input is the key itself); `CommonWords`/`CommonWordBook` (常用词, dev/design/060-common-words.md: a word, its syllables and up to 9 replacements, the file `pinyin/commonwords.txt` an export's text, `# youmo-common-words 1` then `text[pinyin]` and the replacements tab-separated; keys a word's whole pinyin, its first three syllables' when longer than three, its initials (each syllable's first letter, `zh`/`ch`/`sh` too) when of two or more, each as the session spells a syllable (`Segmenter.typedAs`: 双拼 the scheme's taught keys); `PinyinSession.place` puts the replacements of the words whose key is the input exactly (a keyed keyboard's through `PhraseKeys`) first, before a pin and a phrase of order 1, whole before first three before initials, each text once, as text never learned; only pinyin sessions, zhuyin's two (`Kinds.ZHUYIN_NINE`, `Kinds.ZHUYIN_DACHEN`) not, and only with the habits on (`SessionFactory`), read from `Engines.Additions.commonWords`, saved through `saveCommonWords`); `EmojiData` (`engine/emoji.data`: the emoji panel's groups and the words emoji stand for) and `EmojiCandidates` (a word's emoji after the first two candidates, pinyin's and a table's alike; a table's word alone on its code commits itself as ever, and its emoji and built-in phrases come first in the 联想 after it, `TableSession.pickOffered` replacing the word (`Snapshot.deleteBefore`, in code points) — the offer ends with any other key or pick: setting `Emoji`, those the phone cannot draw left out by `Engines.emojiShows`); `Chaizi` (`engine/chaizi.data`: characters by the pinyin of their parts, full pinyin's after `u`, setting `Chaizi`, those the phone's font lacks left out by `Engines.textShows`) and `AsideCandidates` (where pinyin puts both: the emoji after the first two, the characters first) |
+| `data` | File formats: `DataFile` (the container), `PinyinData`, `CodeTable`, `NgramTables`, `BitPacked`, `EliasFano` (the trigram runs' starts; a lookup costs more, so not for the unigrams'), `Quantizer`, `StringTable`, `WordIndex`, `PinyinDataBuilder`, `CodeTableReader`, `NgramWords`, `SortedKeys`, readers of text sources, `Misreadings`, `DataAge`, `CharLevels` (生僻字屏蔽's levels from the APK's `engine/charlevels.data`, `DataFile` kind 6; `CharLevelsBuilder`) |
+| `store` | `RecordFormat` / `RecordStore`: append-only logs with CRC'd records, compacted by rename (over a `LogFile`); a record garbled mid-log (CRC wrong, its length in `1..MAX_RECORD`, a sound record readable after it and any run of such) is skipped on open (B2, `RecordFormat.read`'s `garbled`, passed by `RecordStore.open` alone; backups, older table logs and rewrites still stop at the first bad record): the whole file is first kept aside as `learn.log.unreadable[.N]` (`RecordStore.isAside`), then rewritten without the bad records, so the next open sees a clean log; a header not known or damage that cannot be skipped is kept aside and cut as before; each of these is reported as `RecordStore.KeptAside`, which the app tells once (`learning_kept_aside`); `ReplaceFile` (a file written whole, put in place by rename) |
 | `platform` | The ports by which the core reaches the platform, so that nothing in it opens a `java.io.File`, starts a thread or reads the system clock itself: `Blobs` (the data files' bytes by path), `UserFiles` (a directory of the user's: its files and directories, size, delete, rename) and `LogFile` (one file in it: read, map, append, create, truncate, rename; `exists` is a file there, `taken` anything at the path, a directory too), `Clock` (`LearnClock`'s wall time and UTC offset, and uptime for the tables' timings), and `java.util.concurrent.Executor` for every thread. `platform.jvm` is the phone's and the JVM's implementation, the code from before the ports: `JvmFiles` / `JvmFile`, `JvmClock`, `JvmThreads.each(name)` (a daemon thread a task), `replaceFile(File)` for the app's own files. Tests keep the user's files in `MemoryFiles` (ime-core testFixtures), the disk only where the bytes on it or its refusals are what is tested |
 | `user.imports` | Words as text (`WordText`: a text's readings, a dictionary line) and libime's `.dict` read without libime (`LibimeFiles.pinyinDictionary`: its `DATrie`, zstd), for importing |
-| (`engine` itself) | `InputMethodCatalog` (the input methods by name, the tables, `LISTED`, the keys each reads, which glide; the data files' names), `EngineBehaviour` |
+| (`engine` itself) | `InputMethodCatalog` (the input methods by name, the tables, `LISTED`, the keys each reads, which glide; the data files' names) |
 | `runtime` | `Engines` (the keyboards over the sessions, made on first use; `invalidate()` has them all made anew; a setting, the sessions alone, the decoders' look-ahead kept while the user model's counts are as they were when it was made, `UserModel.countsVersion`), its parts: `SessionFactory` (each input method's session as the settings have it; one `ChineseLanguage` per user model and one list of coarse words per set of words added by hand, shared by the sessions made between two invalidates), `FieldContext` (the field's context, flags and warm-ups: each a `WarmUp`, named steps in order handed to `warmUps` as one task, so the platform decides the thread), `LearningFacade` (the one holder of `learn.log`, opened at first use: backups, stashes, the user's acts, imports, U-93), `LexiconFacade` (the words as the settings show them); `EnginesHost` (the `EngineHost` port on `Engines` alone, for tests and the replay), `UserWord`, `EngineAssets`, `EngineSettings` (+ `ModelLevel`), `TableRegistry`, `InBackground` (work handed to `warmUps`, waited on by who needs it), `UserLexicon` (the user model and the lists; its parts `UserAdditions`, the words added from the user's dictionaries, and `WordImport`, another input method's list read in), `EnglishLexicon` (the English page's words, read from `learn.log`), `Keyboard` (the addon's event numbers) |
 
 ## What voice input gets from the engine
@@ -53,6 +63,9 @@ they share the large model's slices at a pause (`session/RefineSlices`) too.
   recognizer; none of theirs while U-93's 「用我的输入习惯」 is off (`habits`).
 - **Blocking**: a blocked word is kept out of a result (`VoiceBlocking`), found by the model's word
   boundaries (`Engines.wordBoundaries`, `TextWords.boundaries` with `splitLong`).
+- **生僻字屏蔽**: a hypothesis with a character held back is passed over for the next without
+  (`VoiceChoice`; all with one, the first as the recognizer wrote it); a user word with one is
+  neither a hotword nor a homophone's target (`Engines.rareHeld`).
 - **Reranking**: the recognizer's hypotheses are rescored by the word model (`Engines.logProbs`,
   `VoiceRerank`).
 - **Homophones**: after the polish, a stretch reading exactly as a user's word (toned, char by char,
@@ -61,6 +74,34 @@ they share the large model's slices at a pause (`session/RefineSlices`) too.
   one with a common word in it or across its edge, nor inside a longer dictionary word. Built with the
   hotwords (`Engines.voiceHomophones`), each candidate checked once a hold
   (`Engines.voiceHomophonesAllowed`); shown as it streams too, same length, so settled text holds.
+- **Asked, then remembered** (0.6.1, dev/design/061-voice-learn-from-edits.md): `VoiceEdits` (ime-core
+  `input/voice/`, pure; `engine/runtime/VoiceEditsGlue` binds it to `Engines`) follows the text of one talk,
+  told whole by `Engines.voiceSaid(text, before, hinted)` once it is in, with the field's text before the
+  cursor then; only where the app asks (its switch on, a field that learns), else it calls `voiceEditsEnd`
+  and the engine never sees voice's text (review S6). A window, one per talk: Backspaces the app takes
+  (`EngineEvent.BACKSPACE` not handled) and commits of pinyin, 双拼, 九键 and handwriting not picked from
+  联想 (r13 U-30; tables, English, 联想, paste, and any commit with a character not Chinese, a mark or a
+  digit, end it, Q5) are followed by cells, a pinyin commit with the syllables typed for it
+  (`CommitRecorder`'s record, `VoiceEditsGlue.readingOf`; review S2); what goes in otherwise is reported by
+  the app (`voicePutIn`), and the context (`Engines.context`) ends it where what happened is not sure (the
+  field cleared, the cursor elsewhere, text before not as expected). A selection of the window is a gap
+  that what is typed next replaces, as Backspaces make one. A stretch of 2+ characters deleted whole and
+  typed again, the same length, each character sharing a toned reading with the one heard
+  (`EngineAssets.voiceReadings`; Q2), is asked about once a window (Q6) only if voice's own homophones, the
+  word added as the settings add it (one this window added at the place left out, review M4), would put
+  it in (`Words.takes`; so a common word, a word already added or blocked is not); a sentence's mark
+  deleted with it, the stretch is judged once its Chinese is typed again (review S5). A word asked about
+  is not asked again that window: one typed at the place after it is, but the first typed back again is
+  not (Q6). A syllable typed that none of the character's readings in the tables has asks nothing (voice
+  could not hear what would be added as typed). One character typed
+  again is asked about where a learned word of the user's covers it (§3 (a)); else it says once how to
+  have it remembered (`Ask.hint`, Q3; `hinted`, the app's word that it was said, stops the looking, S7).
+  The user's words are read and voice's table built once an edit (S7). `voiceConfirm(before, after)` reads
+  the field again before the notice. `voiceRemember` adds it by hand (`LexiconFacade.addWord`), then takes
+  off one this window added at the place (review M4/S8, `UserLexicon.unAdd`); `voiceForget` (its 撤销) takes
+  it off the added words only, nothing forgotten in the learning record (review R1), typed again learned as
+  if never added (S3). Nothing is followed while U-93 is off (turning it off ends the window, S4), a commit
+  is not learned from, or input finished (`voiceEditsEnd`). Memory only, the last 256 characters.
 
 ## Pinyin, from keys to candidates
 
@@ -68,12 +109,84 @@ they share the large model's slices at a pause (`session/RefineSlices`) too.
    carries every syllable that stretch may stand for, with `SyllableMatches` flags saying how it
    strays (fuzzy, typo, slipped onto a neighbouring key, initial only = 简拼, partial = still being
    typed, a Latin letter, raw). Unlike libime, every cut is kept and the language model chooses.
-   `PinyinSegmenter` (全拼), `ShuangpinSegmenter` (双拼, same graph), `T9Segmenter` (digits; with 连按
+   `PinyinSegmenter` (全拼), `ShuangpinSegmenter` (双拼, same graph; where a key and the next make a
+   syllable it reads the key alone too, an initial flagged `SyllableMatches.ABBREV`: 简拼 in the
+   middle, as Rime's `abbrev`, at `Penalties.abbrev` (−2) on top of the initial's −1, the least that
+   left input in whole syllables reading as before, dev/design/061-shuangpin-abbrev-measure.md;
+   over such a key, there or before on the path, the decoder offers only the words the user typed
+   or chose, `UserWords.typed`: a count, which the learning record's 30 typing days give,
+   `chosen`, or pinned under any keys (`LearnState.pins`, `UserModel.setPinned`: typed while pinned); of the dictionary, the merged ones and the imported alike, and none with no user
+   model or the habits off. `UserModel.typedBelow` keeps the dictionary's and the merged file's
+   nodes to them (`TypedNodes`), at each reading a word was typed at: a word that comes has its nodes
+   marked there and then, and all are marked anew when asked after one went (a count to 0, a forget,
+   an unpin), not on the key after each new word's first commit;
+   `PinyinDecoder.step` leaves the other nodes be, and looks no word ahead over such a key. A key read
+   as its neighbour is no key read alone (`Path.alone` counts the first, `Path.abbreviated` both): a
+   slip reads the whole dictionary. The user's decision (DECISIONS.md 「0.6.1
+   双拼中间简拼改 U」, dev/design/061-shuangpin-abbrev-research.md): every word behind a score of
+   syllables a key doubled a key's time on a phone;
+   `ime-eval pinyin --sp-abbrev off` reads without it, `--history <words.txt>` types words before
+   the run (`TypedHistory`), without which a run reads no key alone; what asks how the user typed reads the
+   graph without them nor slips onto a neighbouring key, `SyllableGraph.withoutOtherReadings`: whether the input ends on a syllable
+   (`endsOnSyllable`), whether `;` ends one (`readsAfter`), and whether a code `readsWhole` (`Retype` reads a code
+   so as whole syllables: on purpose, a word typed before read there by keys alone, second, is learned when picked
+   as any pick, but a delete and the same keys again is no correction to it). The words a key alone reads are placed by `HabitOrder` and `HabitRanker` (`Tier.ALONE`,
+   dev/design/061-sp-abbrev.md §3.3): one word typed, read exactly as whole syllables then two or more keys alone
+   (`HabitOrder.aloneShape`), goes first where the code reads no whole syllables to its end (`ufmuh`, `umuh`,
+   `x'm`) and right after the first where it does (`ky` kuai, `xm` xian), or where a word typed reads whole
+   syllables then the last key alone (`yr|y` with 原因 typed: the gate, §3.4, decided once a decode over the
+   start's words typed, `HabitOrder.gate`, not by the candidates read so far, so a page further on never swaps the
+   first two); up to three, the pins and the first learned here before them, `FLOORED` still second (after the
+   first of them, or before them all where the code reads whole), never `LIFTED`, and none past the three lifted
+   either (`spellings` leaves a word read alone where it is); such a word takes a slot of the order though
+   `ranksHere` fails (its reading has no slip). The review's M3 (no word typed under a code read whole) is gone.
+   `GroupedShuangpinSegmenter` reads the keys alone too (§3.1), `T9Segmenter` (digits; with 连按
    on, off by default, a key pressed again soon is its next letter and nothing else, `MultiTap`: the
    session puts it in as a letter typed as itself, upper case, in place of the digit, so `4 4` fast
    is `H`. The 2026-10-12 hybrid, read as keys too with a `Penalties.tapped`, went 2026-10-19: a
    learned 广告 overrode the h the key's preview showed). The 14 keys (拼音 14 键) are the same
    segmenter over a grouped layout: see [The 14 keys](#the-14-keys-grouped-keys) below.
+
+   **Keys tapped off-centre** (纠正错拼和按偏的键; dev/design/061-neighbour-correction.md). A typing key's
+   tap carries a `Touch` (pinyin/Touch.kt): where it fell across the key (`dx`, `dy`, ±0.5 its edges),
+   the key's size in dp and the keys around it (`Near`: what each types, its centre and size in the
+   tapped key's units). Where it fell is where the finger came down (`KeyGesture.fellAt`/`fellDown`),
+   for a tap that slid past the slop or out of the key too (the 14 keys' place on the key, `clickAt`,
+   stays NaN for those). The app measures it (`withTouch`, TypingKeys.kt, for the keyboards that are `TypingKeys`, from the keys drawn, by
+   `KeyBoxes.touch`: the next keys in the row and those of the rows above and below overlapping it; a key over two rows (a layout's rows="2") is in both rows;
+   a key on both halves of a split keyboard is the copy nearest), `HostKeyAction`/`SymAction` carry
+   it, the host passes it on as the key's payload (`Action.Key.touch`), `PressedKeys` keeps it by
+   place and `Segmenter.segment(input, taps, touches)` reads it. `SlipCost.of` scores reading a key as
+   one around it: the log of how much likelier the tap is under a finger aimed at it than at the key
+   hit (round Gaussians of σ 10 dp), never above 0, −2 more where the keys as typed spell a syllable
+   too (a legal slip, `ta` near `y`), none below a floor of each keyboard's. −3 on the nine keys' digits (pinyin's and
+   双拼's): below it they cost the 6T more than 061-neighbour-correction §7.2 allows, below. The rest by the user's
+   2026-11-16 rule, the loosest floor that turns no sentence typed in the keys' middle (σ 0.15, both halves × seeds
+   1–3) wrong (061-neighbour-18key-impl-report §5): 全拼 −1.75 (`PinyinSegmenter.SLIP`) and 大千 −1.75, with tones or
+   without, so neither reads a legal slip; 双拼 on the full keyboard −3.75 (`ShuangpinSegmenter.SLIP`); the pinyin
+   18 keys −4; the pinyin 14 keys −6; 双拼's 18 and 14 keys −5 (to −6 none turned wrong, but past −5 a key on the
+   18 keys took a sixth more arcs, over the tenth allowed: `NeighbourKeyWorkTest`); 注音九键 −2. So a tap in a key's middle reads as typed and
+   one at its edge reads the neighbour too. 全拼 (`PinyinSegmenter`: `SpellingIndex` has every
+   one-letter substitution, the segmenter keeps those the touches allow; never a syllable still
+   growing at the end of the input, nor consonants alone where tapped in the middle, 简拼 being
+   read), 双拼 on the full keyboard (`ShuangpinSegmenter`), 九键 (`T9Segmenter`, 1 and 0 no
+   neighbours) and the pinyin 14/18 keys (`T9Segmenter` over the groups, a tap put onto the key
+   meant at its edge nearest the key hit, its letters weighed by where it lies there, the 18 keys' too
+   since 061-neighbour-18key, the user's 2026-11-16), 双拼's 18, 14 and nine keys
+   (`GroupedShuangpinSegmenter`, by the same groups) and 大千 (`T9Segmenter` over `ZhuyinKeys.DACHEN`, a symbol
+   key's neighbours the symbol keys around it, a tone key none) read slips (061-neighbour-groups), and 注音九键
+   since the user's 2026-11-16 (`T9Segmenter` over `ZhuyinKeys.NINE`, a group key's neighbours the group keys
+   around it, floor -2: past it every slip that also spells as typed, so it reads only where the keys spell
+   nothing; the loosest that turns no sentence typed in the keys' middle (σ 0.15) wrong, with tones or without,
+   where -2.5 turned one with no tones; 061-neighbour-18key-impl-report). A key with no place (a hardware keyboard, TalkBack's double tap): 全拼 reads a
+   slip only where the keys spell nothing (the 0.6.0 rule, `SlipCost.fixed`) and never consonants
+   alone; the others none. The decoder adds the slip's cost in the arc's score where it scores the syllable (`step`,
+   `startWords`), so `Lattice.same` sees it and a kept lattice is dropped where it changed; an arc over
+   a slip is marked `SLIPPED`, apart from one over a key alone (`ALONE`; `Lattice.mark`: `Path.abbreviated` past
+   `Path.alone`), and what reads a code read whole leaves out only the slips (`takes()` where `holdsSlips`, as
+   `withoutSlips` does in the graph: a key alone is the user's 简拼, 061-sp-abbrev §3.6); a code shows the syllable as meant (`Reading.slips`), and a word read
+   through a slip is learned under the keys meant (`CommitRecorder`, `PressedKeys.keys(…, slips)`),
+   so what the keys typed read as typed is not raised by it (user's N1-A).
 2. **Decode.** `PinyinDecoder` puts every dictionary word along every path into a lattice and beam
    searches it, scoring each step by `WordScorer` (the n-gram model, through `UserScorer` with the
    user's counts added; a word of the user's whose text the model has, added by hand or typed at a
@@ -83,7 +196,23 @@ they share the large model's slices at a pause (`session/RefineSlices`) too.
    its score, its layer's prior, the context of 联想 and the words 联想 offers after it, and the
    reading handwriting takes it at) plus the `Penalties` of how the input was read. It keeps whole sequences
    (a real N-best, not trigram-merged), and reuses the beams of the unchanged prefix so a key costs
-   only its last syllables.
+   only its last syllables; the words collected from a position whose collecting read no edge where
+   the graph changed (`SyllableGraph.sameUntil`) are kept too, which 双拼's 简拼 in the middle needs:
+   every key read alone made collecting from every position grow a key's time with the input. Of a
+   position whose collecting did read there, the arcs ending before it are kept and only the steps
+   that crossed it are taken again (`collectOn`, from the steps `collectFrom` and it keep a
+   position: those onto where the graph changed or past it, at least the last key; not while a tone
+   is typed, a word's tones being asked of the whole path).
+   The first words keep their scores and order while the arcs from the start are the last decode's
+   and none reads to the end.
+   `PinyinDecoder.work` counts what a decode took (arcs; steps, which guard `collectOn`; words scored
+   in the search; first words scored anew, which guard the scores kept), the same on any
+   machine: `ShuangpinKeyWorkTest` (`:lib:ime-eval:uatTest`) holds a 小鹤 key on the app's data
+   under ceilings by it, and each key's reading to a decoder's made afresh; `NeighbourKeyWorkTest`
+   holds the keys read by where they were tapped (full pinyin, 小鹤, 九键, 14 keys, 双拼's 18, 14 and nine keys,
+   大千, clean taps) to a tenth over the same input with no place (061-neighbour-correction §7.2; it was 3.5% at most; 小鹤
+   with the 3000 likeliest words typed, 8% of the arcs: with none typed a key takes so little that
+   the slips' two hundred arcs are 12% of it).
 3. **Rank.** At `ModelLevel.MEDIUM` and up, `Reranker` adds the 4M sentence model's score of the
    decoder's best whole-input readings (after the text before the cursor) to the decoder's score;
    at `HIGH`, while the user pauses, the 25M model refines the top readings in time slices
@@ -156,7 +285,8 @@ they share the large model's slices at a pause (`session/RefineSlices`) too.
 
 - **Kept in sentences** (`session/Enforced`, from `HabitOrder.enforce`): pins and the user's firsts
   of two or more characters (a first only after its word), and a word added by hand that is the only
-  word over its keys (`PinyinDecoder.arcsBetween`), are put into the decoder's sentences where the
+  word over its keys (`PinyinDecoder.arcsBetween`; where those keys read whole, 双拼's arcs over a key read alone
+  are not counted, so a word typed so read leaves the added one alone there), are put into the decoder's sentences where the
   sentence has word ends at both of theirs; two that overlap, neither. The sentences are taken of
   `moreSentences` (the beam's) so as many stay. This runs right after decoding, before the habit
   levels and the sentence models, so a pause cannot undo it. A pin or first over the whole input is
@@ -193,6 +323,16 @@ they share the large model's slices at a pause (`session/RefineSlices`) too.
   under 简拼 the first is the model's alone, what was typed in full never moves it (D32). The
   user's own words come next to it there by the ranking, not by the scores. Do not add per-case
   boosts or global penalties for "my word should win" (both were tried and lost on the sets).
+- **Keys read alone** (双拼, all four keyboards, dev/design/061-sp-abbrev.md §3.5, §3.9). An arc carries
+  `ALONE` where its path reads a key alone and `SLIPPED` where it reads a slip too (`Lattice.mark`); `takes()`
+  holds back only `SLIPPED` under a code read whole. The words from the start are the best `DEFAULT_WORDS` (64) by
+  score and, where the graph reads keys alone, up to `TYPED_SLOTS` (8) more of the words typed read with no slip
+  (`rankedWords`): on the grouped keyboards a word typed is otherwise not among the 64. The slots stay right after
+  the first 64 whatever more is asked, so a list read further (`PinyinSession.readUntil`) begins with the one before. Over a key alone the
+  decoder walks the dictionary node's children that have a word typed below (`collectTyped`,
+  `UserWords.nextTypedBelow`, `TypedNodes.nextBelow`) instead of looking up each of the key's 20–60 syllables;
+  `Reading.matched` walks a node's children the same way where they are few (`WALKED_PER_MATCH`). The lattice is
+  the same either way (`PinyinDecoderTypedTest`, `ReadingSlipsTest`).
 - **Across one keyboard's spellings** (U-20, D32 B; the user's rule in docs/pinyin.md 完整拼音和简拼).
   Not in the scores but in the ranking (`HabitRanker.spellings`): `SpelledForm` tells a code's keys
   as the full spelling, the 简拼 (a key a syllable) or a part of a word of two syllables or more, by
@@ -314,7 +454,11 @@ they share the large model's slices at a pause (`session/RefineSlices`) too.
   tone of it: which tone is the character's own is the data's to say.
   候选词注音 (`EngineSettings.candidateReading`, off by default) puts `readings` on each `Snapshot` and
   `Choice`: one string a code point, by `CandidateReadings`, from `Session.readingOf` (pinyin's words as
-  typed) or else the text. Engines adds them for every input method but English; pinyin's and 双拼's
+  typed) or else the text. A character whose tone is not known is its syllable toneless in pinyin and
+  left empty in zhuyin (where it would read as the first tone); read by its text, a character takes a
+  dictionary syllable of known tone first; with readings on in the pinyin style, every cell keeps the
+  reading line above, so one without a reading (an emoji, English) sits on its neighbours' baseline; the
+  zhuyin style, drawn to the right, adds no line, and a character left without one is on the same baseline. Engines adds them for every input method but English; pinyin's and 双拼's
   hints (all readings) go while it is on. The host keeps them only while the shown text (traditional)
   has a code point for each; the bar is taller for pinyin (`CandidateBarHeight.dp(textSp, style)`).
   While it is off, those hints become `readings` instead (`CandidateReadings.ofHint`: a misreading's
@@ -332,9 +476,10 @@ they share the large model's slices at a pause (`session/RefineSlices`) too.
   candidate wider; zhuyin a column a reading). A settings change that touches only `candidateReading`
   keeps the sessions (`Engines.settings`); the host then sends `Keyboard.RECALL` (`HostCore.configure`)
   so what is composing is read again, and the app makes its views anew with `ViewRebuild.READING`, which
-  does not end the composition. Handwriting's 注 key (`ReadingToggle`: off ↔ the last style used)
-  sets the same option.
-  A character's card (`CharCard.of`, `Engines.charCard(im, index, text)`): for a candidate the session
+  does not end the composition.
+  A held candidate's card (`Engines.card(im, index, text, paged, shown)`, a `CandidateCard`; the text checked
+  against the candidate as the learning menu checks it, a traditional shown 銀行 taken for the engine's 银行
+  and its characters shown): `Looked`, a character's full card at once for a candidate the session
   says was looked up (`Session.lookedUp`: handwriting's characters, full pinyin's `u` parts and stroke
   lookup, not what was typed nor what may follow; `paged`, the index from the page shown), its readings
   in `ordered(card = true)`'s order with up to two words each (`CharReadings`: a dictionary's words only,
@@ -346,8 +491,17 @@ they share the large model's slices at a pause (`session/RefineSlices`) too.
   for a character without, the stroke table's (`Strokes`) of Unihan's count, else its first (the table's orders
   sorted, not rime-stroke's own order; the five kinds only, a 折 `StrokeShape.ZHE`), the strokes counted as the
   order shown is (Unihan's count may be Taiwan's glyph's: 范 9 beside the mainland's 8); what is
-  not known is null. The app shows it above the held candidate's menu (`CharCardView`, laid out by
-  `CharCardLayout`).
+  not known is null. Any other candidate with a Han character in it: a compact line of its reading and,
+  a tap away, `Char` (one character: `CandidateReadings.lineOf`, háng / xíng…, and its card) or `Word`
+  (two to `WordCard.MAX_CHARS` = 8 Han characters: `WordCard`, the word in pinyin and zhuyin, a row each
+  Han character with its radical and strokes); more than 8, `Line`, the reading alone. The readings are the
+  bar's: `Engines.readingsOf` takes the same two steps as `readingAndHint`, sharing its `above` (a hint
+  that is a reading, drawn above it) and `read` (else the text as the session typed it), in both styles whatever 候选词注音 is; the line in its style (off: zhuyin on the zhuyin
+  keyboards, else pinyin). A word's row reads `CardReading` (syllable and tone, null tone where none is
+  known); `Engines.charCardOf(char, reading)`, stateless, makes that character's card with the reading first
+  (`CharCard.of(first = …)`, `Row.inWord`; prepended when the dictionary's list has no such reading).
+  Emoji, English, quick input's entries: none. The app shows it as the held candidate's menu head
+  (`CardNav`, `CompactLineView`, `WordCardView`, `CharCardView`, laid out by `CharCardLayout`).
 - **Strokes.** `u` with nothing typed starts `StrokeLookup` (`h s p n z` = 横竖撇捺折); any other
   letter turns it back into pinyin (`usb`, or `uan` as a slip for `yan`), typed at the strokes'
   cursor, which they keep as pinyin keeps its own.
@@ -356,9 +510,16 @@ they share the large model's slices at a pause (`session/RefineSlices`) too.
   stroke drawn on the keyboard comes as `Keyboard.strokeKey` (0xF0110 up, `Keyboard.STROKES`, one
   per `h s p n z`; `KeyRouter` swallows it in any other input method and a temporary mode, so it
   is never typed), `Action.Stroke` to the session. While something is typed it keeps, in the
-  inner session's order, the candidates whose first character starts so in any of its orders
-  (`Strokes.startsWith`, a sorted char → entries index made on first use); an emoji or mark goes
-  as the one before it, a Latin word goes. The next stroke is that character's next. It looks
+  inner session's order, the candidates whose first character starts so: in the mainland's order
+  where `CharInfo.orderKeys` has one (lexicon/stroke-order.tsv, the card's; rime-stroke's other orders
+  are mostly Taiwan's and start otherwise for 473 of those 6940, 艳 丿一一丨: ST-120; compared in place,
+  `CharInfo.orderStartsWith`), else, for the ones it lacks (some, most of them traditional or rare), in any of
+  rime-stroke's (`Strokes.startsWith`, a sorted char → entries index made on first use); an emoji or mark goes
+  as the one before it, a Latin word goes. The next stroke is that character's next. Then `singles`
+  (首页至少几个单字, `EngineSettings.strokeSingles`, 0–5, 2 by default) of the kept characters alone (one
+  ideographic code point, an emoji after one going with it) are put right after the kept first, the
+  words they passed after them in their order; a first that is one alone does not count. `inOrder`
+  is the kept list as filtered, `keptAt` the order shown, indices mapped through it. It looks
   through the inner candidates 32 at a time as a page asks, at most `LOOK_AHEAD` (2000); indices
   (`Select`, `Pick`, `Forget`, `Pin`, `offers`, `why`) are mapped back to the inner session's.
   Backspace takes the last stroke, then the pinyin; a pick or a key it reads ends the filter and is
@@ -368,8 +529,8 @@ they share the large model's slices at a pause (`session/RefineSlices`) too.
   of the pinyin, the rest stays typed and the key is swallowed (`Keyboard` keeps a key not read
   handled while something is still composing, so the app never types it before the rest). Nothing kept leaves the bar
   empty and Backspace takes the stroke back. The preedit is the inner one, a space, the strokes
-  (`Strokes.shown`). `ime-eval strokes <pinyin.data> <stroke.data> <set> [--first-char] [--scheme t9]
-  [--rerank <sentence-model> --refine <sentence-model-large>]` times it (the first character typed by
+  (`Strokes.shown`). `ime-eval strokes <pinyin.data> <stroke.data> <set> [--charinfo <charinfo.data>] [--first-char] [--scheme t9]
+  [--rerank <sentence-model> --refine <sentence-model-large>]` times it (`--charinfo`: drawn and filtered by the mainland's orders, as the app; the first character typed by
   the sample's exact reading, samples without one left out, an untimed warm-up first): on
   pinyin-chat.tsv's first characters alone (a syllable's homophones, 1941 samples) a stroke's snapshot
   is 0.05 ms p50 / 0.27 ms p95, the look through to 2000 0.31 / 1.54 ms, first right after 0–4 strokes
@@ -413,13 +574,18 @@ are offered where nothing is learned (a password field, `Session.learning` false
   under which a setting says 「拼音 · 14 键」) is the grouped session: a `T9Segmenter` over
   `G14`, no abbreviations, `spell = true`, wrapped in `ForgetsInTables` as the nine keys are, no
   glide, no `u` stroke lookup (笔画筛选 wraps it as every pinyin session). It is made at the first code. `PINYIN_KEYS18` (`engine-pinyin#keys18`,
-  「拼音 · 18 键」) is the same over `G18`, fed `Keyboard.pinyin18Key`; `T9` (`engine-t9`) survives only
+  「拼音 · 18 键」) is the same over `G18`, fed `Keyboard.pinyin18Key` and its taps `Keyboard.pinyin18Tap`; `T9` (`engine-t9`) survives only
   as pinyin's nine-keys session (「拼音 · 九键」), fed `Keyboard.PINYIN_NINE` — never a listed input
   method (0.4's 九键拼音 is merged into pinyin by `NineKeysMerge`, run from `KotlinHost.mergeNineKeys`
   when the profile is read; each read of a 0.4 profile merges it, but pinyin's keyboard is set and
   the user told only once, `Internal.nineKeysMerged`, so a profile not written back never undoes a
   keyboard chosen since; its notice waits in `Internal.nineKeysUnseen` till said on the keyboard, so a
-  process ended before any keyboard showed tells it at the next start; in direct boot the config is none of the user's and nothing is merged). On
+  process ended before any keyboard showed tells it at the next start; in direct boot the config is none of the user's and nothing is merged). 0.6.0's handwriting input method (`engine-handwriting`) is
+  dropped from every group the same way by `HandwritingRetire` (`host/`, through `Profile.retireHandwriting`,
+  run from `KotlinHost.retireHandwriting` at each read): first of a group, pinyin takes its place (moved, or
+  added); its 繁体 in chttrans goes to pinyin there, else is dropped (`HandwritingRetire.traditional`); once
+  (`Internal.handwritingRetired`) the toolbar's 手写 is pinned and, where it was first, turned on, and the user
+  told (`Internal.handwritingRetiredUnseen`, said on the keyboard as 九键's notice is). On
   the nine keys every digit is a `PINYIN_NINE` code while typing: one the engine doesn't read (0)
   ends the input with the first candidate and goes in after it (`Keyboard.char`), as 0.4 did. The router's IM is `engine-pinyin` on every pinyin keyboard;
   `ImKeyboards.session(im, keyboard)` names the session. `KeyboardPair` stands for 拼音's keyboard: a
@@ -461,7 +627,7 @@ are offered where nothing is learned (a password field, `Session.learning` false
   and `t9:*` as the nine keys are from full pinyin; the words and their counts are shared. The kind
   and the codes are the record's format: never changed once in a release. 「已学条目」 names `qk:` as
   「14 键」 and shows its keys as letters (`bn ui`, `NineKeyLetters.shown`).
-- **What does not apply**: typos and neighbouring keys, glide, 拆字, 中英混输 (the hardware keyboard
+- **What does not apply**: typos (keys tapped off-centre are read, see Segment above), glide, 拆字, 中英混输 (the hardware keyboard
   still has the last two). Fuzzy pinyin, u↔v included, does; so do `rq`/`sj`/`xq` and the custom
   phrases' keys, typed as their letters' keys (`PhraseKeys`, A1).
 
@@ -489,9 +655,14 @@ setting either: it reads the codes.
   reads each syllable as the scheme's two keys turned into their groups' codes; the graph has one
   path, the ambiguity in each edge's syllables.
 - **Segmenter.** `GroupedShuangpinSegmenter(scheme, letters, fuzzy)`, built as
-  `ShuangpinSegmenter` is (pairs, a key alone as PARTIAL/INITIAL, a/e/o alone, fuzzy), but reading no
-  slip, not even ü typed with its own key: the grouped keyboards correct nothing (the user's 2026-11-03;
-  纠错 says 不适用 for them and its value is ignored).
+  `ShuangpinSegmenter` is (pairs, a key alone as PARTIAL/INITIAL, a/e/o alone, fuzzy, and 简拼 in the middle:
+  a key that makes a syllable with the next read alone too, an `ABBREV` initial for the words typed only,
+  061-sp-abbrev §3.1; `abbreviations = false` for measuring, as `ime-eval --sp-abbrev off`), but no
+  spelling slip, not even ü typed with its own key (the user's 2026-11-03). With `neighbours` (纠错 on,
+  061-neighbour-groups) it reads a key tapped by its neighbour's edge as that key, as `T9Segmenter` does
+  over pinyin's groups: each key's touch onto the key meant (`slipped`), its cost `SlipCost`'s (floor −5 on the
+  18 and 14 keys, −3 on the nine keys' digits as on pinyin's; above); a pair read through a slip carries its slips,
+  its arc marked `SLIPPED`, as 全键盘 双拼's are.
   It and `T9Segmenter` are `KeyedSegmenter`s: `letters`, `isKey`, `asTyped`, `initialsOf` (the
   bar's initials: the scheme's initials on the key's letters, 自然码's v zh) and `started` (a
   syllable not whole yet shows as its initial in 双拼, as many letters on the nine keys).
@@ -535,16 +706,34 @@ setting either: it reads the codes.
   held as unreadable, not writable or a failed write is pinned again at the next start; direct boot
   settles nothing. Learning under a dropped scheme (`sp:Ziguang`, `spk:Ziguang:…`) is kept as it
   is, listed and forgotten by its old name (`ShuangpinNames` names all eight).
-- No tap position on G18 yet; `Keyboard.TAPS` leaves indices 26–51 for it (design k14-tap §1.4).
+- Pinyin's 18 keys' taps (061-neighbour-18key, the user's 2026-11-16) are a block of their own,
+  `Keyboard.TAPS_18` (U+F0500 on, `pinyin18Tap(code, at) = TAPS_18.first + (code − G18_BLOCK.first) × 17 +
+  round(at × 16)`), not `TAPS`' indices 26–51 the design left (k14-tap §1.4): 双拼's 18 keys send the same G18
+  codes, so a tap there would read as 双拼's; as `PINYIN_18` is pinyin's alone (`KeyboardPair.pinyinKeyed` →
+  `PINYIN_KEYS18`), so are its taps. Decoded, typed letters and quick phrase as `TAPS` (`Keyboard.isTap`,
+  `untapped`, `typedLetter`). Every key sends one where the layout leans; only a key of two letters a–z
+  (`NineKeyLetters.weighs`: WE RT IO SD FG JK XC BN; not pinyin's L, the group `l;`) has its own letters weighed by it,
+  and the engine, the app and the eval count alike. A key of one letter's place is for a slip from it alone: the key
+  slipped onto has its letters weighed by where the tap lies on it (`T9Segmenter.slipAgainst`, `placeOn`; the code
+  review's S1). Measured (ime-eval `--touch k18:…` with `TouchSim.placed`, held-out py18, rerank+refine,
+  s0.2/s0.3 × seeds 1–3): dev/design/061-neighbour-18key-impl-report.md.
 - **A layout's own groups** (060-render-p3 T9a, the engine part; T9b, the app's: app.md, grouped keys).
   `NineKeyLetters.custom(groups)` (each a key's `letters=`, rows apart by a space): `problem` refuses
   groups that leave a letter of a–z on no key (ü as v), a key of 0 or more than 5 letters (a–z, `;`), a
-  letter twice on one key, or more than 30 keys. Groups whose letters are G14's or G18's are those
-  keyboards (their codes, their `qk:`/`spk:` record: the built-in keys move no data); any other gets
+  letter twice on one key, or more than 30 keys. Groups whose letters are G14's or G18's, in any order
+  (as many, the same set: 061-custom-layout §6, L4), are those keyboards (their codes, a group's code its first
+  letter's wherever its key is; their `qk:`/`spk:` record and 双拼: the built-in keys moved about move no data;
+  written in rows, the rows put in the built-in order, `rowsOf` the app's GroupedKeyboard hands its taps,
+  its `Grouping.letters`, for where a tap falls on a key stacked: review L4 S1; the engine's G14/G18 have one row a key and
+  read a place along it: a stacked key's tap is sent with where down it fell, a slip onto one placed down it,
+  `Near.stacked`, `T9Segmenter.placeOn`).
+  A group is its letters in their order: `wq` is not the 14 keys' `qw` (a tap's place goes against the first letter on
+  the left), a grouping with it one of its own, pinyin's alone (docs/settings.md); any other gets
   codes `NineKeyLetters.CUSTOM_BLOCK` (U+F840 + its key's index, freed by `Action.Syllable.IDS` 98 → 97,
   so `Keyboard.SYLLABLES` ends at U+F83F): a stable encoding, kept in its `qk:<tag>` record (and backups),
   never to move; the record filed under its `tag()` (the keys' letters, commas between;
-  `NineKeyLetters.filedAs` reads one back, G14, G18 or a layout's own, never NINE_SP). Making,
+  `NineKeyLetters.filedAs` reads one back, G14, G18 or a layout's own, never NINE_SP; a tag of G14's or G18's
+  groups in another order is still read as one of its own, as 0.6.0 filed such a layout, its learning no longer typed on). Making,
   comparing (`SceneGroups.letters`, `mismatch`, `leaningOf`) and filing are pure; `ofCode` reads a
   custom code as the keyboard `NineKeyLetters.inUse` last named (the session typing on it, T9b), none
   past its keys. Rows are where a tap falls, not the keyboard: with or without them it is equal. Pinyin reads them (`readsCode`), never text (`isCode`).
@@ -578,7 +767,10 @@ setting either: it reads the codes.
 - **Segmenter.** `T9Segmenter` over `ZhuyinKeys.NINE` / `DACHEN` with a `KeySpelling.Bopomofo`: each
   syllable spelt by `Zhuyin.of`, a symbol a fixed key, an initial its zhuyin initial. A tone is a separator
   (`SyllableGraph.isSeparator`); `SyllableGraph.tone(edge)` reads it after the edge. On 大千 a space after a
-  syllable with no tone is tone 1 (`KeyedSegmenter.tonesBySpace`), else it picks the first candidate.
+  syllable with no tone is tone 1 (`KeyedSegmenter.tonesBySpace`), else it picks the first candidate. With 纠错
+  on 大千 reads a symbol key tapped by its neighbour's edge as that one too (`ZhuyinKeyboard` a `TypingKeys` there,
+  tone keys none; 061-neighbour-groups); so does 注音九键 a group key by the group keys around it (its group
+  codes, since the user's 2026-11-16).
 - **Keys and bar.** 注音九键 has the tones ˉ ˊ ˇ ˋ a key each down the left (˙ on ˉ's long press and
   swipe); the key after ㄖㄥㄩ's group is 分词 (tone 0) while something is typed, else a comma as punctuation
   maps it. A tone with nothing typed is not read (`PinyinSession.reads`): it types nothing. The bar's
@@ -600,7 +792,24 @@ setting either: it reads the codes.
 `noSortInputLength` in table order, then shorter codes first), the table's own before the words
 from outside it of a code as long (U-28). Auto-select commits a
 lone full code, or the first candidate when the next key leads nowhere; 空码 is dropped by the next
-key. The code keeps a cursor as pinyin's input does; a key typed before its end is put in there and
+key. A tap with a place (`Action.Key.touch`, 纠正错拼和按偏的键 on: `SessionFactory` hands it
+`TableSlips.SLIPS`, a `SlipCost` with floor −1.5) is read as a key around it only where the key as
+typed leads nowhere (an empty code, or 顶字) and that one leads on (`TableSlips`, asked by `TableSession.slipped` before
+anything else reads the key: the nearest, then the one whose first entry the word model weighs more;
+061-neighbour-table): never a code's first key, one past a full code or an end key, one put in before
+the code's end, the wildcard, the pinyin key, a selection key or an end key, nor a code with the wildcard,
+nor as one of them. Where the key would commit something (`TableSession.topped`: the first candidate shown,
+as `autoCommit` takes it, by 顶字 or for a code that waits, below; a 简码, or a part of a code that shows the
+character first, then the next code's first key, typed so on purpose most often) only past
+`SLIPS.toppingFloor` (−1: the loosest that changes no word typed in the keys' middle, σ 0.15, five tables, both plans, seeds 1–3, both halves, where −1.5 changed one; a looser hand changes a few, 覅 → 要饭; −0.1 read a third as many slips) and for a key whose code's first table entry is another text the word model
+weighs at least as much (the table's first, not the order the session would show: that is weighed only for
+the code typed). Codes read toward pinyin entries alone (五笔拼音) are not read. A code with a key so read
+(`TableSlips.marks`, a bit per place, moved as keys are put in and deleted) never commits itself as it is
+typed; where its one candidate would have (`TableSession.waits`), the next key that cannot go on commits
+it through `autoCommit`, as a full code's next key does, so the space after it is the new code's (the
+user's call, DECISIONS「形码临键纠错：改读出的唯一码自动上屏」); else it waits for a space or a pick.
+`ime-eval table-slips` measures it on whole codes and on the parts that show a word first (`--plan prefix`). A code with entries, and
+typing on target, are as without a place. The code keeps a cursor as pinyin's input does; a key typed before its end is put in there and
 never commits by the next-key rule (the code is being mended, not full), a lone full code still
 commits. `pinyinKey` (五笔 `z`, 二笔 `[`) looks a character up by pinyin, showing its code (the
 cursor then the pinyin's);
@@ -693,7 +902,10 @@ On pinyin.tsv (2026-10-16), the table's order → the word model (low): 五笔 7
 ## English
 
 `EnglishSession`: word-at-a-time, as Gboard. The candidates are the word typed and what it may be
-(`EnglishDecoder`: spelt, started, or spelt with a slip); a word that is none is corrected and
+(`EnglishDecoder`: spelt, started, or spelt with a slip); a key typed as one beside it costs by where
+the tap fell (`Action.Key.touch`, kept a place each beside the input; 061-neighbour-english): pinyin's
+`SlipCost` (σ 10 dp, never below 0), at most `far` (a tap in a key's middle costs about as much: 2.2–2.8 on
+a phone's keys 32–36 dp wide), the fixed `near` where a key has no place (a hardware key, TalkBack); a word that is none is corrected and
 space commits the correction; backspace right after takes it back and that word is never corrected
 again; so is a word picked over its correction, and one whose correction a tap back takes back
 (`Corrections`: the cursor put right after a correction of the field's last few, the word typed is
@@ -746,7 +958,11 @@ On the nine keys English takes `Action.NineKey(digit, upper)` (the host `Keyboar
 (`'` from 1, kept in place) and `NineKeyWords` reads it: an `EnglishDecoder` whose substitution is
 `nineKeyCost` (a digit fits any of its `NineKeyLetters`, the same 按键字母 as pinyin's nine keys; a letter only
 itself) and whose every edit costs `NINE_KEY_COSTS`' `NEVER`, the user's own words matched the same
-way, then words as long as the keys first, completions after, each by score, in the case Shift gave
+way; a digit tapped with a place (`Action.NineKey.touch`) also fits the letters of the digit key next
+to it that the tap leans to (`EnglishDecoder.nineKeyTap`: pinyin nine keys' `SlipCost`, floor -3: on keys
+80–88 dp wide a tap within about a tenth of the width of that edge), 2
+dearer where some word of the keys as typed is among the words (`legalSlip`, as pinyin's legal slip:
+without it one word of 19669 typed on target went wrong, `not` read `you`), then words as long as the keys first, completions after, each by score, in the case Shift gave
 each key. A letter a long press pinned (`Action.NineKey` with the letter, `Keyboard.NINE_LETTERS`
 from 0xF0060; where English does not suggest the addon swallows the digits and types the letter) is
 itself among the keys, and marks the word the nine keys' (`pinned`) though no digit is left: never
@@ -756,7 +972,13 @@ preedit and `typed()` are the first candidate, else each key's first letter
 (`NineKeyWords.firstLetters`, a guess not learned), so space, punctuation, Enter and the
 arrows commit a word, never the digits; the cursor stays at the end; `keypad()` picks the nth
 candidate (`picksByDigit`). `ime-eval english --keys nine` measures it (2026-10-20, english.txt:
-95.9% first, 98.4% in the first three).
+95.9% first, 98.4% in the first three). `--hand s0.2` (TouchSim's hand, either keyboard) taps each key
+with a place and gives rows as the session reads it (`-t`) and as with `readsTouch` off (`-0`):
+clean, a slip a word (`slip1`, a key landing in one next to it) and, on the full keyboard, the
+`--noise` slips (`slips`). 2026-11-15, english.txt, s0.2: full keyboard clean 87 → 71 words wrong
+(26 put right, 10 newly wrong, as `rammy` → `army`), slips fixed 73.8% → 75.8%, a slip a word
+80.2% → 82.7% (first three 93.4% → 96.2%); a looser hand (s0.3): clean 87 → 74 wrong, but slips fixed
+73.8% → 73.4% and a slip a word 80.5% → 79.3%. Nine keys, s0.2: clean the same words, a slip a word 0% → 72.9%.
 Each char a screen key types there is sent as `EngineEvent.TYPED` (`Keyboard` passes it on, then
 `Session.typed`: the session's edge, and its known text if it knows the text before it). The
 screen's Backspace there goes the same way as `Session.ERASED`, as does the session's own
@@ -803,34 +1025,25 @@ pinyin set (`--shuangpin`, `--keys nine`, `--table`): on pinyin-chat (readings c
 96.5% in the first three, 0.4 ms; 双拼 (自然码) 82.1% / 94.2%; the nine keys 53.5% / 76.7% (a key three or four letters, the path reads far more; the weights moved it under a point); 五笔 70.6% / 90.0%,
 仓颉 94.5% / 99.3% (the characters it has). These times are with no user model: with one, a glide works out again only the words the user has counts of, at the nodes (pinyin) or entries (a table) it reaches, the rest kept till a word gets its first count, is forgotten or blocked; unmeasured. A table entry with no count of its own keeps its score meanwhile, though a counted word is in its likeliest split (你们 as 你 + 们). The setting is off by default: a sloppy fast tap may glide.
 
-Writing on the keys (键盘手写, design 060-kbd-handwriting): `InkOver` (`engine/handwriting`) wraps,
-outermost, the session of each input method that `InputMethodCatalog.writesOnKeys` (all but English
-and handwriting; over a `GlideSession` and a `StrokeFilter` where those are, which `Engines.glide`
-unwraps). An `Action.Ink` goes to a `HandwritingSession` of its own, made at the first as
-handwriting's is (`SessionFactory.handwritingSession`); while that shows anything (what is written,
-its 联想) every action is its, but a letter, which puts its best sentence in and is typed into the
-wrapped session in the same snapshot; what it put in is told the wrapped session as an
-`Action.Context`, and a new sentence written after the wrapped session put text in is told the text
-before anew. An Ink while the wrapped session has input typed (`InkOver.typing`, `Engines.typedOnKeys`)
-is dropped (`HandwritingSession.drop`: taken, so `inkSent` holds it not, its piece ended); one while it
-offers 联想 starts writing and drops the offer. A Backspace the app does and a key passed on reach
-the handwriting too, so a sentence it put in and deleted at once is taken back (U-03).
-`Engines.ink`/`inkSent` take the input method (its shown session, a pair's keyed one), and `inkEnded`
-and the pieces ended over a drop of the sessions count every handwriting session made. When a touch
-on the letters is a stroke is `KeyInkGesture` (`input/keyboard`), which `GlideTouch.down` takes (`ink`,
-and `typed`: `Engines.typedOnKeys`, false while what shows is handwriting's): `START`, half a key any
-way (up or down at most 32dp, `GlideInput`'s cap, so before the key's swipe; across always half a key), not within `TYPING_MILLIS` (500 ms)
-of a key typed (a letter, or another key lifted, `keyLifted`, unless after a stroke and no letter: a
-space in the writing is no typing; design 060-kbd-handwriting-start), then every touch a stroke from
-its down till the pause; a tap that started the input (nothing typed at its down, not typing), a
-stroke within the pause after it, `NEAR` it (2.5 keys), and no other key between (a long press, a cancel, a
-second finger, a touch in the gap forget it), taken back as the first dot (`takeTapped`), by state,
-not by text, as the nine keys and zhuyin show no letter of the key. The keyboard sends no backspace
-for it: the piece's first reading carries `Action.Ink.takesBack`, and `InkOver` deletes the letter
-(a Backspace to the wrapped session) only when that session's input is the one action that started
-it (`typedActions == 1`); anything else typed, picked or committed between, and nothing is deleted
-(the Ink then dropped as any while typing). Decided on the fcitx thread, where what was typed is
-known, not from the UI thread's guess of it.
+Writing on the keys (the toolbar's 手写, designs 060-kbd-handwriting and 061-handwriting-toolbar; 0.6.0's
+handwriting input method and 键盘手写 merged into it): `InkOver` (`engine/handwriting`) wraps,
+outermost, the session of each input method that `InputMethodCatalog.writesOnKeys` (all but English;
+over a `GlideSession` and a `StrokeFilter` where those are, which `Engines.glide` unwraps). An
+`Action.Ink` goes to a `HandwritingSession` of its own, made at the first (`SessionFactory.handwritingSession`,
+`Kinds.HANDWRITING`, no input method of the list); while that shows anything (what is written, its 联想) every
+action is its, but a letter, which puts its best sentence in and is typed into the wrapped session in the
+same snapshot; what it put in is told the wrapped session as an `Action.Context`, and a new sentence written
+after the wrapped session put text in is told the text before anew. An Ink while the wrapped session has
+input typed (from before 手写 was on, a hardware key, a swipe's command) first puts that in as space would,
+its first candidate (a pinyin's a word at a time, more than its longest typed as it is), and is written
+then, in one snapshot. One while it offers 联想 starts writing and drops the offer. A Backspace the app does
+and a key passed on reach the handwriting too, so a sentence it put in and deleted at once is taken back
+(U-03). A reset (the field left, the keyboard hidden or made anew) puts the written sentence in as it
+shows (DECISIONS A2). The last action the handwriting's (`lastInk`), what is read again is its though it
+shows nothing (its 联想 turned off, then taken back). `Engines.ink`/`inkSent` take the input method (its
+shown session, a pair's keyed one), and `inkEnded` and the pieces ended over a drop of the sessions count
+every handwriting session made. Which touch is a stroke is the app's: with 手写 on (`HandwritingMode.writes`),
+every touch on the letter area (`BaseKeyboard`), none elsewhere; no threshold, no taking a tap back.
 
 ## Handwriting
 
@@ -992,7 +1205,20 @@ place. Rules that keep old files and old users working:
   commit flagged `NO_PREDICT` or `NO_PAIRS`
   (`Commit.UNPAIRED`) counts no pair and no 联想 pick (a `pred` row) on replay: a tail written by a build that still paired them
   loses those pairs at the next open, as meant; an older build reading the record pairs them. A clear that
-  fails on disk says so (`LearningResult.Failed`) and still saves a backup if they are on.
+  fails on disk says so (`LearningResult.Failed`) and still saves a backup if they are on. An undo
+  (`LearningOps.undo`) whose rewrite of the record failed answers `Failed` too, saving no backup: the act on disk, the
+  rewrite that drops it threw (the record took no rewrite, or the disk filled in it). An act whose records were never
+  written (refused while storage was full, or the record not saving) is taken back in memory and answers `Done`, nothing
+  on disk to drop (`LearnLog.dropUnwritten`: the state made the file's again); of an act written in part, the rewrite
+  drops the part written. Both make the state the file's, so an act the file refused records of is taken back only
+  while those are all that is unwritten (`LearnLog.unwritten` counts them, R25 F8066): with anything else in memory
+  alone (learned before the act, as a word learned after storage filled and then deleted, or after it) the undo answers
+  `Unavailable`, nothing dropped. `Unavailable` too when the act can no longer be undone (its token stale, something learned since), and for a
+  forget on a record that did not open this run (`LearnLog.rewrite` writes nothing there), the word still deleted. `LearningOp.Saving` answers
+  `LearningResult.Saving(saving, rewrites)`: `rewrites` false only while the record takes no rewrite till the process
+  starts anew (`RecordStore.checkRewrites` refuses: a write failed and the store did not open again; or a file there that
+  did not open this run, `LearnLog.takesRewrites`), true when storage is
+  full (writes refused, the record open), where the app tells to try again, not to restart.
   The tables (stream C) learn into the record too: a candidate's block is per code (`TableBlock`,
   listed as `Listed.TABLE_BLOCKS`), kept by U-88/U-86 but 全部清空, which also forgets the phrases
   an older build saved (the `TABLE_WORD` rows); 恢复码表顺序 is `LearningOp.ResetTableOrder`. Tables and
@@ -1051,3 +1277,78 @@ A key must decode in a few milliseconds on a phone. Nearly all the time is the s
 `MEDIUM`+, the 4M model; `HIGH`'s 25M model runs only in pause slices. Measure with `ime-eval`
 (it reports latency per key, p50/p95/p99) before and after anything on the decode path, and keep allocations off
 it: `Counts`, `IndexCounts` and `WordIndex` exist because boxing in a `HashMap` showed up.
+
+生僻字屏蔽 costs a key one bitmap lookup per arc (`HeldWords.has(id)`); the bitmap is built by a walk
+of every dictionary word's characters at the first need after the data or the choice changed
+(`UserLexicon.held`, counted by `heldMade`): 13–22 ms on the Mac's JVM (2026-11-14), not again while
+neither changed. The page's copy of the grid (`Engines.rareGrid`, one `runOnReady`) took 10–13 ms there,
+sorting off the fcitx thread another 10–13 ms. Which 扩展 B characters something types (DECISIONS N2)
+is the pack's part, walked once an `Engines` (every dictionary word, every table, the parts: the pack's
+data does not change under it), and the user's words' (their merged dictionaries, those added or
+imported, those learned), walked again as the grid is made again: `LexiconFacade` keeps the grid till
+the user model or its `listings`/`changes` move, the key the tables keep theirs by. A merged
+dictionary, a million words for a big one, is walked once a file (`DictionaryFile`, which comes new
+only with a new model), not at each grid made again as the user learns: a million words took 28–45 ms
+on the Mac's JVM (2026-11-14, a made-up dictionary of two to four characters a word). The first making
+on a cold process, a debug build on the Mac's API 36 emulator (2026-11-14, five runs): 0.8–1.5 s on the
+fcitx thread, of which the user model 0.39–0.70 s (made then rather than at the first key, which would
+make it anyway), the pack's walk 0.31–0.55 s, the copy 0.11–0.23 s; the user's words 1 ms (none merged). Left there
+on purpose: only the settings rows of 生僻字屏蔽 ask, once per engine for the pack's part, while no
+keyboard is up but for a field tapped in that second; moving the walk off the thread would need a
+second call from the page (the pack's part made on another thread, then the grid), for a cost paid
+once.
+
+双拼 with 简拼 in the middle, a key's round trip through `EngineEvalRunner` (lib/ime-eval/run-on-device.sh,
+`engine-shuangpin`, 小鹤) on the API 36 emulator of the Mac mini, 2026-11-14: 10 inputs each of 20, 40
+and 60 keys, in whole syllables and as a first syllable then initials, keys 41–60. Before the words
+were kept from key to key (`SyllableGraph.sameUntil`), p50/p95 17.7/25.8 ms whole and 21.7/29.8 ms
+initials, growing with the input; after, 5.5/8.0 and 7.6/9.8, as without 简拼 in the middle
+(the decoder before it, 7689e738f, 6.7–7.5/11.9–15.3 and 9.1–10.3/15.9–18.4 over two runs). On the host JVM
+(`ime-eval pinyin --scheme xiaohe`) keys 41–60 went 2.0/2.5 → 0.6/0.8 ms whole, 2.5/3.1 → 0.6/0.9
+initials; all candidates the same.
+
+That emulator could not show what 简拼 in the middle costs: it runs on the Mac's cores, where the extra
+work of a key was about 0.6 ms of a 5–7 ms round trip, less than two runs of one build differ by. On the
+OnePlus 6T (the same runner and inputs, each build installed in turn, three rounds alternated, 2026-11-14)
+keys 41–60 took, p50/p95, 9.8/16.7 ms whole and 14.8/24.4 ms initials before 简拼 in the middle
+(3cbb9726b), 20.4/25.9 and 27.7/35.6 with it (191bc1ddf): every position a score of readings more, and the
+last positions collecting all of theirs again each key. With `collectOn`, the walk along a node's children,
+the beam comparing before it looks for a state's double, and the first words kept while no arc from the
+start changed and none reads to the end, 14.1/20.1 and 20.3/28.0 (keys 1–20:
+7.7 → 15.3 → 12.0 ms whole), all candidates the same on the 双拼 sets; on the host JVM, through
+`PinyinSession`, a key 0.70 → 0.41 ms whole and 0.91 → 0.54 initials, 0.07 and 0.15 with no key read
+alone. What was left was the reading itself: a 小鹤 key in whole syllables scored 6,400 words on 13,500 arcs
+where it scored 2,900 on 540, nearly all of them dropped by the model's score, which nothing cheaper
+bounds. So a key alone now reads only the words the user typed or chose (step 1 above): with the 3000 likeliest words typed a key in whole syllables scores 3,600 words on 2,300 arcs in 92 steps (6,800 on 3,700 in 148 by initials), with nothing typed 2,900 on 1,600 in 57, the words from the positions between a syllable's two keys, which nothing then reaches
+(`ShuangpinKeyWorkTest` prints them and holds them a quarter above); with each key tapped in a place and read as its neighbour too, 3,800 on 2,500 in 97 (7,000 on 4,000 in 157 by initials), the case a phone is timed on. A slow phone is measured on the
+phone, and by counts where a time would not hold still.
+
+Keys tapped off-centre on the 6T (`EngineEvalRunner` with `-e evalNine true` for the digits, each key's
+`Touch` of `ime-eval --touch …:s0.2:clean --touched`, 30 samples of 60 keys, learned data on, 2026-11-14/15;
+a Chrome process took 75% of a core throughout, so rounds of one build differ by 2 ms): keys 41–60, the median
+of the rounds' p50 and p95, the feature against its base (946a4ab04): 全拼 +0.9/+1.3 ms, 小鹤 whole −0.3,
+initials −0.1, 九键 at floor −4 +2.7/+3.1 (19.7 → 22.4), at −3 +1.4/−0.9 (5 rounds against 5). The nine keys'
+cost was not the decoder: a touch gives nearly every graph a slip, so `HabitOrder.ranksHere` walked the
+code read whole once a candidate, a key (`readsAlong`), and `words` read each candidate's words again
+(host, through `PinyinSession`: `reading` 63k → 212k calls, 1.5M → 3.4M steps). Each word at its place is
+now read once an order (`Readings`), and walked on the code read whole only where its reading goes over an
+edge read otherwise (then `Reading.otherwise`; since 061-sp-abbrev a slip, `Reading.slips`): 107k calls, 1.7M steps
+with touches. A word over keys no slip reads (`SyllableGraph.readsSlipWithin`), from a place reached along the code
+read whole, is not read at all: the decoder read it there, as every candidate takes its slot unread where no slip is. On the
+nine keys' 60-key samples that leaves a word in ten read (host: 35.6k of 39.7k words skipped), and on the
+emulator the nine keys went from +0.49 to +0.17 ms over 946a4ab04 at keys 41–60, the candidates the same at
+every key (061-nine-perf-impl-report).
+
+061-sp-abbrev reads a key alone on the 18 and 14 keys and the nine keys too (only words typed or chosen,
+step 1 above). Host JVM, the 86 long 小鹤 inputs with taps placed (`--touch <keyboard>:s0.2:clean`), learning on
+(3000 words typed), one thread, no Gradle worker running, keys 41–60, p50/p95 in ms, abbreviations off against on:
+full keyboard 0.88/1.22 → 0.95/1.32 (a key alone was read there before: 0.96/1.26 then), 18 keys 0.93/1.30 →
+1.05/1.41 (+13%), 14 keys 0.98/1.50 → 1.15/1.63 (+17%), nine keys 1.15/2.05 → 1.59/2.41 (+38%), the first
+candidates and pages the same as the design's prototype at every key. The cost is the decoder (nine keys
+0.39 → 0.63 ms a key) and the code line (0.02 → 0.14), not `HabitOrder` (0.02). The budget was +15% for the
+grouped keyboards; the nine and 14 keys' figures were accepted by the user 2026-11-17, optimisation later.
+`ShuangpinKeyWorkTest` holds the grouped keyboards' arcs and steps a quarter above what they read with 3000 words
+typed; the 6T is timed against `dev/design/061-sp-abbrev/6t-base.md` (p50, 小鹤, w3000: 18 keys 13.6 ms,
+14 keys 16.0, nine keys 21.3). w3000 is the design's draw of 3000 words by frequency (not in the tree); a history
+from the tree is `ime-eval history <pinyin.data> 3000 <words.txt>`, the likeliest 3000, typed on a device with
+`HISTORY=<words.txt> lib/ime-eval/run-on-device.sh` (specs/testing.md).

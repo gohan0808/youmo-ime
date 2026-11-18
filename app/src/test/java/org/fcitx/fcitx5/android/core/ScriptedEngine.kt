@@ -4,7 +4,6 @@
  */
 package org.fcitx.fcitx5.android.core
 
-import org.fcitx.fcitx5.android.engine.InputMethodCatalog
 import org.fcitx.fcitx5.android.engine.runtime.EngineEvent
 import org.fcitx.fcitx5.android.engine.runtime.EngineSettings
 import org.fcitx.fcitx5.android.engine.session.Action
@@ -15,9 +14,12 @@ import org.fcitx.fcitx5.android.host.EngineHost
 import java.io.File
 import java.util.Collections
 
-/** Pinyin as far as a case needs: the letters typed are the preedit, two candidates, a pick commits one. */
+/** Pinyin as far as a case needs: the letters typed are the preedit, Backspace takes one off, two candidates, a pick commits one. */
 class ScriptedEngine(private val home: File) : KotlinHost.EngineSide, EngineHost {
     val events: MutableList<Int> = Collections.synchronizedList(ArrayList())
+
+    /** Each character key's payload, as the host handed it on ([EngineHost.event]'s). */
+    val payloads: MutableList<Action?> = Collections.synchronizedList(ArrayList())
     val settings: MutableList<EngineSettings> = Collections.synchronizedList(ArrayList())
     private var typed = ""
 
@@ -32,13 +34,11 @@ class ScriptedEngine(private val home: File) : KotlinHost.EngineSide, EngineHost
 
     override fun event(im: String, event: Int, arg: Int, learning: Boolean, payload: Action?): Snapshot {
         events += event
+        if (event == EngineEvent.CHAR) payloads += payload
         var commit = ""
         when (event) {
-            // a letter in handwriting stands for a character written (the pad's reading is HandwritingUatTest's)
             EngineEvent.CHAR -> if (arg !in 'a'.code..'z'.code) {
                 return idle()
-            } else if (im == InputMethodCatalog.HANDWRITING) {
-                typed += WRITTEN
             } else {
                 typed += arg.toChar()
             }
@@ -47,6 +47,8 @@ class ScriptedEngine(private val home: File) : KotlinHost.EngineSide, EngineHost
                 typed = ""
             }
             EngineEvent.RESET -> typed = ""
+            // a letter taken off what is typed; with nothing typed it is the field's
+            EngineEvent.BACKSPACE -> if (typed.isNotEmpty()) typed = typed.dropLast(1) else return idle()
             // Return: what is typed committed as it is (pinyin's raw letters)
             EngineEvent.ENTER -> if (typed.isNotEmpty()) {
                 commit = typed
@@ -73,8 +75,5 @@ class ScriptedEngine(private val home: File) : KotlinHost.EngineSide, EngineHost
 
     companion object {
         val WORDS = listOf("你好", "你")
-
-        /** What a letter typed in handwriting is written as. */
-        const val WRITTEN = "中"
     }
 }

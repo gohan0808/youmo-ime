@@ -4,13 +4,17 @@
  */
 package org.fcitx.fcitx5.android.eval
 
+import org.fcitx.fcitx5.android.assertRows
+import org.fcitx.fcitx5.android.engine.data.CodeTable
 import org.fcitx.fcitx5.android.engine.data.PinyinData
 import org.fcitx.fcitx5.android.engine.data.PinyinDataBuilder
 import org.fcitx.fcitx5.android.engine.data.WordLayers
+import org.fcitx.fcitx5.android.engine.pinyin.NineKeyLetters
 import org.fcitx.fcitx5.android.engine.pinyin.PinyinSegmenter
 import org.fcitx.fcitx5.android.engine.pinyin.Syllables
 import org.fcitx.fcitx5.android.engine.rerank.SentencePicker
 import org.fcitx.fcitx5.android.engine.rerank.SentenceRefiner
+import org.fcitx.fcitx5.android.engine.user.UserModel
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -143,8 +147,14 @@ class MainTest {
             arrayOf("pinyin", "d", "s", "r", "--scheme", "nope"),
             arrayOf("pinyin", "d", "s", "r", "--color", "red"),
             arrayOf("pinyin", "d", "s", "r", "--neighbours", "maybe"),
-            arrayOf("pinyin", "d", "s", "r", "--scheme", "ms", "--neighbours", "on"), // 双拼 reads none
-            arrayOf("pinyin", "d", "s", "r", "--scheme", "t9", "--neighbours", "on"), // nor the nine keys
+            arrayOf("pinyin", "d", "s", "r", "--touch", "qwerty:s0.2"), // clean or slip
+            arrayOf("pinyin", "d", "s", "r", "--touch", "dvorak:s0.2:clean"), // no such keyboard
+            arrayOf("pinyin", "d", "s", "r", "--touch", "qwerty:s0.2:clean", "--taps", "sigma0.2:1", "--scheme", "g14"), // not both
+            arrayOf("pinyin", "d", "s", "r", "--touch", "qwerty:s0.2:clean:x"), // a seed is a number (review F8254)
+            arrayOf("pinyin", "d", "s", "r", "--touched", "t.tsv"), // the set --touch tapped: none
+            // read as given, not the app's floor reported as asked (review F8254)
+            arrayOf("table-slips", "d", "s", "--floor", "low"),
+            arrayOf("table-slips", "d", "s", "--topping-floor", "NaN"),
             arrayOf("pinyin", "d", "s", "r", "--threads", "0"),
             arrayOf("pinyin", "d", "s", "r", "--stale"), // stale is a merged dictionary's
             arrayOf("pinyin", "d", "s", "r", "--beam", "x"),
@@ -159,6 +169,12 @@ class MainTest {
             arrayOf("pinyin", "d", "s", "r", "--typos", "maybe"),
             arrayOf("pinyin", "d", "s", "r", "--scheme", "t9", "--typos", "off"), // the nine keys read none
             arrayOf("ksc", "d", "s", "--typos", "off"), // not ksc's
+            arrayOf("pinyin", "d", "s", "r", "--scheme", "xiaohe", "--sp-abbrev", "maybe"),
+            // a penalty, as the others: not a bonus, nor endless
+            arrayOf("pinyin", "d", "s", "r", "--scheme", "xiaohe", "--sp-abbrev", "1"),
+            arrayOf("pinyin", "d", "s", "r", "--scheme", "xiaohe", "--sp-abbrev", "NaN"),
+            arrayOf("pinyin", "d", "s", "r", "--scheme", "xiaohe", "--sp-abbrev", "-Infinity"),
+            arrayOf("pinyin", "d", "s", "r", "--sp-abbrev", "off"), // 双拼's only: full pinyin reads 简拼 anyway
             arrayOf("slips", "s", "o", "--scheme", "t9"), // 双拼's schemes only
             arrayOf("predict-learn", "d", "s", "--user-weight", "much"),
             // a weight, as --weight's: not negative, nor endless
@@ -191,9 +207,31 @@ class MainTest {
             // the models read the sentences at one ink weight
             arrayOf("handwriting", "d", "r", "--rerank", "m", "--weights", "1,2"),
             arrayOf("voice-post", "s", "--source", "best"),
+            // the tagger's json and --source tagged go together: labels without a table, or a table nothing reads
+            arrayOf("voice-post", "s", "--source", "tagged"),
+            arrayOf("voice-post", "s", "--source", "app", "--tagger", "t.json"),
+            arrayOf("voice-post", "s", "--source", "tagged", "--tagger", "t.json", "--guard", "maybe"),
+            // the guards are the tagger's labels': with any other source --guard would change nothing and say so nowhere
+            arrayOf("voice-post", "s", "--source", "app", "--guard", "off"),
             arrayOf(),
         )
         for (args in usageErrors) assertEquals(args.joinToString(" "), 2, exit(*args))
+    }
+
+    // review F8111: table-slips' --touched is its own taps, its preset left out (plain) or not; only pinyin's needs --touch
+    @Test
+    fun tableSlipsWritesItsTouchedSetWithoutAPreset() {
+        val table = CodeTable.Builder()
+            .header("键码", "abcdefghijklmnopqrstuvwxyz")
+            .header("码长", "4")
+            .entry("abr", "甲").entry("cd", "丁")
+            .build().toByteArray()
+        val tableFile = tmp.newFile("t.data").apply { writeBytes(table) }
+        val set = tmp.newFile("s.tsv").apply { writeText("x\t甲丁\tdaily\n") }
+        val touched = File(tmp.root, "touched.tsv")
+        assertEquals(0, exit("table-slips", tableFile.path, set.path, "--touched", touched.path))
+        // a few keys, short of a line's 60: written all the same (review F8207)
+        assertTrue(touched.readText(), touched.readLines().any { it.isNotBlank() })
     }
 
     @Test
@@ -208,6 +246,68 @@ class MainTest {
             val line = lines.single { it.startsWith("${command.name} ") }
             assertEquals(command.name, command.options, Regex("--([a-z-]+)").findAll(line).map { it.groupValues[1] }.toSet())
         }
+    }
+
+    @Test
+    fun voicePostPassesTheGuardSwitchToTheTaggedReplay() {
+        val tagger = tmp.newFile("polish-tagger.json").apply { writeText("""{"ops": ["keep", "del"], "after": [""], "num": ["none"]}""") }
+        val set = tmp.newFile("seg-g.jsonl").apply {
+            writeText(
+                """{"wav": "1.wav", "ref": "好", "stretches": [{"nbest": ["好"], "app": "好"}], """ +
+                    """"tagged": {"text": "好", "op": [0], "after": [0], "num": [0]}}""" + "\n",
+            )
+        }
+        fun line(vararg guard: String): String {
+            val out = StringBuilder()
+            assertEquals(0, runCli(arrayOf("voice-post", set.path, "--source", "tagged", "--tagger", tagger.path, *guard), out, StringBuilder()))
+            return out.lines().first { it.startsWith("tagged:") }.split(' ')[1]
+        }
+        assertEquals("guard=true", line())
+        assertEquals("guard=false", line("--guard", "off"))
+    }
+
+    @Test
+    fun voicePostWithAFileReadWrongFailsNamingItNotWithAStackTrace() {
+        val goodTagger = """{"ops": ["keep", "del"], "after": [""], "num": ["none"]}"""
+        val goodLine = """{"wav": "1.wav", "ref": "好", "stretches": [{"nbest": ["好"], "app": "好"}]}"""
+        // exit 1 and what it says on err: a stack trace would leave runCli by throwing
+        fun failure(set: String, lines: String, tagger: String = "polish-tagger-$set.json", taggerText: String = goodTagger): String {
+            val t = tmp.newFile(tagger).apply { writeText(taggerText) }
+            val s = tmp.newFile(set).apply { writeText(lines) }
+            val err = StringBuilder()
+            val exit = runCli(arrayOf("voice-post", s.path, "--source", "tagged", "--tagger", t.path), StringBuilder(), err)
+            assertEquals(err.toString(), 1, exit)
+            return err.toString()
+        }
+        assertRows(
+            "labels shorter than the tagged text: VoicePostRun.read refuses it, which ended the whole run uncaught" to {
+                val err = failure(
+                    "seg-short.jsonl",
+                    """{"wav": "short.wav", "ref": "好的", "stretches": [{"nbest": ["好的"], "app": "好的"}], """ +
+                        """"tagged": {"text": "好的", "op": [0], "after": [0, 0], "num": [0, 0]}}""" + "\n",
+                )
+                assertTrue(err, err.startsWith("voice-post: seg-short.jsonl: short.wav:"))
+            },
+            "a line not json: kotlinx's message alone does not say where, so the file and the line are added" to {
+                val err = failure("seg-cut.jsonl", goodLine + "\n" + """{"wav": "2.wav", "ref": """ + "\n")
+                assertTrue(err, err.startsWith("voice-post: seg-cut.jsonl:2: "))
+            },
+            "a line missing a key a record needs: named the same way" to {
+                val err = failure("seg-nowav.jsonl", """{"ref": "好", "stretches": []}""" + "\n")
+                assertTrue(err, err.startsWith("voice-post: seg-nowav.jsonl:1: "))
+            },
+            "a tagger file VoicePolishTags refuses (ops not starting keep, del): its check's message, naming the file" to {
+                val err = failure(
+                    "seg-4.jsonl", goodLine + "\n",
+                    tagger = "bad-ops.json", taggerText = """{"ops": ["del", "keep"], "after": [""], "num": ["none"]}""",
+                )
+                assertTrue(err, err.startsWith("voice-post: bad-ops.json: ops start keep, del"))
+            },
+            "a tagger file not json" to {
+                val err = failure("seg-5.jsonl", goodLine + "\n", tagger = "cut.json", taggerText = """{"ops": [""")
+                assertTrue(err, err.startsWith("voice-post: cut.json: "))
+            },
+        )
     }
 
     @Test
@@ -334,6 +434,19 @@ class MainTest {
         assertTrue(toldCrashed, "readings: the run failed" in toldCrashed)
     }
 
+    // a history made from the tree (R27 F8530): the likeliest words with their readings, as --history and the device read them
+    @Test
+    fun aHistoryIsTheDictionarysLikeliestWords() {
+        val data = dataFile()
+        val history = File(tmp.root, "history.txt")
+        assertEquals(0, exit("history", data.path, "2", history.path))
+        assertEquals(listOf("你\tni", "好\thao"), history.readLines())
+        // read back as --history reads it: each line a word of the dictionary counted
+        val read = PinyinData.load(ByteBuffer.wrap(data.readBytes()))
+        assertEquals(2, TypedHistory.count(UserModel(read.dictionary, read.vocabulary, index = read.wordIndex), read, history.readLines()))
+        assertNotEquals(0, exit("history", data.path, "0", history.path))
+    }
+
     // a dictionary's text compiled as the app compiles one: its words typed as the app offers them
     @Test
     fun aMergedDictionarysWordsAreOffered() {
@@ -382,6 +495,48 @@ class MainTest {
         assertEquals("张", first())
         assertEquals("张", first("--typos", "on"))
         assertNotEquals("张", first("--typos", "off"))
+    }
+
+    @Test
+    fun spAbbrevOffReadsAKeyAloneOnlyWhereItAndTheNextMakeNoSyllable() {
+        // 自然码 ufmuh: shen whole, then m, sh, h by their initials; mu and uh (shang) are pairs, so m
+        // and u alone are 简拼 in the middle: 什么时候 only with it read, and only as a word typed before (--history)
+        val data = tmp.newFile("abbrev.data").apply {
+            writeBytes(
+                PinyinDataBuilder().layers(listOf(WordLayers.BASE)).unigram("<unk>", -7f, 0f).unigram("什么时候", -3f, 0f)
+                    .entry("什么时候", syl("shen", "me", "shi", "hou"))
+                    // read whole but for the h begun: shen mu, then he
+                    .unigram("神木", -4f, 0f).entry("神木", syl("shen", "mu")).unigram("和", -3f, 0f).entry("和", syl("he"))
+                    .build().toByteArray(),
+            )
+        }
+        val set = tmp.newFile("set.tsv").apply { writeText("ufmuh\t什么时候\tdaily\n") }
+        val result = File(tmp.root, "result.tsv")
+        val history = tmp.newFile("history.txt").apply { writeText("什么时候\n和\tgone\n没有\n") }
+        fun candidates(vararg abbrev: String, typed: Boolean = true): List<String> {
+            val typedBefore = if (typed) arrayOf("--history", history.path) else emptyArray()
+            assertEquals(0, exit("pinyin", data.path, set.path, result.path, "--scheme", "ziranma", *abbrev, *typedBefore, "--threads", "1"))
+            return result.useLines { RunResultFormat.parse(it) }.single().candidates
+        }
+        candidates().let { assertTrue("$it", "什么时候" in it) }
+        // never typed, no key alone reads it
+        assertFalse("什么时候" in candidates(typed = false))
+        candidates("--sp-abbrev", "-1").let { assertTrue("$it", "什么时候" in it) }
+        assertFalse("什么时候" in candidates("--sp-abbrev", "off"))
+        // the penalty reaches the decoder: free, 什么时候 goes before the reading in whole syllables; at -4 after it
+        val free = candidates("--sp-abbrev", "0")
+        val dear = candidates("--sp-abbrev", "-4")
+        assertTrue("$free $dear", free.indexOf("什么时候") in 0 until dear.indexOf("什么时候"))
+        // a grouped keyboard's segmenter takes it too (R27 F8542): off was measured on, had it dropped it. On the 18 keys
+        // u, m and h are keys of one letter, so ufmuh reads as on the 26 (only f shares fg): off, no whole syllable reaches it
+        assertEquals(listOf("u", "m", "h"), "umh".map { NineKeyLetters.G18.letters(NineKeyLetters.G18.key(it)) })
+        val g18 = tmp.newFile("set18.tsv").apply { writeText("${"ufmuh".map(NineKeyLetters.G18::key).joinToString("")}\t什么时候\tdaily\n") }
+        fun grouped(vararg abbrev: String): List<String> {
+            assertEquals(0, exit("pinyin", data.path, g18.path, result.path, "--scheme", "ziranma-18", *abbrev, "--history", history.path, "--threads", "1"))
+            return result.useLines { RunResultFormat.parse(it) }.single().candidates
+        }
+        grouped().let { assertTrue("$it", "什么时候" in it) }
+        assertFalse("什么时候" in grouped("--sp-abbrev", "off"))
     }
 
     @Test

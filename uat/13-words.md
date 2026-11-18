@@ -103,6 +103,12 @@ adb push uat/fixtures/userwords.txt uat/fixtures/dict-words.txt uat/fixtures/wor
 - **预期**：词库页"基础词库"一节里列出 `extra` 这个导入的词库；「琮璟」在候选里。（并入基础词库时 .scel 先转换成文本词库再编译，转换坏了只有这条能在设备上看出来。）
 - **JVM**：`BaseDictionaryUpgradeUatTest.aScelFileIntoTheBaseIsConvertedAndMerged`（.scel 转成文本词库并入基础词库、列出 extra、有琮璟）；设备上不跑。
 
+### WD-14z3 [P1] 太大的词库文件拷贝到一半就拒绝，不留东西
+- **前提**：B0-设置；"下载"里有一个超过 32 MB 的 `big.scel`（`head -c 34000000 /dev/zero > big.scel` 后推过去）。
+- **操作**：**词库与短语 → 导入词库**，选 `big.scel`；看提示；回词库页看列表。
+- **预期**：提示「文件太大，导入不了这么大的这类文件」，不问并入哪个词库；词库页的列表和导入前一样；缓存里不留拷贝了一半的文件。（`.dict` 超过 64 MB、文本超过 512 MB 也是这一句，见 docs/words.md 的拒绝原因表。）
+- **JVM**：`PinyinDictManagerTest.aBinaryDictionaryPastItsCapIsRefusedAsItIsCopied`（读到 32 MB 就停、拒绝原因是太大、提示是这一句、缓存里什么都不留）；设备上不跑。
+
 ### WD-14d [P0] 上百万词的大词库并入基础词库，键盘不崩
 - **前提**：B0-设置，雾凇拼音（rime-frost）发布的 `frost_dict_for_fcitx5.txt`（约 89 MB、191 万行，词、`'` 分开的拼音、概率三列；是哪一份、哈希多少见 [README](README.md) 的 fixtures 一行）已放到"下载"目录。
 - **操作**：**词库与短语 → 导入词库**，选它，看 **并入哪个词库？** 的标题；选"基础词库（推荐）"导入，等导入完；回测试页点输入框弹出键盘，按 [README](README.md#量-java-堆) 的做法量 Java 堆 5 次（导入前也这样弹出键盘、打几个字量 5 次作对照）；打 a b a z h o u（阿坝州）、g e n n i s h u o（跟你说）；看词库目录的文件大小（以 root `ls -l /data/data/<包名>/files/host-data/pinyin/dictionaries`，模拟器上 `adb root` 后直接 `adb shell`）。
@@ -196,8 +202,8 @@ adb push uat/fixtures/userwords.txt uat/fixtures/dict-words.txt uat/fixtures/wor
 
 ### WD-14r [P0] 从 0.3.2 升级：导入的大词库转换成压缩的，空间省下一大半
 - **前提**：装着 v0.3.2 正式版（不是要测的这一版），在它里面按 WD-14d 把雾凇拼音并入基础词库，等合好（候选里有「阿坝州」）；再导入 `dict-words.txt` 并入基础词库后把它 **关闭**；记下 **系统设置 → 应用 → 幽默输入法 → 存储** 的"用户数据"大小和词库目录（`adb shell ls -l /sdcard/Android/data/<包名>/files/data/pinyin/dictionaries`：`frost_dict_for_fcitx5.txt`、`dict-words.txt.disable`、`merged.ymd` 约 106 MB）。
-- **操作**：不卸载，直接安装要测的这一版正式版（`adb install -r`）；回测试页点输入框弹出键盘，马上打几个字；等到提示「词库格式已升级」（最多三分钟）；看词库目录和应用的存储；打 a b a z h o u、k e m i a o t a n g p u；打开词库页。
-- **预期**：键盘马上弹出、照常打字；空闲栏写着「正在升级词库格式 N%」，进度一路往前走，合好以后提示「词库格式已升级」；外部的 `files/data` 已经没有了（升级后搬进应用自己的目录，核对好就删了旧的，同 PR-41）；词库目录（以 root 看 `/data/data/<包名>/files/host-data/pinyin/dictionaries`，模拟器上 `adb root` 后直接 `adb shell`）里是 `frost_dict_for_fcitx5.txt.gz`（约 24 MB）、`dict-words.txt.gz.disable` 和 `merged.ymd`（约 50 MB），没有 `.txt`、`.tmp` 文件；"用户数据"比升级前少约 120 MB；候选里有「阿坝州」，kemiaotangpu 第一页没有「氪喵糖铺」；词库页里 frost 已开启、约 191 万个词，dict-words 已关闭。这一条在发版时用正式版跑。
+- **操作**：不卸载，直接安装要测的这一版正式版（`adb install -r`）；回测试页点输入框弹出键盘，马上打几个字（0.6.0 起安装包不带词库：键盘写着「需要导入文字包才能打字」，点它到「资源包」导入文字包；升级在导入后就开始，191 万词约 7 秒合好，点 **确定** 后马上回测试页弹出键盘，才看得到空闲栏）；等到提示「词库格式已升级」（最多三分钟）；看词库目录和应用的存储；打 a b a z h o u、k e m i a o t a n g p u；打开词库页。
+- **预期**：键盘马上弹出（导入文字包前写着「需要导入文字包才能打字」）、导入后照常打字；空闲栏写着「正在升级词库格式 N%」，进度一路往前走，合好以后提示「词库格式已升级」；外部的 `files/data` 已经没有了（升级后搬进应用自己的目录，核对好就删了旧的，同 PR-41）；词库目录（以 root 看 `/data/data/<包名>/files/host-data/pinyin/dictionaries`，模拟器上 `adb root` 后直接 `adb shell`）里是 `frost_dict_for_fcitx5.txt.gz`（约 24 MB）、`dict-words.txt.gz.disable` 和 `merged.ymd`（约 50 MB），没有 `.txt`、`.tmp` 文件；"用户数据"减去导入的文字包（`/data/user_de/0/<包名>` 约 300 MB；0.3.2 的词库数据在安装包里，"应用大小"从约 362 MB 降到约 51 MB）比升级前少约 120 MB；候选里有「阿坝州」，kemiaotangpu 第一页没有「氪喵糖铺」；词库页里 frost 已开启、约 191 万个词，dict-words 已关闭。这一条在发版时用正式版跑。
 
 ### WD-14s [P1] 升级转换词库时强行停止，再打开接着做完
 - **前提**：B0-设置，按 WD-14h 的前提放好 0.3.1 样子的 `frost.txt`（不放 `old.txt.disable`）。
@@ -227,7 +233,7 @@ adb push uat/fixtures/userwords.txt uat/fixtures/dict-words.txt uat/fixtures/wor
 
 ### WD-14v [P1] 装回 0.3.2 再升级：导入的基础词库藏起来，回来时又有了
 - **前提**：WD-14r 做完的手机（这一版正式版，frost 已开启、dict-words 已关闭，目录里是 `frost_dict_for_fcitx5.txt.gz`、`dict-words.txt.gz.disable`）。
-- **操作**：照用户装回旧版的路（docs/faq.md「想装回旧版本」；正式版不能 `install -r -d` 留着数据降级，手机上只能卸载）：**备份全部**，把文件拷到电脑；卸载；装 v0.3.2 正式版，走完向导，把备份推回"下载"，**从备份恢复** 选它；回测试页打 x i m u z h e n；打开词库页；看词库目录。再在 0.3.2 里按 WD-11 把 `dict-words.txt` 并入基础词库；然后装回这一版正式版（`adb install -r`）；回测试页弹出键盘，等到提示「词库格式已升级」（最多三分钟）；打 x i m u z h e n、k e m i a o t a n g p u；打开词库页；看词库目录。
+- **操作**：照用户装回旧版的路（docs/faq.md「想装回旧版本」；正式版不能 `install -r -d` 留着数据降级，手机上只能卸载）：**备份全部**，把文件拷到电脑；卸载；装 v0.3.2 正式版，走完向导，把备份推回"下载"，**从备份恢复** 选它；回测试页打 x i m u z h e n；打开词库页；看词库目录。再在 0.3.2 里按 WD-11 把 `dict-words.txt` 并入基础词库；然后装回这一版正式版（`adb install -r`）；回测试页弹出键盘（卸载时文字包一起删了：照 WD-14r 从键盘到「资源包」导入文字包，点 **确定** 后马上回测试页弹出键盘），等到提示「词库格式已升级」（最多三分钟）；打 x i m u z h e n、k e m i a o t a n g p u；打开词库页；看词库目录。
 - **预期**：0.3.2 里键盘照常打字，不崩；ximuzhen 的候选里没有「溪木镇」（frost 才有的词，0.3.2 和这一版的基础词库都没有；「阿坝州」基础词库本来就有，测不出），词库页"基础词库"一节没有 frost；词库目录里 `frost_dict_for_fcitx5.txt.gz`、`dict-words.txt.gz.disable` 还在。装回这一版后空闲栏写着「正在升级词库格式 N%」，合好以后：ximuzhen 第一页有「溪木镇」，kemiaotangpu 第一页有「氪喵糖铺」；词库页 frost 已开启、约 191 万个词，dict-words 只有一行、已开启（0.3.2 里新导入的那份胜出）；词库目录里 dict-words 只剩 `dict-words.txt.gz`，没有 `.txt`、`.txt.gz.disable`、`.tmp` 文件。这一条在发版时用正式版跑。
 
 ### WD-14w [P1] 升级转换词库时导入新词库
@@ -314,7 +320,7 @@ adb push uat/fixtures/userwords.txt uat/fixtures/dict-words.txt uat/fixtures/wor
 - **前提**：B0，按 PY-54 在「他」后面连着选两次「点了」，按 PY-34 让「汪小明」成为你的词，点 s h i，长按第五个候选 C 选 **固定首位**，按 PY-29 屏蔽「是」；另外按 TBL-36 在五笔的 fghy 下屏蔽「寸」。
 - **操作**：打开 **用户词库**，点 **清空学到的**，读确认框，不勾 **全部清空**，确认；回测试页打「他」，点 d l；点 ⌫ 删掉，点 **。**，点 w x m；点 ⌫，点 s h i。再打开 **用户词库**，点 **清空学到的**，勾 **全部清空**，读确认框，确认；回测试页点 w a n g x i a o m i n g；点 ⌫，点 s h i；切到五笔，点 f g h y。
 - **预期**：不勾时确认框逐项写着清什么、留什么，写明自定义短语不在这里清、清空以后不能"退回恢复前"；清空后「他 dl」第一个是「带来」；wxm 里仍有「汪小明」（还是你的词，次数 0）；shi 的第一个仍是 C；候选里仍没有「是」。勾上后确认框写明"屏蔽的 2 个词会重新出现"（「是」和码表里的「寸」），并改为"回到刚装好，清掉：…"，固定、屏蔽、你的词都列在清掉里，"留下"只有自定义短语；清空后「王小明」第一、候选里没有「汪小明」；shi 里有「是」，C 不再固定；fghy 下「寸」又出现了。
-- **JVM**：`LexiconUatTest.clearingTheLearnedKeepsYourWordsUnlessAll`（:lib:ime-eval:uatTest，真数据）（不勾：他 dl 带来第一、wxm 有汪小明、shi 第一仍 C、没有是；勾上：王小明第一、没有汪小明、是回来、fghy 有寸（确认框文字是界面））；设备上不跑。
+- **JVM**：`LexiconUatTest.clearingTheLearnedKeepsYourWordsUnlessAll`（:lib:ime-eval:uatTest，真数据）（不勾：他 dl 带来第一、wxm 有汪小明、shi 第一仍 C、没有是；勾上：王小明第一、没有汪小明、是回来、fghy 有寸（确认框文字是界面））；勾上时词表里这一版读不懂的行（以后的版本写的）也删掉、不在下一版里回来见 ime-core `WordListsTest.aClearEmptiesTheListsAndTheLinesThatDoNotRead`、`EnginesLearningTest.aClearOfEverythingEmptiesTheWordListsOfTheLinesThisBuildDoesNotRead`（只有后来的版本写的文件才看得到，设备上造不出），这次没读出来的词表文件也删掉、下次启动不回来见 `WordListsTest.aClearDeletesAListThatDidNotRead`；设备上不跑。
 
 ### WD-30 [P1] 搜索、多选删除、点"撤销"就回来
 <!-- learning: U-80 -->
@@ -332,8 +338,20 @@ adb push uat/fixtures/userwords.txt uat/fixtures/dict-words.txt uat/fixtures/wor
 ### WD-37 [P1] 自定义短语的导入和导出
 - **前提**：B0-设置；已有自定义短语 `dz` →「北京市海淀区」（同 WD-18）；把 `uat/fixtures/phrases.txt`（`dz,1=北京市海淀区`、`sh,1=上海`）推到 `/sdcard/Download/`。
 - **操作**：**词库与短语 → 自定义短语**，等 **+** 出现，右上角 ⋮ → **导入**，在下载里选 phrases.txt；返回，再进这一页看列表；回测试页打 s h；再回这一页 ⋮ → **导出**，在下载里保存；取回导出的文件看内容。
-- **预期**：导入后列表里「北京市海淀区」只有一条（已有的不重复加），多了 sh →「上海」，提示「导入了 1 条短语」（脚本截图留给人看）；离开再回来两条都在；sh 第一候选是「上海」；下载里多出一个导出的文件（同名的已有时存成「… (1).txt」），里面有 `dz,1=北京市海淀区` 和 `sh,1=上海` 两行。
-- **JVM**：`SettingsPagesUatTest.nothingIsAddedToTheCustomPhrasesBeforeTheirFileIsRead`（短语文件读完前没有 +、导入导出不可用；读完前送达的导入、导出等读完再做：导入不重复、离开页面时存下，导出不是空文件；这一状态手上看不到，只在 JVM 上断言）；设备上照跑：文件选择器、导入导出的真实文件只在设备上有。
+- **预期**：导入后列表里「北京市海淀区」只有一条（已有的不重复加），多了 sh →「上海」，页底只有一个提示条「导入了 1 条短语」带 **撤销**（不另弹「已添加 1 个项目」，也没有另一条 toast；脚本截图留给人看）；点 **撤销** 只少了 sh，「北京市海淀区」还在，再导入一次照常加上 sh；离开再回来两条都在；sh 第一候选是「上海」；下载里多出一个导出的文件（同名的已有时存成「… (1).txt」），里面有 `dz,1=北京市海淀区` 和 `sh,1=上海` 两行。（导入最多加到 5000 条，见 WD-37a。）
+- **JVM**：`SettingsPagesUatTest.nothingIsAddedToTheCustomPhrasesBeforeTheirFileIsRead`（短语文件读完前没有 +、导入导出不可用；读完前送达的导入、导出等读完再做：导入不重复、离开页面时存下，导出不是空文件；这一状态手上看不到，只在 JVM 上断言）、`ListPagesReadUatTest.anImportSaysItsCountOnTheUndoBarThatTakesBackOnlyIt`（提示条是「导入了 1 条短语」带撤销，没有「已添加」、没有 toast；撤销只删 sh；什么都没导入时照旧弹 toast）；设备上照跑：文件选择器、导入导出的真实文件只在设备上有。
+
+### WD-37a [P2] 自定义短语导入最多加到 5000 条，手动加不受限
+- **前提**：B0-设置；自定义短语已有 4999 条（JVM 上直接写进短语文件；设备上造不出这么多，不跑）。
+- **操作**：**词库与短语 → 自定义短语** ⋮ → **导入** 一个有 3 条新短语的文件；再点 **+** 手动加一条。
+- **预期**：导入只加 1 条，列表到 5000 条，页底提示条「导入了 1 条短语；另有 2 条没导入：导入最多加到 5000 条」带 **撤销**（整句显示得下，停留比普通提示条长）；手动加的照常加上（这个上限只管导入）。以前就超过 5000 条的列表不删，再导入什么都不加：这时没有提示条，「导入了 0 条短语；另有 N 条没导入：…」弹成 toast。
+- **JVM**：`SettingsPagesUatTest.anImportFillsTheCustomPhrasesToTheirLimitAndSaysTheRest`（已有 4999 条再导入 3 条：加 1 条，提示条写另 2 条没导入；满 5000 条后用 **+** 对话框再加一条，列表是 5001 条）；设备上不跑。
+
+### WD-65 [P0] 打开自定义短语、常用词页不提示「已添加」，已有的不会被撤销删掉
+- **前提**：B0-设置；已有自定义短语 `bj` →「北京」，常用词「米字旁 → 米、糸」「木字旁 → 木」。
+- **操作**：进 **词库与短语 → 自定义短语**，等列表出来；点 **+** 加 `sh` →「上海」；返回。进 **常用词**，等列表出来；⋮ → **导入** 一个只有「你好 → 您好」的文件，确认框点确定；返回再进这两页。
+- **预期**：打开两页时底部都不弹「已添加 N 个项目 / 撤销」（0.6.0 和 0.6.1 测试版会弹，点撤销就把已有的短语、常用词全删了，离开页面时存成空的）；手动加短语照常提示「已添加 sh,1=上海」；导入常用词后列表是三条，底部不弹「已添加 3 个项目 / 撤销」（那个撤销连导入前就有的两条也删）；回来两页的条目都在。
+- **JVM**：`ListPagesReadUatTest.openingTheCustomPhrasesOffersNoUndoOfThePhrasesRead`（打开不弹，手动加照常提示，存下两条）、`ListPagesReadUatTest.openingOrImportingTheCommonWordsOffersNoUndoThatDeletesThem`（打开、导入都不弹撤销，存下三条）；设备上不跑。
 
 ### WD-38 [P1] 带拼音的 GBK 词库里夹着几行只写词的，照样能导入
 - **前提**：无（JVM）。
@@ -382,3 +400,123 @@ adb push uat/fixtures/userwords.txt uat/fixtures/dict-words.txt uat/fixtures/wor
 - **操作**：**词库与短语 → 常用词**，点 **+**，词写「你好」，拼音留空，替换项写两行「你好」「您好」，保存。回「普通文本」框打 nihao，看候选栏，点空格。
 - **预期**：保存不报错，列表里有「你好 → 你好、您好」。打 nihao 时候选前两个是「你好」「您好」，「你好」只出现一次；点空格框里是「你好」。
 - **JVM**：ime-core `CommonWordsTest.replacementsAreKeptOnceNineAtMostTheWordItselfToo`（词本身算替换项，重复的只留一个，最多九个）、`CommonWordsInSessionTest.theWordItselfAsAReplacementGoesFirst`（你好 → 你好、您好：你好排第一、只出一次、上屏）；设备上不跑。
+
+### WD-46 [P1] 学到的词存不下时，用户词库页和 ⋯ 面板顶上都说一声，存得下了就不说
+- **前提**：B0-设置；学习记录写不进存储（模拟器上 `adb root` 后用大文件把 `/data` 填满，见 PR-50 的做法：之后的写都失败，截回和重新打开文件仍成功），打几个字让它写一次。
+- **操作**：打开 **词库与短语 → 用户词库** 看页顶；回测试页点工具栏 **⋯** 看面板最上面。删掉大文件，打几个字（让它再写一次），再看这两处，不重启键盘。
+- **预期**：存不下时，用户词库页顶第一行和 ⋯ 面板最上面一行都是「学到的词现在没在保存：只记在内存里……」；面板下面的按钮照旧。删掉大文件后下一次写成功，两处都没有这一行，不用重启；存得下以后在用户词库里 **清空学到的** 成功（把学习记录整个重写），这一行同样消失；清掉最近一段时间只在学习记录文件里有这段时间的记录、文件因此重写时才让它消失，这段时间在文件里没有记录时（存不下那会儿打的字只在内存里，常常就是这样）这一行留到下一次写成功，但这段时间学到的照样忘掉：没写下、只在内存里的，不管什么时候打的、做的（存不下那会儿做的固定、不再联想也算），清掉最近时一起忘掉（它们本来也撑不过键盘重启）。写失败后学习记录文件截不回、也重开不了时（学习记录从此不再接受写，到键盘重启为止），**清掉最近** 和 **清空学到的** 都提示「没清掉：学到的词现在存不下，重启键盘后再清」，什么都没清（自动备份和「退回恢复前」那份也都还在）；出路是重启键盘（在系统设置的应用信息里强行停止，或重启手机）后再清。这时（或这次学习记录根本没打开）从备份恢复、退回恢复前没做成，同样提示「没做成：学到的词现在存不下，重启键盘后再试」。长按 **删除** 删的词（连同一起删掉的、显示一样的词）没写进学习记录、只在内存里时（存储满，或记录停写），存不下以来没写进去的只有这一次删除，点候选栏上方小条里的 **撤销** 照常撤回，和平常撤销一样；它之前或之后还有别的只在内存里（存不下以后才学到、又删掉的词，或删词以后又打的字），小条说「已经撤销不了了」，什么都不动，别的也不丢。长按 **删除** 时按的那个没删成，提示「候选已经变了，没做」（不带撤销）；一起删掉的显示一样的词平时当场放回，存不下且另有只在内存里的学习时仍删着，别的不丢。固定首位、不再联想、屏蔽的撤销不重写学习记录（固定、不再联想和形码的屏蔽写一条相反的记录，拼音、英文的屏蔽记在各自的文件里），存不下时也照常撤回；这次学习记录根本没打开（只在内存里学）时，撤销删词也说「已经撤销不了了」，词仍删着；删除已经写进学习记录、撤销时重写学习记录没成（记录停写，或重写时存储满）时，小条换成「没撤销成：学到的词现在存不下」，不再带 **撤销** 按钮，不提再试或重启；用户词库页里删词后点底部提示的 **撤销** 没写成时，也提示这一句，撤销不了时同样提示「已经撤销不了了」。只是存储满（像这里填满 `/data`：学习记录还开着，只是写不下）时没清掉、没做成，提示的是「没清掉，再试一次」「没做成，再试一次」（清除、恢复、退回），不说重启：重启没用，清出空间后不重启再试就行；学到的词照常在保存、别的原因没清掉、没做成时也是这两句。存一份备份不重写学习记录，没做成时一律是「没做成，再试一次」。（这几句提示和撤销只由下面 JVM 行的 `LearningClearedTest`、`CandidateMenuUatTest`、`LearningControlTest`、`UnwrittenLearningControlTest`、`BackupControlTest`、`EnginesRecordFaultTest`、`SettingsPagesUatTest` 查，步骤里不做：满盘时撤销的重写成不成要看还剩多少空间，设备上定不准。学习记录连打开都打不开时，这一行留到键盘重启：之后的重试在以后的版本里做。）
+- **JVM**：`StatusAreaNotSavingTest.thePanelSaysLearningIsNotSavedOnlyWhileItIsNot`（saving 为 false 时面板有这一行，为 true 时没有）、`StatusAreaNotSavingTest.thePanelAsksOnlyWhetherLearningSavesNotTheOverview`（面板只问 `LearningOp.Saving`，不等整份 `Overview`）、`UserWordsNotSavingTest.thePageSaysLearningIsNotSavedOnlyWhileItIsNot`（用户词库页顶第一行同样）、ime-core `EnginesRecordFaultTest.aRecordThatStoppedTakingWritesIsNotSaving`（写失败后重开不了时 `Overview.saving` 为 false，`LearningOp.Saving` 的 `rewrites` 也为 false）、`LearnLogTest.aRecordWhoseFileDidNotOpenTakesNoRewrite`（这次没打开的记录 `takesRewrites` 为 false、重写什么都不写，所以恢复、退回没做成时提示先重启；在内存里的、打开着的记录照常重写）、`EnginesRecordFaultTest.aRecordWhoseWritesKeepFailingIsNotSavingUntilOneIsWritten`（满盘那样截回、重开都成功而写一直失败时为 false，`rewrites` 仍为 true，后来写成功一次又为 true，不用重启）、`RecordStoreTest.aStoreWhoseWritesKeepFailingIsNotWritingUntilOneIsWritten`（同上，存储这一层）、`RecordStoreTest.aStoreAWriteWasRefusedIsWritingAgainOnceTheLogIsWrittenWhole`（拒过写以后整个文件重写或压缩成功一次就回到在保存）、`EnginesRecordFaultTest.aRecordAWriteWasRefusedIsSavingAgainOnceAClearRewroteIt`（存储恢复后清空学到的，`Overview.saving` 回到 true）、`RecordStoreTest.aCompactionPutInPlaceAfterAWriteRefusedIsWritingOnlyIfWrittenSince`（拒过写以后压缩换上，只有之后真写下过才回到在保存）、`LearningControlTest.aClearOfASpanTheDiskRefusedTakesItFromMemoryToo`（存不下时打的字，清掉最近时从内存里也忘掉；这段时间之前没写下的也一起）、ime-core `LearningControlTest.aClearOfARecordThatStoppedTakingWritesFailsWithNothingCleared`（写失败后截不回、重开不了时清除报失败，什么都没清）、`EnginesRecordFaultTest.aClearOfARecordThatStoppedTakingWritesSaysItFailed`（同上）、ime-core `LearningControlTest.aForgetTheFileNeverTookIsTakenBackInMemoryAndOneItHoldsFailsWithItsRewrite`（没写进文件的删词，存储满或记录停写时，撤销在内存里撤回；已写进文件、重写时存储满则报失败，什么都没撤回，只记一次错；一次操作写下一半时重写去掉写下的那部分）、`LearningControlTest.anActTheFileRefusedIsTakenBackOnlyWhereNothingElseIsUnwritten`（存储满时在内存里撤回只在没写进去的只有这次操作时做：删的是文件里的词、别的都写下了，撤回，词回来；删的是存不下以后才学到的词、之前另有没写下的、或删后又学了别的，答撤销不了，什么都不动，别的都留着）、`LearningControlTest.aForgetTakenBackFailsWhereTheFileDoesNotReadOrIsStillFull`（存储满时没写进文件的删词，撤销时文件读不出；或一次删除只写下一半，撤销时存储仍满：答没撤销成，只记一次错，什么都没撤回，再撤是撤销不了）、`EnginesRecordFaultTest.aForgetTheDiskRefusedIsTakenBackInMemory`（引擎这一层：存储满时删词的撤销答 Done，词回来）、`EnginesRecordFaultTest.aForgetOnDiskWhoseRewriteFailsSaysItFailed`（删词已在文件里、撤销的重写写不成：答 Failed，之后再撤是撤销不了）、`BackupControlTest.aRecordThatStoppedTakingWritesIsNeitherRestoredToNorRevertedAndAStashWaits`（停写的记录上从备份恢复、退回恢复前都报失败，什么都没动）、app `LearningClearedTest.aFailedClearSaysToRestartOnlyWhenTheRecordTakesNoRewrite`（清除失败时记录停写，提示「没清掉：学到的词现在存不下，重启键盘后再清」；存储满、在保存或问不到时提示「没清掉，再试一次」）、`LearningClearedTest.aBackupActThatFailedSaysToRestartOnlyIfItRewritesTheRecord`（恢复、退回没做成时只在记录停写时提示先重启，存储满、在保存、问不到时「没做成，再试一次」；存一份备份等不重写记录的没做成一律「没做成，再试一次」）、`CandidateMenuUatTest.anUndoThatFailedSaysWhatToDo`（撤销小条：引擎答没撤销成时说「没撤销成：学到的词现在存不下」、不带 **撤销**、不去问记录在不在保存，撤销不了时说「已经撤销不了了」）、`SettingsPagesUatTest.anUndoOfARemovalNotTakenBackSaysWhy`（用户词库页删词后撤销，引擎答没撤销成时提示「没撤销成：学到的词现在存不下」，答撤销不了时提示「已经撤销不了了」）、ime-core `RecordStoreTest.aRewriteOfALogNotOpenedAgainBehindItsCompactionThrowsAndWritesNothing`（换上压缩后记录没能重开时，清除报失败，什么都不写）、`UnwrittenLearningControlTest.aForgetOnARecordThatDidNotOpenIsNoLongerTakenBack`（这次没打开的记录上撤销删词：说撤销不了，词仍删着，不报存储错）、`UnwrittenLearningControlTest.whatIsUnwrittenIsCountedARecordAndAnewOnceTheStateIsTheFiles`（未写下的按条计数，重写或内存撤回后归零）、`EnginesRecordFaultTest.aDeleteRefusedAfterTheOneAlikeTakesItBackOnlyWhereNothingElseIsUnwritten`（按下的候选被拒、同形词已删：没有别的未写下时收回；有时同形词仍删着、提示「候选已经变了，没做」、别的不丢）、`UnwrittenLearningControlTest.aPinOrANoPredictIsTakenBackByItsOppositeWhateverIsUnwritten`（存不下且另有只在内存里的学习时，固定首位、不再联想照常撤回，别的不丢）；设备上不跑。
+
+### WD-47 [P1] 学习记录有一部分读不出来：提示一次，读得出的照常；另存的副本清空时删掉
+- **前提**：B0-设置；在「普通文本」框打 n i h a o 空格（「你好」），再按 PY-34 让「汪小明」成为你的词。强行停止应用，弄坏 `files/engine/learn.log` 里「你好」那条记录的正文（`adb root` 后先 `adb shell grep -abo 你好 /data/data/<包名>/files/engine/learn.log` 找到第一处的偏移 N，再 `adb shell "printf '\\377' | dd of=/data/data/<包名>/files/engine/learn.log bs=1 seek=N conv=notrunc"` 改掉那一个字节）：改的是记录里的字，不是记录的长度，不要随便挑偏移，落在长度上时读到那里就停、后面不再照常；再在同一目录放一个 `learn.log.unreadable.x`（名字像但不是副本）。
+- **操作**：回测试页点「普通文本」框弹出键盘，看提示；点 w x m；强行停止再弹出一次键盘；看 `files/engine/` 里的文件。再打开 **用户词库**，点 **清空学到的**（不勾 **全部清空**），确认；再看 `files/engine/`。
+- **预期**：第一次弹出键盘时提示「学习记录有读不出来的内容……」一次（停 2 秒，不因打字收起）；坏的那条前后读得出的照常（坏的是「你好」那条，后面「汪小明」的记录照读：wxm 里仍有「汪小明」）；`files/engine/` 里有 `learn.log.unreadable`（原文件整份另存）；第二次弹出不再提示，也没有多出 `learn.log.unreadable.1`。清空以后 `learn.log.unreadable` 不在了，`learn.log.unreadable.x` 还在。勾 **全部清空**、清掉最近也一样删副本（这一句只由下面 JVM 行的 `EnginesLearningTest.aClearTakesTheCopiesOfTheRecordKeptAside` 查，步骤里不做）。
+- **JVM**：ime-core `RecordStoreTest.recordsGarbledMidLogAreDroppedAndTheRestReadOn`（中间坏的记录跳过、其余照读、原文件另存）、`RecordStoreTest.aLogThatIsNotOneThisReadsIsKeptAsideAndSaidSo`（整份读不出时另存并报 KeptAside）、`EnginesLearningTest.aClearTakesTheCopiesOfTheRecordKeptAside`（勾不勾全部清空、清掉最近 10 分钟、1 小时、今天，每一行都删 `.unreadable`、`.unreadable.1`，留下 `.unreadable.x`）、`EngineBridgeTest$Made.aLearningRecordThatDoesNotReadIsSaidKeptAside`（读不出的学习记录另存、在键盘上说一次）、`EngineBridgeTest$Made.whatTheEngineCouldNotReadOrWriteIsSaidInItsOwnWords`（KeptAside 说 `learning_kept_aside`，每个进程一次）；设备上不跑。
+
+### WD-48 [P1] 手动加的词、屏蔽的词、常用词、自定义短语存不下：各自提示一次，这次只在内存里
+- **前提**：B0-设置；先按 WD-39 导入常用词（「米字旁 → 米、糸」：导入要写常用词文件，放在下面改权限之前），回测试页打几个字（让学习记录 `files/engine/learn.log` 先建好）。学习记录要是 B0 刚重置后新建的、只有这几个字，整条在同一天里做完（不跨午夜）：目录写不进新文件时，学习记录要新建文件的事（重新打开时把前一天的记录压缩成 `learn.log.compacting`、读坏了另存 `.unreadable`）都会失败并提示学到的词没存下，用掉下面要看的那一次提示。强行停止应用，以 root 让放词表和常用词的两个目录写不进新文件（模拟器上 `adb root` 后 `adb shell stat -c %a <目录>` 记下原来的权限，再 `adb shell chmod 500 /data/data/<包名>/files/engine /data/data/<包名>/files/host-data/pinyin`）：手动加的词、屏蔽的词、常用词都是整份写成新文件再改名，写不进；学习记录只往已有的 `learn.log` 后面追加，照常写下。不要填满 `/data`（WD-46 那样）：那样学习记录也写不进，它没存下的提示和加词、屏蔽没存下的是同一句、每个进程只说一次，在加词对话框里打字时就用掉了，这一条就看不出加词、屏蔽有没有报。中途停下不做了也要先把两个目录的权限改回原来的（或卸载重装）：不改回，之后的用例都存不下词，B0 的重置也删不掉这两个目录里的文件。
+- **操作**：在 **用户词库 → 手动添加的词** 里加「鲸喵屿」（j i n g m i a o y u）；回测试页切到英文打 hello，长按候选「hello」选 **不再提示**；看提示；回拼音打 j i n g m i a o y u，看第一个候选，点 ⌫ 清掉。再按 WD-43 打 mzp，长按候选「糸」选 **从常用词中删除**，看提示。把两个目录的权限改回原来的，不重启，再打 zhonghuaren，长按候选「中国」选 **从常用词中删除**，看提示。最后强行停止，打开 **用户词库 → 手动添加的词**，再看 **词库与短语 → 常用词**。
+- **预期**：加词、屏蔽没存下时键盘上提示「学到的词暂时无法保存：只记在内存里……」一次（再失败不再提示）；这次打 jingmiaoyu 第一个是「鲸喵屿」；删常用词没存下时另提示「自定义短语或常用词的改动没能保存：只记在内存里……」一次（在键盘上固定、删自定义短语也是这一句），不占用上面那一条；改回权限后删「中国」只提示「已从常用词中删除「中国」」（同删「糸」时一样），没有别的提示（「没能保存」那一句每个进程只说一次，这里没提示证明不了存下了：存没存下看强行停止以后的常用词页）；强行停止以后 **手动添加的词** 里没有「鲸喵屿」（没存下），常用词里只剩「米字旁 → 米」、没有「中华人民共和国」：先删的「糸」没存下，后一次删「中国」时连它一起存下了（只存后一次的话「米字旁」那行还是「米、糸」）。
+- **JVM**：ime-core `WordListsTest.aListThatCannotBeWrittenIsKeptInMemory`（写不进的词表留在内存、报 Unsaved）、`EnglishBlocksTest.aBlockThatCannotBeKeptIsBlockedInMemoryAndToldAsUnsaved`（英文屏蔽同样）、`EngineBridgeTest$Made.whatTheEngineCouldNotReadOrWriteIsSaidInItsOwnWords`（Unsaved 在键盘上说 `learning_unkept`，每个进程一次）、`EngineBridgeTest$Made.aPhraseOrCommonWordNotSavedIsSaidOnceInItsOwnWordsNotAsLearning`（常用词、自定义短语没存下说 `user_lists_unkept`，不说学到的词）、`EngineBridgeTest.aKeyboardChangeNotSavedIsSavedWithTheNext`（键盘上改自定义短语没存下，下一次改存下时连它一起存）、`EngineBridgeTest.aCommonWordsChangeNotSavedIsSavedWithTheNext`（常用词同样）；设备上不跑。
+
+### WD-49 [P2] 在别的应用里「用幽默输入法打开」词库文件
+- **前提**：B0-设置；`dict-words.txt`（fixtures 里的）已放到"下载"目录。
+- **操作**：在系统「文件」应用里从设备存储进 `Download`（侧栏里以手机型号或「内部存储」命名的那一项，没有时在 ⋮ 里点 **显示内部存储**；不要从侧栏的「下载」进：那里给应用的地址是 `…/document/msf:NN`，不带文件名，打开方式里没有本应用），长按 `dict-words.txt` → 打开方式 → 幽默输入法；看对话框，点确定，按 WD-11 选"基础词库"导入。
+- **预期**：弹出「您想导入这个词库吗？」，确定后进词库页导入，和在词库页里选文件一样；列表里多出 `dict-words`。
+- **JVM**：`MainActivityTest.aFileIntoTheAppsOwnDirectoriesIsNotOpenedFromOutside`（`content://`、下载里的文件能打开，应用自己目录里的不打开）；打开方式只认地址以 `.dict`、`.scel`、`.txt`、`.fxlb` 结尾的文件（`AndroidManifest.xml` 的 VIEW 过滤器），Rime 的 `.dict.yaml` 不在其中，在词库页里导入（WD-14e）；「打开方式」是系统界面，在真机或模拟器上手工跑。
+
+### WD-58 [P1] 用户词库页顶「改语音的字后问是否记住」
+- **前提**：B0-语音。
+- **操作**：打开 **用户词库**，看页顶第三个开关；关掉，回测试页照 VO-41 改一次；再打开。
+- **预期**：开关默认开，说明写着只有点「记住」才加词；关掉后不问、不加词、开发者页的计数不变；再打开照常问。
+- **JVM**：`VoiceAskUatTest.theSwitchOffAsksNothing`（关掉时不把语音的字交给引擎跟着看、不提示、不计数）、`SettingsUatTest.pagesFromTopToBottom`、`SettingsPagesUatTest.theUsersWordsListsCountsAndDays`（页顶三个开关）；设备上不跑。
+
+### WD-59 [P1] 点「记住」加的词在手动添加的词里，撤销后不在
+- **前提**：B0-语音。
+- **操作**：照 VO-41 改出「徐婧」点 **记住**，打开 **用户词库 → 手动添加的词**；回去照样改一次，点 **记住** 后点 **撤销**，再看。
+- **预期**：点了以后手动添加的词里有「徐婧」（拼音 xu jing），和自己在这页加的一样，可以在这里删；撤销后不在，学到的词不动，学习记录里也不多一条「忘记」。
+- **JVM**：ime-core `EnginesVoiceEditsTest.a word typed again is asked about, added on 记住 and taken off on its 撤销`、`VoiceAskUatTest.aWordTypedAgainIsAskedAboutAndRememberedOnATap`；设备上手动添加的词那一半在 VO-41 的脚本里看。
+
+### WD-50 [P0] 生僻字屏蔽：打开后扩展区的字不再出现，别的表外字照常，关掉就回来
+<!-- 061-rare-char-block.md -->
+- **前提**：B0-设置；**词库与短语 → 生僻字屏蔽** 关着（这一行写「关」）。
+- **操作**：在「普通文本」框打 din，看候选栏；清空。到 **词库与短语 → 生僻字屏蔽** 打开开关（别的不动），返回，看 **词库与短语** 上这一行；回输入框再打 din、da。再到这一页把开关关掉，返回，打 din。
+- **预期**：第一次 din 的候选栏里有扩展区的字（码位 U+20000 以上：读 din 的字全在扩展区，模拟器上可能显示成方框，按码位核对）；打开后这一行写「已屏蔽 N 个字」，din 的候选栏里一个扩展区的字都没有（「顶」「的」之类照常），da 里「大」「打」照常；关掉后这一行写「关」，din 里扩展区的字又出来。翻完 da 的候选（「𤝰」U+24770 在很后面）由下面的 JVM 行查：打开后没有「𤝰」，「龘」「大」「打」照常，关掉后「𤝰」回来；借手机（**不用我的输入习惯**）时照样没有。
+- **JVM**：ime-eval `RareCharsUatTest.turnedOnExtensionBIsGoneTheRestStaysTurnedOffItIsBack`（:lib:ime-eval:uatTest，真数据：da 的全部候选）、ime-core `RareCharContractTest.theDefaultChoiceHoldsBackExtensionBAndTheOutOfTableAsChosen`（默认只挡扩展区）、`RareCharsPageUatTest.thePageHoldsBackAndLetsThrough`（开关存下文件、让引擎重读、词库与短语那一行的副标题）；设备上跑 din。
+
+### WD-51 [P0] 生僻字屏蔽：默认只挡扩展区——诶、囧、龘、闫、裡 都还打得出
+- **前提**：B0-设置；**词库与短语 → 生僻字屏蔽** 打开开关（别的不动）。
+- **操作**：分别打 ei、jiong、da、yan、li，在候选里找「诶」「囧」「龘」「闫」「裡」。
+- **预期**：五个字都在（诶、囧、龘 是其它表外字，闫 是三级字，裡 是繁体字：默认都放行）。
+- **JVM**：ime-eval `RareCharsUatTest.byDefaultOnlyExtensionBIsHeld`（真数据，翻完候选）；设备上不跑。
+
+### WD-52 [P1] 生僻字屏蔽：勾上「其它表外字」后「龘」不出，单独放行「龘」又出；按住拖动连选、撤销
+- **前提**：B0-设置；**词库与短语 → 生僻字屏蔽** 打开开关。
+- **操作**：点「其它表外字」卡片下面的勾选条，看底部提示；返回，打 da 翻候选。再进这一页，搜 da，点「龘」那一格；返回，打 da。再进这一页，点「三级字」卡片进去，长按一格，不抬手往后拖过几格、再往回拖一格，抬手；看这几格和底部提示，点 **撤销**。
+- **预期**：勾上后勾选条是勾上的，写「已屏蔽 N/N」（两个数一样），底部提示「已屏蔽 N 个字」带 **撤销**；da 里没有「龘」，「大」照常。点「龘」后它不再变淡、没有斜线，其它表外字的勾选条变成半选；da 里「龘」回来。拖动时从按住的那格到手指下那格都变成屏蔽（变淡加斜线），往回拖退出的那格恢复；抬手后底部提示「已屏蔽 N 个字」带 **撤销**，点了这几格都回到放行。
+- **JVM**：ime-eval `RareCharsUatTest.theOtherOutOfTableHeldThenOneLetThrough`（真数据）、`RareCharsPageUatTest.thePageHoldsBackAndLetsThrough`（勾选条三态、点格、存下的文件）、`RareCharsPageUatTest.aDragHoldsBackARunAndOneUndoTakesItBack`（按住拖动、往回拖、撤销）、ime-core `RarePageTest.aDragSetsTheRangeToTheStartsOppositeAndLeavesTheRestAsTheyWere`；设备上不跑（拖动手势由 JVM 行查）。
+
+### WD-53 [P1] 生僻字屏蔽：含屏蔽字的词和联想也不出；五笔勾上「其它表外字」后打 adwe 直接上屏「期」（原来和「朞」重码），放行「朞」后又要选
+- **前提**：B0-设置；五笔的 **自动上屏** 开着（默认）。
+- **操作**：切到五笔打 adwe，看候选；**词库与短语 → 生僻字屏蔽** 打开开关、勾上「其它表外字」，返回，打 adwe；再进这一页搜 qi（或粘贴「朞」），点「朞」放行，返回，打 adwe。切到拼音打 dada，看候选；打 da 选「打」，看联想。
+- **预期**：开之前 adwe 有「期」「朞」两个，要选；勾上后打满四码直接上屏「期」；放行「朞」后又是两个、要选。dada 的候选里有含「哒」的词，没有含其它表外字、扩展区字的词；「打」后的联想里也没有。
+- **JVM**：ime-eval `RareCharsUatTest.wubiAutoCommitsTheOneLeftAndAgainChoosesOnceLetThrough`、`RareCharsUatTest.aWordWithAHeldCharacterIsNotOfferedNorPredicted`（真数据）、ime-core `RareCharContractTest.aGateMadeDirectlyHoldsBackEvenTheCommonest`（码表剩一个自动上屏、唯一的字被挡不上屏、同码的短语照常）；设备上不跑。
+
+### WD-54 [P1] 生僻字屏蔽：手写、笔画查字、拆字、滑行里都不出（先勾「其它表外字」；笔画表里没有扩展区的字，笔画查字用其它表外字）
+- **前提**：B0-设置；**词库与短语 → 生僻字屏蔽** 打开开关、勾上「其它表外字」。
+- **操作**：打开手写，在字母区写一个「龘」；拼音里 `u` 笔画查字、`u` 拆字查一个其它表外字；在键上划 选 **滑行输入** 划 da。
+- **预期**：几处的候选里都没有其它表外字和扩展区的字，常用字照常。笔画表里没有扩展区的字（实测 0 个），所以笔画查字这一项用其它表外字查，不用扩展区的。
+- **JVM**：ime-eval `RareCharsUatTest.handwritingStrokesPartsAndGlideOfferNoneHeld`、`RareCharsUatTest.withEveryGroupHeldNoListedChineseInputMethodOffersOne`（每个列出的中文输入法，按键和滑行）、ime-core `RareCharContractTest.theHandwritingPadReadsAroundWhatIsHeld`；设备上不跑。
+
+### WD-55 [P1] 生僻字屏蔽：备份全部带着它，恢复后以备份为准；恢复一份没有它的备份后回到关；借手机时照样生效
+- **前提**：B0-设置；**词库与短语 → 生僻字屏蔽** 打开开关。
+- **操作**：**备份与恢复 → 备份全部**；把开关关掉；**从备份恢复** 选刚才那份；看这一行。再恢复一份做于打开以前的备份（或 0.6.0 的备份）；看这一行。打开开关，工具栏 ⋯ → **不用我的输入习惯**，打 din。
+- **预期**：恢复后这一行是「已屏蔽 N 个字」（以备份为准）；恢复没有它的备份后是「关」（手机上的文件被删）；恢复前的确认框写着没有生僻字屏蔽的备份恢复后它是关的。借手机时 din 里照样没有扩展区的字。
+- **JVM**：`UserDataManagerTest.theConfigDataAndThemesAreBackedUpWhereBackupsHaveThemAndRestoredIntoTheirOwnDirectories`（`pinyin/rarechars.txt` 进备份、恢复回原处）、`UserDataManagerTest.theUsersTextFilesFollowTheBackupItsCollectionsAndDotEntriesStay`（备份里没有它，手机上的被删）、ime-eval `RareCharsUatTest.turnedOnExtensionBIsGoneTheRestStaysTurnedOffItIsBack`（借手机时照样挡）；设备上不跑。
+
+### WD-56 [P1] 生僻字屏蔽：加一个含被屏蔽字的词，对话框当场提示；点「放行这个字」后打得出；用户词库里含屏蔽字的词标着「含屏蔽的字」
+- **前提**：B0-设置；在 **用户词库 → 手动添加的词** 里先加「龘龘」（拼音 da da）；**词库与短语 → 生僻字屏蔽** 打开开关、勾上「其它表外字」。
+- **操作**：打开 **用户词库 → 手动添加的词**，看「龘龘」那一行，点它；点 **放行 龘**；再看这一行，回测试页打 dada。点 **+**，词写「𤝰」……（或别的被挡的字），看输入框下面。
+- **预期**：「龘龘」那一行下面写「含屏蔽的字：龘」；点开的对话框里有 **放行 龘**；放行后这一句没了，dada 里有「龘龘」。加词对话框里写了被挡的字时，输入框下马上提示「"X" 是屏蔽的生僻字，加了也打不出」，旁边有 **放行这个字**；不放行也能保存。
+- **JVM**：`RareCharsPageUatTest.aUserWordWithACharacterHeldIsMarkedAndLetThrough`（列表的标记、放行后文件里多了这个字且标记消失、加词对话框的提示和按钮）、ime-core `RareChoiceTest.theCharactersHeldInAWord`、`HeldWordsTest.theUserModelAsksItsWordsAsTheDictionarysAndTheUsersByText`（用户的词含被挡的字不给出）；设备上不跑。
+
+### WD-57 [P2] 生僻字屏蔽：搜拼音、粘贴一个字定位、粘贴一级字显示「不能屏蔽」、恢复默认、设置搜索能搜到这一页
+- **前提**：B0-设置；**词库与短语 → 生僻字屏蔽** 打开开关。
+- **操作**：在页上的搜索框打 da（拼音键盘打了按回车上屏字母）；清空，粘贴「大」；清空，粘贴「龘」；清空。点「三级字」卡片下面的勾选条，右上角菜单 → **恢复默认**，确定。点一下搜索框（键盘弹出来），不打字，直接点一张分组卡片进去，再打几个键，返回。设置首页搜「生僻」。转一下屏。
+- **预期**：搜 da 列出读 da 的字（跨组，格子上的读音是 dá、dà……）；粘贴「大」写「大：常用字，不能屏蔽」，没有格子；粘贴「龘」只有「龘」一格；恢复默认先问「回到只屏蔽扩展区，并清空单独屏蔽和放行的字？」，确定后三级字的勾选条回到不勾、扩展区的回到勾上，底部有 **撤销**；搜索框弹着键盘时点开分组：键盘收下，搜索框不再有焦点，再按的键不会在看不见的搜索框里搜，返回时是分组卡片、不是搜索结果（这一步脚本不跑，JVM 上断言，设备上手工看）；设置搜索里有「生僻字屏蔽」，点了进这一页；转屏后改动和搜的字都还在。
+- **JVM**：`RareCharsPageUatTest.thePageHoldsBackAndLetsThrough`（搜拼音、粘贴一级字、粘贴一个字定位）、`RareCharsTouchTest.aGroupOpenedPutsTheSearchsKeyboardAway`（搜索框弹着键盘时点开分组：键盘收下、搜索框不再有焦点）、`RareCharsPageUatTest.resetATurnAndALaterVersionsFile`（恢复默认、转屏）、`SettingsIndexTest.theRareCharactersPageIsFound`、ime-core `RarePageTest.aSearchFindsASpellingOrThePastedCharacter`；设备上跑搜 da 和恢复默认。
+
+### WD-60 [P1] 生僻字屏蔽：默认屏蔽的扩展区排第一，一打开开关第一栏就有屏蔽的字
+- **前提**：B0-设置；**词库与短语 → 生僻字屏蔽** 关着，没改过。
+- **操作**：进 **词库与短语 → 生僻字屏蔽**，看四张卡片的顺序；打开开关，看第一张卡片的勾选条和页顶的说明。
+- **预期**：卡片两列两行，顺序是 **扩展区**、**三级字**、**繁体字**、**其它表外字**：默认屏蔽的扩展区在最前，其余三组照原来的先后。打开后扩展区卡片的勾选条勾着，写「已屏蔽 N/N」，N 大于 0，和页顶「已屏蔽 N 个字」的 N 一样；三级字写「已屏蔽 0/…」。
+- **JVM**：ime-core `RarePageTest.thePageListsTheGroupsHeldByDefaultFirstTheRestInTheirOrder`（页上的组序：默认屏蔽的在前，其余按原序；存的文件和组的编号不变）、`RareCharsPageUatTest.thePageHoldsBackAndLetsThrough`（卡片的先后：扩展区、三级字、繁体字、其它表外字）；设备上照跑。
+
+### WD-61 [P1] 生僻字屏蔽：九键、全键盘来回切，照样挡；开关还开着，卡片上看得出默认挡什么
+<!-- 061-rare-switch-research.md：测试版 1 反馈「切到九键再切回全键盘不好使」 -->
+- **前提**：B0-设置；**词库与短语 → 生僻字屏蔽** 关着。
+- **操作**：到 **生僻字屏蔽** 看开关下的说明和四张卡片，打开开关（别的不动），返回。**输入法 → 拼音 → 键盘** 选 **九键**，回「普通文本」框点 3 4 6（din），看候选栏，清空。回 **词库与短语**，看这一行，进 **生僻字屏蔽** 看开关，返回。键盘选回 **全键盘**，打 din，看候选栏，清空。强制停止应用（`am force-stop`）后再打 din。
+- **预期**：说明里写着改动在离开本页后生效；关着时扩展区卡片的勾选条也是勾着的（默认只挡扩展区），三级字卡片的样字里有犇（这类字要勾三级字才挡）。九键 346 和全键盘 din 的候选栏里都没有扩展区的字（码位 U+20000 以上，关着时 din 里有 𨈖）；中途这一行仍写「已屏蔽 N 个字」，开关仍开着；强制停止后再打 din 也没有。
+- **JVM**：ime-core `RareCharContractTest.theChoiceOutlivesAKeyboardSwitch`（关着时先在九键、全键盘、18 键上都打过，九键上打开，不重读就切全键盘、18 键、再九键：都不出，找挡的词只找一次）；设备上照跑。
+
+### WD-62 [P1] 生僻字屏蔽：进页是四张卡片，一屏看全
+<!-- 061-settings-cards.md §3 -->
+- **前提**：B0-设置。
+- **操作**：词库与短语 → 生僻字屏蔽，等页面读好；不滚动，看页面。
+- **预期**：开关、搜索框下面是四张卡片，两列两行：扩展区、三级字、繁体字、其它表外字；每张有一句说明、一行样字，下面一条是勾选框和「已屏蔽 N/总数」；
+  四张都在屏幕里（1080×2340），页面上没有格子，右边没有字母条。（窗口高不到 600 dp 的设备上没有样字那一行，四张的卡身和勾选条仍都在屏幕里。）
+- **JVM**：`RareCharsPageUatTest.fourCardsAndOffOnlyToLookAt`、`SettingsCardsLayoutTest.smallPhonesWindow`（360×568 和 393×851 字号 1.3、中英文，四张的卡身和勾选条都在可见区里）；设备上照跑，看一次样字画得出。
+
+### WD-63 [P1] 生僻字屏蔽：点卡片进去看字，返回回到卡片；勾选条是整组，标题栏能撤回
+- **前提**：B0-设置；生僻字屏蔽开着，默认。
+- **操作**：点「三级字」卡片的名字；看页面；点一个字；按返回键；看「三级字」卡片；点它下面的勾选条；等底部的提示自己消失；点标题栏的 ↶。
+- **预期**：进去后标题是「三级字」，只有三级字的格子，顶上一条写「已屏蔽 0/1,605」和勾选框，往下滚它不走；点的字变淡加斜线，顶上变「已屏蔽 1/1,605」；
+  返回后是四张卡片（没有退出本页），三级字写「已屏蔽 1/1,605」，勾选框是半选；点勾选条后是「已屏蔽 1,605/1,605」、全选，底部提示「已屏蔽 1,604 个字」；
+  提示消失后点 ↶，回到「已屏蔽 1/1,605」、半选，↶ 变灰。转屏会存一次，存过之后 ↶ 也变灰。
+- **JVM**：`RareCharsCardsUatTest.theTitleBarsUndoTakesBackTheLastStepTillASave`（整组勾、提示过后 ↶ 撤回、点一格也算一步、存过之后变灰）、`RareCharsPageUatTest.thePageHoldsBackAndLetsThrough`（点格、组页的固定条）。
+
+### WD-64 [P2] 生僻字屏蔽：开关关着，只有勾选条变淡、勾不了，卡片还能进去看
+- **前提**：B0-设置；生僻字屏蔽关着。
+- **操作**：看四张卡片；点「繁体字」的勾选条；点「繁体字」卡片的名字；点一个字。
+- **预期**：组名、说明、样字不淡，四条勾选条是淡的；点勾选条不变；进去能看到格子，顶上写着开关关着只能看；点字不变。
+- **JVM**：`RareCharsPageUatTest.fourCardsAndOffOnlyToLookAt`、`GroupCardTest.unusable, only the strip fades and stops, the body still opens`、`SettingsCardsTest.an unusable strip is dimmed and inert`。

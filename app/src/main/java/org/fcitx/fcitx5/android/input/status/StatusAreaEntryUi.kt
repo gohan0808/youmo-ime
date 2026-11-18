@@ -15,7 +15,10 @@ import android.view.ViewGroup
 import android.widget.ImageView
 import org.fcitx.fcitx5.android.data.theme.Theme
 import org.fcitx.fcitx5.android.input.AutoScaleTextView
+import org.fcitx.fcitx5.android.input.bar.BarIconDrawables
+import org.fcitx.fcitx5.android.input.bar.ui.ToolButton
 import org.fcitx.fcitx5.android.input.keyboard.CustomGestureView
+import org.fcitx.fcitx5.android.input.keyboard.canvas.PackIcons
 import splitties.dimensions.dp
 import splitties.resources.drawable
 import splitties.views.dsl.constraintlayout.above
@@ -87,10 +90,22 @@ class StatusAreaEntryUi(override val ctx: Context, private val theme: Theme) : U
         }
     }
 
+    private val icons = PackIcons.of(theme)
+
+    // the entry bound last: a theme's icon read after it was bound again draws nothing of it
+    private var shown: StatusAreaEntry? = null
+
     fun setEntry(entry: StatusAreaEntry) {
         val contentColor =
             if (entry.active) theme.genericActiveForegroundColor else theme.keyTextColor
-        if (entry.icon != 0) {
+        shown = entry
+        val named = entry.named
+        if (named != null) {
+            icon.visibility = View.VISIBLE
+            textIcon.visibility = View.GONE
+            // a theme's of its name in the cell's colour, nothing till it is read (the cell bound again then), else the app's
+            icon.imageDrawable = BarIconDrawables.of(ctx, icons, named, contentColor, ctx.dp(ICON_DP)) { if (shown === entry) setEntry(entry) }
+        } else if (entry.icon != 0) {
             icon.visibility = View.VISIBLE
             textIcon.visibility = View.GONE
             icon.imageDrawable = ctx.drawable(entry.icon)!!.apply {
@@ -105,6 +120,7 @@ class StatusAreaEntryUi(override val ctx: Context, private val theme: Theme) : U
         bkgDrawable.paint.color =
             if (entry.active) theme.genericActiveBackgroundColor else theme.keyBackgroundColor
         label.text = entry.label
+        root.alpha = if (entry.available) 1f else ToolButton.UNAVAILABLE_ALPHA
     }
 
     private fun getFirstCharacter(s: String): String {
@@ -112,5 +128,10 @@ class StatusAreaEntryUi(override val ctx: Context, private val theme: Theme) : U
         val iterator = BreakIterator.getCharacterInstance()
         iterator.setText(s)
         return s.substring(iterator.first(), iterator.next())
+    }
+
+    private companion object {
+        // the app's vectors' side
+        const val ICON_DP = 24
     }
 }

@@ -166,6 +166,23 @@ class StrokeFilterTest {
     }
 
     @Test
+    fun aCharacterTheMainlandWritesGoesByThatOrderAloneOneItDoesNotByAny() {
+        // 望 as the mainland writes it is nzphhsh: its other order (rime-stroke's Taiwan one) keeps it no longer (ST-120's 艳);
+        // 样 and 杨, which it does not know, by the table's
+        val mainland = mapOf('望'.code to "nzphhsh")
+        val f = StrokeFilter(FakePinyin(mapOf("yang" to yang)), { strokes }, pageSize = 3, mainland = { cp, drawn -> mainland[cp]?.startsWith(drawn) })
+        "yang".forEach { f.apply(Action.Key(it)) }
+        f.apply(Action.Stroke('h'))
+        assertEquals(listOf("样", "杨"), f.apply(Action.Stroke('s')).candidates)
+        assertEquals(listOf("样", "杨"), f.candidates(0, 100).map { it.text })
+        f.apply(Action.Backspace)
+        f.apply(Action.Backspace)
+        f.apply(Action.Stroke('n'))
+        assertEquals(listOf("养", "羊", "🐑", "望"), f.candidates(0, 100).map { it.text })
+        assertEquals(listOf("望"), f.apply(Action.Stroke('z')).candidates)
+    }
+
+    @Test
     fun aPickIsTheSessionsCandidateAtItsOwnIndexTheStrokesGone() {
         type("yang")
         filter.apply(Action.Stroke('n'))
@@ -426,5 +443,107 @@ class StrokeFilterTest {
         assertEquals(listOf("养", "羊", "🐑"), s.candidates)
         assertEquals(s.candidates, s.candidates.indices.map { filter.lookedUp(it) })
         assertEquals(s.candidates, s.candidates.indices.map { filter.readingOf(it)?.single()?.text })
+    }
+
+    // 首页单字: after a stroke the first stays, the first [singles] characters alone come right after it with their
+    // emoji, the words they pass after them in their order. 王 is h: every candidate here starts with it
+    private fun singles(words: List<String>, singles: Int, pageSize: Int = 3): Pair<FakePinyin, StrokeFilter> {
+        val pinyin = FakePinyin(mapOf("x" to words))
+        val filter = StrokeFilter(pinyin, { strokes }, pageSize = pageSize, singles = singles)
+        filter.apply(Action.Key('x'))
+        filter.apply(Action.Stroke('h'))
+        return pinyin to filter
+    }
+
+    private val wang = listOf("王者", "王国", "样子", "王", "🙂", "杨树", "样", "杨", "望")
+
+    @Test
+    fun theFirstSinglesComeRightAfterTheFirstWithTheirEmojiTheWordsAfterThemInOrder() {
+        val rows = listOf(
+            Triple(0, "none: as the session has them", wang),
+            Triple(1, "one: 王 and its 🙂 after the first", listOf("王者", "王", "🙂", "王国", "样子", "杨树", "样", "杨", "望")),
+            Triple(2, "two: 样 next, the words after in their order", listOf("王者", "王", "🙂", "样", "王国", "样子", "杨树", "杨", "望")),
+            Triple(5, "five, more than there are: every one", listOf("王者", "王", "🙂", "样", "杨", "望", "王国", "样子", "杨树")),
+        )
+        assertRows(rows, { (n, why) -> "$n singles, $why" }) { (n, _, expected) ->
+            val (_, filter) = singles(wang, n)
+            assertEquals(expected, filter.candidates(0, 100).map { it.text })
+        }
+        // the page shows them: the first, then 王 and its 🙂
+        val pinyin = FakePinyin(mapOf("x" to wang))
+        val filter = StrokeFilter(pinyin, { strokes }, pageSize = 3, singles = 2)
+        filter.apply(Action.Key('x'))
+        assertEquals(listOf("王者", "王", "🙂"), filter.apply(Action.Stroke('h')).candidates)
+    }
+
+    @Test
+    fun aFirstAloneIsNoneOfThemTooFewAreAsManyAsThereAreOnesAlreadyThereStillMoved() {
+        // two singles asked for, each row the session's candidates and what the filter shows
+        val rows = listOf(
+            Triple("the first a character alone: it stays, and two more come after it", listOf("王", "王者", "王国", "样", "杨"), listOf("王", "样", "杨", "王者", "王国")),
+            Triple("one alone: that one", listOf("王者", "王国", "样子", "望"), listOf("王者", "望", "王国", "样子")),
+            Triple("none: as it was", listOf("王者", "王国"), listOf("王者", "王国")),
+            Triple("one already second: the next moved up after it all the same", listOf("王者", "王", "样子", "样"), listOf("王者", "王", "样", "样子")),
+            Triple("an emoji after the first stays with it", listOf("王者", "😀", "王国", "王"), listOf("王者", "😀", "王", "王国")),
+        )
+        assertRows(rows, { it.first }) { (_, words, shown) ->
+            assertEquals(shown, singles(words, 2).second.candidates(0, 9).map { it.text })
+        }
+    }
+
+    @Test
+    fun aSingleFarDownComesUpPastManyWords() {
+        val words = (1..20).map { "王$it" } + "样"
+        val (pinyin, filter) = singles(words, 1, pageSize = 5)
+        assertEquals(listOf("王1", "样", "王2", "王3", "王4"), filter.candidates(0, 5).map { it.text })
+        assertEquals(listOf("王1", "样", "王2", "王3", "王4"), filter.apply(Action.Refine).candidates)
+        // picked at its place shown: the session's own
+        assertEquals("样", filter.apply(Action.Select(1)).commit)
+        assertEquals(Action.Pick(20), pinyin.actions.last())
+    }
+
+    @Test
+    @Uat("PY-136")
+    fun aMovedCandidatesOffersPinBlockReasonAndCardAreOfItsOwnPlace() {
+        val inner = FakePinyin(mapOf("x" to wang))
+        val session = object : Session by inner {
+            override fun readingOf(index: Int) = listOf(WordReading(wang[index], 0, IntArray(0)))
+            override fun lookedUp(index: Int) = wang[index]
+        }
+        val filter = StrokeFilter(session, { strokes }, pageSize = 3, singles = 2)
+        filter.apply(Action.Key('x'))
+        filter.apply(Action.Stroke('h'))
+        // shown second: 王, the session's fourth
+        assertEquals("王", filter.lookedUp(1))
+        assertEquals("王", filter.readingOf(1)?.single()?.text)
+        assertEquals(setOf(Offer.FORGET), filter.offers(1))
+        filter.why(1)
+        assertEquals(3, inner.whys.last())
+        filter.apply(Action.Pin(1))
+        assertEquals(Action.Pin(3), inner.actions.last())
+        filter.apply(Action.Unpin(1))
+        assertEquals(Action.Unpin(3), inner.actions.last())
+        // blocked: gone from the session's, kept and ordered again, 样 and 杨 now after the first
+        val s = filter.apply(Action.Block(1))
+        assertEquals(Action.Block(3), inner.actions.last())
+        assertEquals(listOf("王者", "样", "杨"), s.candidates)
+    }
+
+    @Test
+    @Uat("PY-136")
+    fun theOrderIsMadeAgainAtEachStrokeAndBackspaceAndAPageTurnGoesOnFromIt() {
+        val (_, filter) = singles(wang, 2)
+        // the second page: the second alone, then the words passed in their order
+        assertEquals(listOf("样", "王国", "样子"), filter.apply(Action.NextPage).candidates)
+        // 一丨: 王 is hhsh, 样 杨 hs...; 望 hs too. 王者 and 王国 go, 样子 first
+        assertEquals(listOf("样子", "样", "杨"), filter.apply(Action.Stroke('s')).candidates)
+        assertEquals(listOf("样子", "样", "杨", "杨树", "望"), filter.candidates(0, 9).map { it.text })
+        assertEquals(listOf("王者", "王", "🙂"), filter.apply(Action.Backspace).candidates)
+    }
+
+    @Test
+    fun noSinglesTheSessionsOrder() {
+        val (_, filter) = singles(wang, 0)
+        assertEquals(wang.take(3), filter.candidates(0, 3).map { it.text })
     }
 }

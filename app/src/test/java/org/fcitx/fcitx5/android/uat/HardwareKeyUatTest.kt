@@ -10,12 +10,16 @@ import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.TextView
 import org.fcitx.fcitx5.android.FcitxApplication
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.Uat
+import org.fcitx.fcitx5.android.assertRows
 import org.fcitx.fcitx5.android.core.CandidateWord
 import org.fcitx.fcitx5.android.core.FcitxKeyMapping
+import org.fcitx.fcitx5.android.core.FormattedText
 import org.fcitx.fcitx5.android.core.InputMethodEntry
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog
@@ -24,15 +28,20 @@ import org.fcitx.fcitx5.android.engine.learn.control.LearningOp
 import org.fcitx.fcitx5.android.engine.learn.control.LearningResult
 import org.fcitx.fcitx5.android.engine.learn.control.MenuItem
 import org.fcitx.fcitx5.android.engine.learn.control.WordKind
+import org.fcitx.fcitx5.android.engine.reading.CandidateCard
+import org.fcitx.fcitx5.android.engine.reading.CharCard
+import org.fcitx.fcitx5.android.engine.reading.WordCard
 import org.fcitx.fcitx5.android.host.HostEvent
 import org.fcitx.fcitx5.android.input.CandidatesView
 import org.fcitx.fcitx5.android.input.KeyboardHarness
+import org.fcitx.fcitx5.android.input.candidates.CharCardView
+import org.fcitx.fcitx5.android.input.candidates.WordCardView
 import org.fcitx.fcitx5.android.input.candidates.floating.FloatingCandidatesMode
 import org.fcitx.fcitx5.android.input.candidates.floating.FloatingCandidatesOrientation
-import org.fcitx.fcitx5.android.input.keyboard.HandwritingKeyboard
 import org.fcitx.fcitx5.android.input.keyboard.ImKeyboards
 import org.fcitx.fcitx5.android.input.keyboard.T9Keyboard
 import org.fcitx.fcitx5.android.input.keyboard.TextKeyboard
+import org.fcitx.fcitx5.android.input.preedit.CodeRowStyle
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -61,16 +70,16 @@ class HardwareKeyUatTest {
 
     private fun entry(name: String, label: String = name) = InputMethodEntry(name, name, "", "", label, "zh_CN", "androidengine", false)
     private val wubi = entry(InputMethodCatalog.WUBI, "五")
-    private val handwriting = entry(InputMethodCatalog.HANDWRITING, "写")
 
     private fun harness(
         vararg enabled: InputMethodEntry = arrayOf(KeyboardHarness.PINYIN, KeyboardHarness.ENGLISH),
         im: InputMethodEntry = enabled.first(),
         keyboards: ImKeyboards.Chosen? = null,
+        codeRow: CodeRowStyle = CodeRowStyle.Embedded,
     ) =
-        KeyboardHarness(im = im, keyboards = keyboards).also {
+        KeyboardHarness(im = im, keyboards = keyboards, codeRow = codeRow).also {
             h = it
-            it.api.availableIme = arrayOf(KeyboardHarness.PINYIN, KeyboardHarness.ENGLISH, wubi, handwriting)
+            it.api.availableIme = arrayOf(KeyboardHarness.PINYIN, KeyboardHarness.ENGLISH, wubi)
             it.api.enabledIme = arrayOf(*enabled)
         }
 
@@ -160,6 +169,44 @@ class HardwareKeyUatTest {
     }
 
     private inline fun <reified T : View> KeyboardHarness.showing(): Boolean = KeyboardHarness.all(inputView).any { it is T && shown(it) }
+
+    /**
+     * The floating candidates window's text of [code] typed on the hardware keyboard with the code row
+     * [style]: the panel the engine shows for it, as [CodeInFieldUatTest] sends it.
+     */
+    private fun floatingWindowTyping(style: CodeRowStyle, code: String): Pair<String, List<String>> {
+        val h = harness(codeRow = style).start()
+        // a key from the hardware keyboard: the touch keyboard away, the candidates by the cursor
+        h.type(code.take(1))
+        val panel = HostEvent.InputPanel(FormattedText(arrayOf(code), intArrayOf(0), code.length), FormattedText.Empty, FormattedText.Empty, code = true)
+        h.api.inputPanelCached = panel
+        h.emit(panel)
+        h.emit(HostEvent.Paged(listOf(CandidateWord("", "你好", "")), 0, false, true))
+        val shown = KeyboardHarness.all(h.candidatesView).filter { it.isShown }.filterIsInstance<TextView>()
+            .map { it.text.toString() }.filter { it.isNotEmpty() }.toList()
+        val field = h.field.text.toString()
+        h.close()
+        this.h = null
+        return field to shown
+    }
+
+    @Test
+    @Uat("HK-46")
+    fun theCodeInTheFieldIsNotInTheFloatingWindowToo() {
+        val inField = floatingWindowTyping(CodeRowStyle.InField, "nihao")
+        val above = floatingWindowTyping(CodeRowStyle.Embedded, "nihao")
+        assertRows(
+            "in the field: the code there, the window the candidates alone" to {
+                assertEquals("nihao", inField.first)
+                assertFalse(inField.second.toString(), inField.second.any { "nihao" in it })
+                assertTrue(inField.second.toString(), "你好" in inField.second)
+            },
+            "on the keyboard: the window draws the code over its candidates, the field none" to {
+                assertEquals("", above.first)
+                assertTrue(above.second.toString(), above.second.any { "nihao" in it })
+            },
+        )
+    }
 
     @Test
     @Uat("HK-30")
@@ -282,17 +329,6 @@ class HardwareKeyUatTest {
     }
 
     @Test
-    @Uat("HK-14")
-    fun ctrlShiftGoesRoundSkippingHandwriting() {
-        // pinyin on the nine keys: a hardware keyboard types full pinyin in it whatever its keyboard
-        val h = harness(KeyboardHarness.PINYIN, KeyboardHarness.ENGLISH, wubi, handwriting, keyboards = KeyboardHarness.NINE_KEYS).start()
-        // typed on first: the hardware keyboard's turn, where handwriting takes no keys
-        h.type("a")
-        val seen = (1..4).map { h.ctrlShift(); h.current }
-        assertEquals(listOf(InputMethodCatalog.ENGLISH, InputMethodCatalog.WUBI, InputMethodCatalog.PINYIN, InputMethodCatalog.ENGLISH), seen)
-    }
-
-    @Test
     @Uat("HK-15")
     fun shiftThenCtrlToo() {
         val h = harness().start()
@@ -321,31 +357,6 @@ class HardwareKeyUatTest {
     }
 
     @Test
-    @Uat("HK-18")
-    fun handwritingTypedOnIsPinyin() {
-        val h = harness(KeyboardHarness.PINYIN, KeyboardHarness.ENGLISH, handwriting, im = handwriting).start()
-        h.synced()
-        assertTrue(h.showing<HandwritingKeyboard>())
-        h.type("ni ")
-        assertEquals(InputMethodCatalog.PINYIN, h.current)
-        assertFalse(h.touchKeyboardUp)
-        assertEquals("ni ".map { it.toString() }, h.sent())
-    }
-
-    @Test
-    @Uat("HK-19")
-    fun theTouchKeyboardBackIsHandwriting() {
-        val h = harness(KeyboardHarness.PINYIN, KeyboardHarness.ENGLISH, handwriting, im = handwriting).start()
-        h.synced()
-        h.type("ni ")
-        h.touchKeyboardButton()
-        h.synced()
-        assertTrue(h.touchKeyboardUp)
-        assertEquals(InputMethodCatalog.HANDWRITING, h.current)
-        assertTrue(h.showing<HandwritingKeyboard>())
-    }
-
-    @Test
     @Uat("HK-20")
     fun nineKeysTypedOnAndBack() {
         val h = harness(KeyboardHarness.PINYIN, KeyboardHarness.ENGLISH, keyboards = KeyboardHarness.NINE_KEYS).start()
@@ -356,21 +367,6 @@ class HardwareKeyUatTest {
         h.synced()
         assertTrue(h.touchKeyboardUp)
         assertTrue(h.showing<T9Keyboard>())
-    }
-
-    @Test
-    @Uat("HK-22")
-    fun aShortcutsChoiceIsKeptWhenTheTouchKeyboardIsBack() {
-        val h = harness(KeyboardHarness.PINYIN, KeyboardHarness.ENGLISH, handwriting, im = handwriting).start()
-        h.synced()
-        h.type("ni ")
-        h.ctrlShift()
-        val chosen = h.current
-        h.press(KeyEvent.KEYCODE_ESCAPE)
-        h.touchKeyboardButton()
-        h.synced()
-        assertEquals(chosen, h.current)
-        assertFalse(h.showing<HandwritingKeyboard>())
     }
 
     @Test
@@ -466,6 +462,34 @@ class HardwareKeyUatTest {
         assertNotNull(keyboard)
         // split: G and V on both halves
         assertEquals(2, h.texts().count { it == "g" })
+    }
+
+    // the floating candidates window's cards: one column, in landscape too (061-word-card.md §3.5)
+    @Test
+    @Uat("HK-47")
+    @Config(qualifiers = "w851dp-h393dp-land-440dpi-keysexposed-qwerty")
+    fun theFloatingWindowsCardsAreOneColumn() {
+        val h = harness().start()
+        h.api.learned = ::learned
+        val yinhang = WordCard(
+            "银行", listOf("yín", "háng"), listOf("ㄧㄣˊ", "ㄏㄤˊ"),
+            listOf(WordCard.Row("银", "yín", "ㄧㄣˊ", "钅", 11, null), WordCard.Row("行", "háng", "ㄏㄤˊ", "行", 6, WordCard.readingOf("háng", "ㄏㄤˊ"))),
+        )
+        h.api.candidateCards["银行"] = CandidateCard.Word("yín háng", yinhang)
+        h.api.charCards["行"] = CharCard("行", listOf(CharCard.Row("háng", "ㄏㄤˊ", listOf("银行"), inWord = true)), "行", 6, null, null)
+        h.type("y")
+        h.emit(HostEvent.Paged(listOf(CandidateWord("", "银行", ""), CandidateWord("", "因为", "")), 0, false, false))
+        val word = KeyboardHarness.all(h.candidatesView).filterIsInstance<TextView>().first { it.isShown && it.text.toString() == "银行" }
+        generateSequence(word as View) { it.parent as? View }.first { it.isLongClickable }.performLongClick()
+        h.idle()
+        val menu = checkNotNull(h.candidatesView.candidateActionMenu)
+        fun head() = (menu.listView!!.adapter.getView(0, null, menu.listView!!) as FrameLayout).getChildAt(0)
+        check(head().performClick())
+        h.idle()
+        assertEquals(LinearLayout.VERTICAL, (head() as WordCardView).orientation)
+        check((head() as WordCardView).rows[1].performClick())
+        h.idle()
+        assertEquals(LinearLayout.VERTICAL, (head() as CharCardView).orientation)
     }
 
     // the engine's menu for 点了: one the user chose, 忘掉学到的 offered; the forget taken back with 3

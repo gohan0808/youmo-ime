@@ -5,6 +5,7 @@
 package org.fcitx.fcitx5.android.host
 
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog
+import org.fcitx.fcitx5.android.engine.assertRows
 import org.fcitx.fcitx5.android.engine.pinyin.Fuzzy
 import org.fcitx.fcitx5.android.engine.pinyin.ShuangpinScheme
 import org.fcitx.fcitx5.android.engine.reading.ReadingStyle
@@ -128,6 +129,18 @@ class EngineOptionsTest {
         assertEquals(ReadingStyle.OFF, EngineOptions().toSettings().candidateReading)
         assertEquals(ReadingStyle.ZHUYIN, EngineOptions().apply { load("CandidateReading=Zhuyin\n") }.toSettings().candidateReading)
         assertEquals("Off", EngineOptions().apply { load("CandidateReading=Ruby\n") }["CandidateReading"])
+    }
+
+    // 首页至少几个单字: 2 till set (a 0.6.0 file has no line), 0 to 5 as stored, anything else 2
+    @Test
+    fun strokeSinglesAreTwoTillSetAndAValueOutOfRangeIsTwo() {
+        assertEquals(2, EngineOptions().toSettings().strokeSingles)
+        assertEquals(0, EngineOptions().apply { load("StrokeSingles=0\n") }.toSettings().strokeSingles)
+        assertEquals(5, EngineOptions().apply { load("StrokeSingles=5\n") }.toSettings().strokeSingles)
+        val bad = listOf("9" to "above 5", "x" to "not a number", "-1" to "below 0", "" to "empty")
+        assertRows(bad, { (value, why) -> "StrokeSingles=$value, $why: 2" }) { (value, _) ->
+            assertEquals(2, EngineOptions().apply { load("StrokeSingles=$value\n") }.toSettings().strokeSingles)
+        }
     }
 
 }

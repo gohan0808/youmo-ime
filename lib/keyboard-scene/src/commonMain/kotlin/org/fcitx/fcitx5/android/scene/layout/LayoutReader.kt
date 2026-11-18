@@ -64,9 +64,12 @@ object LayoutReader {
         }
         val preview = a.oneOf("preview", ON_OFF) != "off"
         val popups = a.oneOf("popups", ON_OFF) != "off"
+        val basedOn = a.matching("based-on", IDENT, "a board's id")
+        val pads = pads(a, family)
         a.done()
+        val meta = meta(root, p)
         val defaults = defaults(root, p)
-        val parts = root.children.filter { it.name != "defaults" }.mapNotNull { child ->
+        val parts = root.children.filter { it.name != "defaults" && it.name != "meta" }.mapNotNull { child ->
             when (child.name) {
                 "row" -> row(child, p)
                 "include" -> include(child, p)
@@ -82,7 +85,16 @@ object LayoutReader {
                 ?.let { p.add(root.line, "a letters board lacks the keys ${it.joinToString(" ")}") }
         }
         val named = composedNamed(family, parts, p)
-        return p.result { Layout(id.orEmpty(), name.orEmpty(), family.orEmpty(), columns, onSplit, defaults, named, preview, popups) }
+        return p.result { Layout(id.orEmpty(), name.orEmpty(), family.orEmpty(), columns, onSplit, defaults, named, preview, popups, basedOn, meta, pads) }
+    }
+
+    // pads= (061-custom-layout §7): a number board's, each a pad NumberPad opens, once
+    private fun pads(a: Attributes, family: String?): List<String>? {
+        val pads = a.matching("pads", PAD_LIST, "number pads apart by a space (${PADS.joinToString(" ")})")?.split(' ') ?: return null
+        pads.filter { it !in PADS }.forEach { a.problem("pads=: \"$it\" is not one of ${PADS.joinToString("|")}") }
+        if (pads.toSet().size != pads.size) a.problem("pads= names a pad twice")
+        if (family != null && family != "number") a.problem("pads= is a number board's")
+        return pads
     }
 
     /**
@@ -136,12 +148,34 @@ object LayoutReader {
         if (a.string("xmlns") != NAMESPACE) a.problem("xmlns= must be $NAMESPACE")
     }
 
-    // ids unique within the file, but where each has a when= (the number pad's `-`, at a place a pad):
-    // the engine checks those shown are (Expand)
+    // ids unique within the file, but where each has a when=, its own or its row's (the number pad's `-`, at a place
+    // a pad; a custom number board's rows of one pad and another's, 061-custom-layout §7): the engine checks those
+    // shown are (Expand)
     private fun checkKeys(rows: List<Row>, p: Problems) {
-        rows.flatMap { it.cells }.filter { it.id != null }.groupBy { it.id }.forEach { (id, cells) ->
-            if (cells.size > 1 && cells.any { it.condition == null }) p.add(cells[1].line, "the id \"$id\" is used twice")
-        }
+        rows.flatMap { r -> r.cells.map { it to (it.condition != null || r.condition != null) } }.filter { it.first.id != null }
+            .groupBy { it.first.id }.forEach { (id, cells) ->
+                if (cells.size > 1 && cells.any { !it.second }) p.add(cells[1].first.line, "the id \"$id\" is used twice")
+            }
+    }
+
+    // `<meta>` (0.6.1, 061-custom-layout §2.2): once, before anything else; its texts as a theme's (ThemeReader)
+    private fun meta(parent: XmlElement, p: Problems): LayoutMeta? {
+        val all = parent.all("meta")
+        if (all.size > 1) p.add(all[1].line, "<meta> given twice")
+        val el = all.firstOrNull() ?: return null
+        if (parent.children.first() !== el) p.add(el.line, "<meta> must come first")
+        val a = Attributes(el, p)
+        fun text(name: String, max: Int = MAX_META) = a.value(name, "1–$max characters") { it.takeIf { v -> v.isNotBlank() && v.length <= max } }
+        val meta = LayoutMeta(
+            author = text("author"),
+            version = text("version"),
+            license = text("license"),
+            minApp = a.matching("min-app", APP_VERSION, "a version like 0.6.1"),
+            description = text("description", MAX_DESCRIPTION),
+        )
+        a.done()
+        noChildren(el, p)
+        return meta
     }
 
     // `split-side` is the side a board split goes to; one split in halves is on both, which no row can be yet
@@ -156,7 +190,8 @@ object LayoutReader {
     private fun defaults(parent: XmlElement, p: Problems): KeyAttrs {
         val all = parent.all("defaults")
         if (all.size > 1) p.add(all[1].line, "<defaults> given twice")
-        if (all.isNotEmpty() && parent.children.first() !== all[0]) p.add(all[0].line, "<defaults> must come first")
+        // first, or after <meta> where a keyboard has one
+        if (all.isNotEmpty() && parent.children.firstOrNull { it.name != "meta" } !== all[0]) p.add(all[0].line, "<defaults> must come first")
         val d = all.firstOrNull() ?: return KeyAttrs()
         val a = Attributes(d, p)
         val attrs = look(a).copy(width = width(a))
@@ -196,10 +231,10 @@ object LayoutReader {
 
     private fun gap(el: XmlElement, p: Problems): Gap {
         val a = Attributes(el, p)
-        val gap = Gap(
-            a.matching("id", IDENT, "a name"), width(a) ?: Width.Units(1.0), a.oneOf("look", KINDS), classes(a).orEmpty(),
-            condition(a), el.line,
-        )
+        val gap = Gap(a.matching("id", IDENT, "a name"), width(a) ?: Width.Units(1.0), condition(a), el.line)
+        // a 0.6.0 file's look (a blank key's face, drawn no more: Gap) still reads, a pack's layout kept as it was
+        a.oneOf("look", KINDS)
+        classes(a)
         a.done()
         noChildren(el, p)
         return gap
@@ -270,7 +305,7 @@ object LayoutReader {
             if (item.name != "item") return@mapNotNull null.also { p.add(item.line, "<${item.name}> is not allowed in <popup>") }
             val ia = Attributes(item, p)
             val text = ia.required("text")
-            val send = ia.value("send", "an action", ::action)
+            val send = if (retired(ia, "send")) null else ia.value("send", "an action", ::action)
             ia.done()
             text?.let { it to send }
         }
@@ -281,16 +316,18 @@ object LayoutReader {
 
     private fun menu(el: XmlElement, p: Problems): List<MenuItem> {
         Attributes(el, p).done()
+        var gone = false
         val items = el.children.mapNotNull { item ->
             if (item.name != "item") return@mapNotNull null.also { p.add(item.line, "<${item.name}> is not allowed in <menu>") }
             val a = Attributes(item, p)
             val label = a.required("label")
             val icon = a.matching("icon", IDENT, "an icon name")
-            val action = a.value("do", "an action", ::action) ?: a.required("do")
+            val action = if (retired(a, "do")) null.also { gone = true } else a.value("do", "an action", ::action) ?: a.required("do")
             a.done()
             if (label != null && action != null) MenuItem(label, icon, action) else null
         }
-        if (items.isEmpty()) p.add(el.line, "<menu> has no items")
+        // a menu of 0.6.0's 注 items alone (its handwriting.xml's) is none, each item warned of: still read (R26 F8209)
+        if (items.isEmpty() && !gone) p.add(el.line, "<menu> has no items")
         return items
     }
 
@@ -314,7 +351,7 @@ object LayoutReader {
         alt = a.value("alt", "text or one binding ({punct:} of one character)", ::oneMark),
         icon = a.value("icon", "an icon name or binding", ::icon),
         kind = a.oneOf("kind", KINDS),
-        role = a.oneOf("role", KeyNames.ROLES),
+        role = if (retired(a, "role")) null else a.oneOf("role", KeyNames.ROLES),
         classes = classes(a),
         textSize = a.decimal("text-size", 0.0, MAX_TEXT_DP, minIncluded = false),
         compactTextScale = a.decimal("compact-text-scale", 0.0, MAX_RATIO, minIncluded = false),
@@ -324,7 +361,7 @@ object LayoutReader {
         a11y = a.value("a11y", "text or one binding ({punct:} of one character)", ::oneMark),
         sound = a.oneOf("sound", listOf("standard", "space", "delete", "return")),
         badge = a.value("badge", "an icon name or binding", ::icon),
-        actions = ACTIONS.mapNotNull { name -> a.value(name, "an action", ::action)?.let { name to it } }.toMap() +
+        actions = ACTIONS.mapNotNull { name -> if (retired(a, name)) null else a.value(name, "an action", ::action)?.let { name to it } }.toMap() +
             listOfNotNull(
                 a.oneOf("swipe-axis", listOf("vertical", "both"))?.let { "swipe-axis" to it },
                 a.boolean("repeat")?.let { "repeat" to it.toString() },
@@ -368,8 +405,26 @@ object LayoutReader {
         else -> binding(raw)?.takeIf { it.name in Text.ICONS }
     }
 
+    /**
+     * Whether [name] is 0.6.0's handwriting keyboard's 注 (role `reading`, action `reading` or `reading:<style>`), gone
+     * with that keyboard (061-handwriting-toolbar §7): a layout written for it still read, with a warning, that
+     * attribute nothing.
+     */
+    private fun retired(a: Attributes, name: String): Boolean {
+        val raw = a.string(name) ?: return false
+        if (raw != "reading" && (name == "role" || !raw.startsWith("reading:"))) return false
+        a.warn("$name=\"$raw\" does nothing: 0.6.0's handwriting keyboard's 注 is gone with it")
+        return true
+    }
+
     /** [raw] where it is a word of the action vocabulary (layout-1.xsd's `action`). */
     fun action(raw: String): String? = raw.takeIf { a -> ACTION_PATTERNS.any { it.matches(a) } && (!a.startsWith("code:") || codePoint(a) != null) }
+
+    /** The vocabulary's bare words, an action each with no argument (`caps` aside): never text to type (KeyDefaults.itemOf). */
+    val WORDS = listOf(
+        "lang", "ime-picker", "quickphrase", "unicode", "panel-back", "panel-lock", "space-long-press", "begin-selection-swipe",
+        "delete-selection", "move-selection", "lookup",
+    )
 
     /**
      * The code point of a `code:U+…` action: a Unicode scalar value, U+10FFFF at most and no surrogate
@@ -392,6 +447,13 @@ object LayoutReader {
     private const val MAX_TEXT_DP = 64.0
     private const val DEFAULT_COLUMNS = 10.0
     private val IDENT = Regex("[a-z0-9]+(-[a-z0-9]+)*")
+
+    /** The number pads a field may open (NumberPad), what `pad=` asks and `pads=` names (061-custom-layout §7). */
+    val PADS = listOf("full", "digits", "signed", "decimal", "signed-decimal", "phone", "datetime")
+    private val PAD_LIST = Regex("[a-z-]+( [a-z-]+)*")
+    private const val MAX_META = 64
+    private const val MAX_DESCRIPTION = 200
+    private val APP_VERSION = Regex("[0-9]{1,4}\\.[0-9]{1,4}\\.[0-9]{1,4}")
     // KeyNames': 大千's `/` and the number pad's are keys too (a theme's `zhuyin//` is its own: Selector)
     private val KEY_ID = Regex("(?!view:)\\S{1,32}")
     private val CLASSES = Regex("[a-z][a-z0-9-]*( [a-z][a-z0-9-]*)*")
@@ -420,7 +482,7 @@ object LayoutReader {
     private val ACTION_PATTERNS = listOf(
         // one character, sent to the engine as typed: `:` too (the 18 keys' M swipes it, HostKeyAction(":"))
         Regex("\\S"),
-        Regex("(sym|picker|shortcut|reading):[A-Za-z0-9_.-]*"),
+        Regex("(sym|picker|shortcut):[A-Za-z0-9_.-]*"),
         // a layout named; emoji search on or off, as the app has it (KeyAction.EmojiSearchAction)
         Regex("layout:[A-Za-z0-9_.-]+"),
         Regex("emoji-search:(on|off)"),
@@ -433,9 +495,6 @@ object LayoutReader {
         Regex("code:U\\+[0-9A-F]{4,6}"),
         Regex("keypad:[0-9]"),
         Regex("caps(:lock)?"),
-        Regex(
-            "lang|ime-picker|quickphrase|unicode|panel-back|panel-lock|space-long-press|reading|begin-selection-swipe|" +
-                "delete-selection|move-selection|lookup",
-        ),
+        Regex(WORDS.joinToString("|")),
     )
 }

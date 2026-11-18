@@ -66,7 +66,6 @@
     <string name="github_repo">GitHub 倉庫</string>
     <string name="expanded_candidate_grid_span_count">表格樣式展開候選詞列數</string>
     <string name="no_config_options">目前沒有可用的設定選項</string>
-    <string name="unimplemented_type">⛔ 未實作類型</string>
     <string name="select">選取</string>
     <string name="text_editing">文字編輯</string>
     <string name="instruction_enable_clipboard_listening">要使用剪貼簿管理，請在設定中啟用監聽剪貼簿</string>
@@ -85,7 +84,6 @@
     <string name="reset">重設</string>
     <string name="input_method_options">輸入法設定</string>
     <string name="theme">主題</string>
-    <string name="configure">配置</string>
     <string name="navbar_background">導航列背景</string>
     <string name="navbar_bkg_none">無背景</string>
     <string name="navbar_bkg_color_only">與鍵盤背景色相符</string>
@@ -148,7 +146,23 @@
     <string name="sound_class_space">空白</string>
     <string name="sound_class_enter">Enter</string>
     <string name="sound_class_backspace">退格</string>
+    <plurals name="theme_pack_layouts_ignored">
+        <item quantity="other">主題自帶的佈局裡有 %1$d 處長按、角標、滑動的寫法不起作用：0.6.1 起主題只管樣子，這些由 按鍵 → 按鍵字元和快捷鍵 管。</item>
+    </plurals>
     <string name="theme_pack_layouts_unused">不會使用的佈局（讀不出、缺鍵盤必需的鍵，或不是已有的鍵盤）：%1$s</string>
+    <plurals name="theme_pack_layouts_listed">
+        <item quantity="other">這個主題帶 %1$d 個佈局：%2$s，匯入後在 外觀 → 佈局 裡。</item>
+    </plurals>
+    <string name="theme_pack_layouts_listed_commits">其中 %1$d 個動作直接輸入佈局裡寫的文字。</string>
+    <string name="theme_pack_layouts_replaces">取代已有的『%1$s』（這個主題上次匯入時做的，之後沒改過）。</string>
+    <plurals name="theme_pack_layouts_full">
+        <item quantity="other">外觀 → 佈局 已滿（%2$d 個）：其中 %1$d 個放不進去。</item>
+    </plurals>
+    <string name="theme_pack_layouts_not_listed">它的佈局沒有全部放進 外觀 → 佈局（列表已滿，或有的沒能轉成）。</string>
+    <string name="theme_pack_layouts_with">一起匯入</string>
+    <string name="theme_layouts_in_use">主題「%1$s」帶的%2$s已放進 外觀 → 佈局，%3$s正在用</string>
+    <string name="theme_layouts_aside_dark">深色主題「%1$s」帶的%2$s也在列表裡，沒有換上</string>
+    <string name="theme_layouts_aside_light">淺色主題「%1$s」帶的%2$s也在列表裡，沒有換上</string>
     <string name="keyboard_themed">%1$s（主題：%2$s）</string>
     <string name="theme_pack_warnings">注意：</string>
     <string name="theme_info">資訊</string>
@@ -259,14 +273,17 @@
     <string name="reset_keyboard_on_focus_change">焦點改變時切換回鍵盤</string>
     <string name="export_user_data">備份全部</string>
     <string name="import_user_data">從備份還原</string>
-    <string name="exception_user_data_filename">%1$s 的副檔名並不是幽默輸入法備份</string>
+    <string name="exception_user_data_host_starting">鍵盤還在啟動，沒等到它啟動完：什麼都沒有還原。請稍後再試</string>
     <string name="exception_user_data_metadata">無法找到使用者資料的中繼資料</string>
     <string name="exception_user_data_no_room">備份放不下：手機剩餘空間不夠</string>
+    <string name="exception_user_data_too_many_entries">備份裡的條目超過 10 萬個，不是本應用程式的備份</string>
+    <string name="exception_user_data_not_a_backup">這個檔案不是本應用程式的備份</string>
+    <string name="exception_user_data_too_big">檔案超過 2 GB，不是本應用程式的備份</string>
     <string name="exception_user_data_package_name_mismatch">使用者資料與目前應用程式不符合</string>
     <string name="exception_user_data_too_old">這個備份來自 0.3.0 或更早的版本，這一版不再讀取那時學到的內容。請先在 0.4.x 裡還原它、打幾個字、停一下、重新備份，再在這裡還原新的備份</string>
     <string name="user_data_imported">已匯入來自 %1$s 的使用者資料，正在重新啟動</string>
     <string name="user_data_exported">已備份到 %1$s</string>
-    <string name="confirm_import_user_data">匯入使用者資料會覆寫設定、自訂短語、常用詞、快速輸入、標點和剪貼簿（備份裡沒有的，手機上的也刪掉：0.5.1 以前的備份沒有快速輸入，自己加的條目會沒了，關掉的內建表會重新打開；0.6.0 以前的備份沒有常用詞，手機上的會沒了），學到的和詞庫與手機上現有的合併；重新啟動後生效。是否繼續？</string>
+    <string name="confirm_import_user_data">匯入使用者資料會覆寫設定、自訂短語、常用詞、快速輸入和剪貼簿，標點用內建的（備份裡沒有的，手機上的也刪掉：0.5.1 以前的備份沒有快速輸入，自己加的條目會沒了，關掉的內建表會重新打開；0.6.0 以前的備份沒有常用詞，手機上的會沒了；備份裡沒有生僻字屏蔽的（0.6.1 以前的，或做備份時沒開過它），還原後它是關的），學到的和詞庫與手機上現有的合併；重新啟動後生效。是否繼續？</string>
     <string name="clear_clp_db_confirm">剪貼簿資料庫將會被完全清空，包括已置頂條目。是否繼續？</string>
     <string name="clear_clp_db_not_all">部分剪貼簿資料未能清除，可能仍然存在，或在下次啟動時重新出現；再次清空，或重新啟動後再清空，或許有效。</string>
     <string name="lang_switch_key_behavior">語言切換鍵行為</string>
@@ -294,11 +311,14 @@
     <string name="candidates_window_padding">候選視窗邊距</string>
     <string name="restart_fcitx_instance">重新啟動 Fcitx 實例</string>
     <string name="restart_fcitx_instance_confirm">Fcitx 實例將被銷燬並重新初始化。繼續嗎？</string>
+    <string name="restart_fcitx_still_starting">鍵盤還在啟動，可能沒有重新啟動成。請稍後再試</string>
     <string name="haptic_on_repeat">重複按鍵時的觸覺回饋</string>
     <string name="redo">重做</string>
     <string name="status_area">狀態區</string>
     <string name="expand_candidates_list">展開選字列表</string>
+    <string name="stroke_page_hint">這裡劃筆畫，翻頁用右邊 ↑↓</string>
     <string name="hide_candidates_list">隱藏選字列表</string>
+    <string name="drop_predictions">收起聯想</string>
     <string name="hide_keyboard">隱藏鍵盤</string>
     <string name="hide_toolbar">隱藏工具列</string>
     <string name="expand_toolbar">展開工具列</string>
@@ -361,7 +381,7 @@
     <string name="section_sound_and_vibration">聲音與振動</string>
     <string name="long_press_characters_summary">長按彈出的字元，上滑和下滑做什麼：長按首選、快捷鍵（全選、複製、貼上、復原）、一段文字</string>
     <string name="toolbar_buttons">工具列按鈕</string>
-    <string name="toolbar_buttons_summary">鍵盤上方的按鈕：排順序、選顯示哪些。選單鍵一直在</string>
+    <string name="toolbar_buttons_summary">鍵盤上方的按鈕：排順序、選顯示哪些。選單鍵一直在；分隔線上面的當時一個都顯示不了時，選單鍵就是 ⋯，點了直接開選單</string>
     <string name="toolbar_divider">以下一直顯示在列的右邊</string>
     <string name="toolbar_reset">恢復預設</string>
     <string name="toolbar_trad_simp">簡繁切換</string>
@@ -387,6 +407,7 @@
     <string name="learning_why_pinned">固定了：在這串鍵下總排第一</string>
     <string name="learning_why_first_here">在這個前文後面連著選過兩次</string>
     <string name="learning_why_across">你常改選它、最近用得多</string>
+    <string name="learning_why_alone">你打過的詞，按聲母讀出</string>
     <string name="learning_why_floored">在簡拼下改選過它</string>
     <string name="learning_why_lifted">這種鍵盤上打全時常選它</string>
     <string name="learning_why_mine">你的詞</string>
@@ -405,6 +426,7 @@
     <string name="learning_done_delete_phrase">已從自訂詞組中刪除「%1$s」</string>
     <string name="learning_done_no_predict">不再聯想「%1$s」</string>
     <string name="learning_undo_gone">已經復原不了了</string>
+    <string name="learning_undo_failed">沒撤銷成：學到的詞現在存不下</string>
     <string name="learning_habits_off">不用我的輸入習慣</string>
     <string name="learning_habits_on">恢復我的輸入習慣</string>
     <string name="learning_clear_recent">清掉最近</string>
@@ -416,6 +438,7 @@
     <string name="learning_cleared">已清掉</string>
     <string name="learning_not_done">候選已經變了，沒做</string>
     <string name="learning_clear_failed">沒清掉，再試一次</string>
+    <string name="learning_clear_failed_not_saving">沒清掉：學到的詞現在存不下，重新啟動鍵盤後再清</string>
     <string name="learning_clear_recent_title">清掉%1$s學到的？</string>
     <string name="learning_no_predict_entry">不再聯想的搭配：%1$d 個 ›</string>
     <string name="my_words_table_blocked">碼表裡按碼封鎖的</string>
@@ -490,10 +513,19 @@
     <string name="search_settings">搜尋設定</string>
     <string name="search_settings_hint">搜尋設定</string>
     <string name="search_settings_none">沒有找到相關的設定</string>
+    <string name="search_stroke_commands">筆畫：橫、豎、撇、點、折</string>
+    <string name="search_strokes_one">五個筆畫命令（筆畫：橫…筆畫：折）之一</string>
+    <string name="search_command_hint">點一個鍵，展開「上滑」或「下滑」，點「換」，選 %1$s</string>
+    <string name="search_is_choice">選項</string>
+    <string name="search_is_command">上滑或下滑的命令</string>
+    <string name="search_also_called">也叫 %1$s</string>
+    <string name="search_not_added">未新增</string>
+    <string name="search_got_it">知道了</string>
+    <string name="search_where_undo">標題列右上的 ↶</string>
+    <string name="search_where_menu">右上角 ⋮ 裡</string>
     <string name="custom_phrases">自訂短語</string>
     <string name="word_packs">詞庫與短語</string>
     <string name="word_pinyin_unknown">找不到讀音，請填寫拼音</string>
-    <string name="punctuation_map">中文標點</string>
     <string name="word_list_empty">還沒有詞</string>
     <plurals name="word_list_count">
         <item quantity="other">共 %1$d 個 · 長按可多選</item>
@@ -521,12 +553,21 @@
     <string name="learning_backups_summary">從備份還原，或另存一份</string>
     <string name="learning_auto_backup">自動備份</string>
     <string name="learning_auto_backup_summary">每 7 個打字日存一份，只留最近 2 份；存在輸入法自己的目錄，別的 App 拿不到，解除安裝輸入法就沒了</string>
+    <string name="learning_voice_ask">改語音的字後問是否記住</string>
+    <string name="learning_voice_ask_summary">語音打錯的詞整個刪掉、用拼音或手寫重打成讀音（連聲調）一樣的字後，問一次要不要讓語音記住；點「記住」才加進使用者詞庫</string>
+    <string name="voice_ask_remember">讓語音記住『%1$s』？</string>
+    <string name="voice_ask_remember_action">記住</string>
+    <string name="voice_ask_remembered">語音記住了『%1$s』</string>
+    <string name="voice_ask_failed">沒能加入使用者詞庫</string>
+    <string name="voice_ask_hint">把整個詞刪掉重打，語音才能記住</string>
+    <string name="voice_ask_counts">語音改字：問過 %1$d 次，記住 %2$d 次</string>
     <string name="learning_restore">從備份還原</string>
     <string name="learning_restore_summary">本輸入法的備份或匯出的詞表，和手機上現有的合併</string>
     <string name="learning_restore_confirm">把 %1$s 的備份（%2$s）和手機上學到的合併？次數取兩邊較大的；固定、封鎖、首選衝突時以手機上的為準。還原前會先另存一份現在的，後悔了可以退回。</string>
     <string name="learning_restore_confirm_undated">把這份備份（%1$s）和手機上學到的合併？次數取兩邊較大的；固定、封鎖、首選衝突時以手機上的為準。還原前會先另存一份現在的，後悔了可以退回。</string>
     <string name="learning_backup_delete_confirm">刪除 %1$s 的備份（%2$s）？刪了不能找回。</string>
     <string name="learning_try_again">沒做成，再試一次</string>
+    <string name="learning_try_again_not_saving">沒做成：學到的詞現在存不下，重新啟動鍵盤後再試</string>
     <string name="learning_reverted">已退回還原前</string>
     <string name="learning_backup_this_install">這次安裝存的</string>
     <string name="learning_backup_elsewhere">別處來的</string>
@@ -586,8 +627,6 @@
     <string name="im_erbi">二筆</string>
     <string name="im_wubipinyin">五筆拼音</string>
     <string name="im_english">英文</string>
-    <string name="im_handwriting">手寫</string>
-    <string name="a11y_handwriting_pad">手寫板</string>
     <string name="im_section_scheme">方案</string>
     <string name="im_shuangpin_scheme">雙拼方案</string>
     <string name="shuangpin_ziranma">自然碼</string>
@@ -605,9 +644,9 @@
     <string name="im_chaizi">拆字</string>
     <string name="im_chaizi_summary">不會讀的字，先按 u 再打各部分的拼音：uniuniuniu 犇、ushuishuishui 淼</string>
     <string name="im_built_in_phrases">內建的日期時間</string>
-    <string name="im_built_in_phrases_summary">日期、時間、星期這幾個詞後面給出今天的日期、現在的時間、星期幾；全拼裡打 rq、sj、xq 也行</string>
+    <string name="im_built_in_phrases_summary">日期、時間、星期這幾個詞後面給出今天的日期、現在的時間、星期幾；全拼裡打 rq、sj、xq 也行；手寫寫的字沒有</string>
     <string name="im_emoji">表情候選</string>
-    <string name="im_emoji_summary">打的詞有對應的表情時，一併給出：哈哈 😄、點讚 👍</string>
+    <string name="im_emoji_summary">打的詞有對應的表情時，一併給出：哈哈 😄、點讚 👍；手寫寫的字沒有</string>
     <string name="t9_multi_tap">連按選字母</string>
     <string name="t9_multi_tap_summary">快速連按同一個鍵就是它的第幾個字母（按兩下是第二個），只有這一種讀法；按一下仍由輸入法判斷；關著時每按一次都是一個鍵</string>
     <string name="t9_multi_tap_off">關</string>
@@ -627,13 +666,27 @@
     <string name="im_zhuyin">拼音 · 注音全鍵盤</string>
     <string name="zhuyin_traditional_hint">注音一般配繁體字：要繁體，在 ⋯ 裡點「簡體」切換。</string>
     <string name="keyboard_nine">九鍵</string>
+    <string name="keyboard_custom">自訂佈局</string>
+    <string name="keyboard_custom_named">%1$s（自訂）</string>
+    <string name="keyboard_custom_unread">%1$s（讀不出，暫用 %2$s）</string>
+    <string name="keyboard_custom_unusable">%1$s（這裡用不了，暫用 %2$s）</string>
     <string name="im_pinyin_keys18">拼音 · 18 鍵</string>
     <string name="im_shuangpin_keys14">雙拼 · 14 鍵</string>
     <string name="learning_kind_keys18">拼音 18 鍵</string>
-    <string name="learning_kind_keys_own">拼音 主題鍵盤</string>
+    <string name="learning_kind_keys_own">拼音 自己的分組</string>
     <string name="learning_kind_shuangpin_keys14">雙拼 14 鍵</string>
     <string name="english_keyboard">鍵盤</string>
     <string name="english_keyboard_summary">螢幕上打英文用的鍵盤。實體鍵盤仍按字母打。</string>
+    <string name="table_keyboard">鍵盤</string>
+    <string name="table_keyboard_summary">螢幕上打所有碼表輸入法用的鍵盤：全鍵盤，或帶 ; 和 * 鍵的自訂佈局。</string>
+    <string name="handwriting">手寫</string>
+    <string name="handwriting_not_here">這裡不能手寫：英文和密碼框裡沒有手寫</string>
+    <string name="handwriting_unavailable">%1$s，這裡用不了</string>
+    <string name="toolbar_more">更多</string>
+    <string name="handwriting_retired">手寫已併入工具列：點工具列上的手寫按鈕在鍵盤上寫字，再點一下關掉%1$s</string>
+    <string name="handwriting_retired_moved">。輸入法列表裡已換成拼音</string>
+    <string name="handwriting_retired_traditional">。手寫的字現在跟所在輸入法的簡繁走</string>
+    <string name="key_handwriting_retired">鍵盤手寫已併入工具列的手寫按鈕，在鍵上劃已改為關</string>
     <string name="nine_keys_merged">九鍵拼音已併入拼音，在 ⋯ → 鍵盤裡切換。</string>
     <string name="shuangpin_scheme_retired">你用的%1$s雙拼已不再提供，已改成小鶴雙拼，可在雙拼設定裡換。</string>
     <string name="status_keyboard">鍵盤</string>
@@ -666,13 +719,16 @@
     <string name="im_candidate_reading_off">關閉</string>
     <string name="im_candidate_reading_pinyin">拼音</string>
     <string name="im_candidate_reading_zhuyin">注音符號</string>
-    <string name="hw_reading_key_on">%1$s，已開</string>
-    <string name="hw_reading_key_off">%1$s，已關</string>
     <string name="char_card_readings">讀音</string>
     <string name="char_card_radical">部首</string>
     <string name="char_card_strokes">%1$d 畫</string>
     <string name="char_card_parts">拆字</string>
     <string name="char_card_order">筆順</string>
+    <string name="card_open_word">展開詞卡</string>
+    <string name="card_open_char">展開字卡</string>
+    <string name="card_see_char">看字卡</string>
+    <string name="card_back">返回 %1$s</string>
+    <string name="card_copy_char">複製「%1$s」</string>
     <string-array name="char_card_stroke_names">
         <item>橫</item>
         <item>提</item>
@@ -714,11 +770,11 @@
     <string name="im_model_level_medium">中檔：每次按鍵按整句通順程度重排</string>
     <string name="im_model_level_high">高檔：停頓時再用大模型精挑首選，最準</string>
     <string name="im_typos">糾正錯拼和按偏的鍵</string>
-    <string name="im_typos_summary">全拼：比如把 gn 當成 ng，或按到了旁邊的鍵。雙拼：只認 j、q、x、y 後的 u 按成了 ü 的鍵</string>
+    <string name="im_typos_summary">按在鍵的邊上、靠著旁邊哪個鍵，也按那個鍵讀（點在鍵中間不改）；全拼還認 gn 當成 ng 這類錯拼，雙拼全鍵盤還認 j、q、x、y 後的 u 按成了 ü 的鍵</string>
     <string name="im_latin_words">中英混輸</string>
     <string name="im_latin_words_summary">拼音裡直接打英文單詞，比如 iphone 出 iPhone</string>
     <string name="engine_data_libime">拼音詞典和語言模型：libime</string>
-    <string name="engine_data_fineweb">語言模型、英文詞表和手寫的字頻統計用的網頁文本：FineWeb-2</string>
+    <string name="engine_data_fineweb">語言模型、英文詞表、手寫的字頻統計和語音整理的合成口語用的網頁文本：FineWeb-2</string>
     <string name="engine_data_handwriting">手寫辨識模型：本專案用 Make Me a Hanzi 的筆畫（來自文鼎字型）和開源手寫字型訓練</string>
     <string name="engine_data_stroke">筆畫表：rime-stroke</string>
     <string name="engine_data_emoji">表情列表和關鍵詞：Unicode 的 emoji-test.txt 和 CLDR</string>
@@ -750,10 +806,15 @@
     <string name="im_auto_caps">句首自動大寫</string>
     <string name="im_auto_caps_summary">在句子開頭自動開啟 Shift（應用的輸入框要求時）</string>
     <string name="key_drawing">在鍵上劃</string>
-    <string name="key_drawing_handwriting">鍵盤手寫</string>
-    <string name="key_drawing_needs_text_pack">%1$s（需要文字包）</string>
     <string name="glide_typing">滑行輸入</string>
     <string name="stroke_filter">筆畫篩選</string>
+    <string name="stroke_lift">筆畫篩選靈敏度</string>
+    <string name="stroke_lift_summary">手指劃多遠才算筆畫、不算點按這個鍵。高：短筆畫也能認出；低：點按時手指滑一點也還是點按。滑行輸入不用這一項</string>
+    <string name="stroke_lift_high">高</string>
+    <string name="stroke_lift_medium">中</string>
+    <string name="stroke_lift_low">低</string>
+    <string name="stroke_singles">首頁至少幾個單字</string>
+    <string name="stroke_singles_summary">畫筆畫後，緊跟在第一個候選後面放幾個單字</string>
     <string name="status_punctuation_chinese">中文標點</string>
     <string name="status_punctuation_english">英文標點</string>
     <string name="status_full_width">全形</string>
@@ -767,7 +828,7 @@
     <string name="im_fuzzy_none">未開啟</string>
     <string name="picker_recent">最近使用</string>
     <string name="picker_common">常用</string>
-    <string name="picker_ascii">數字與英文符號</string>
+    <string name="picker_ascii">英文符號</string>
     <string name="picker_brackets">括號</string>
     <string name="picker_arrows">箭頭</string>
     <string name="picker_math">數學與希臘字母</string>
@@ -790,15 +851,43 @@
     <string name="long_press_off">這個鍵的長按已關。新增字元就重新開啟。</string>
     <string name="long_press_newer">長按字元是新版本的應用程式設定的：原樣保留，這裡不能改。</string>
     <string name="long_press_add_hint">新增字元，空格分隔</string>
-    <string name="punctuation_page_hint">打中文時，按左邊的鍵打出右邊的標點；一個鍵對應幾個標點時可以選。點一項可修改或刪除。</string>
-    <string name="punctuation_pair">交替</string>
-    <string name="punctuation_key">按鍵</string>
-    <string name="punctuation_mapping">打出</string>
-    <string name="punctuation_alt_mapping">再按一次打出（可不填）</string>
-    <string name="punctuation_alt_mapping_helper">用於成對的標點，如引號：每按一次換另一個。</string>
-    <string name="punctuation_add">新增按鍵</string>
-    <string name="punctuation_choice">可選</string>
-    <string name="punctuation_first">排在這個鍵的候選首位</string>
+    <string name="text_variables_use">使用變數</string>
+    <string name="text_as_is">不轉中文標點</string>
+    <string name="text_as_is_hint">只對有中文寫法的英文標點有效</string>
+    <string name="text_variables_insert">插入變數</string>
+    <string name="text_variables_now">現在打出：%1$s</string>
+    <string name="text_variables_nothing">現在什麼也打不出</string>
+    <string name="text_variables_dropped">不認識 %1$s，會被去掉；要打出 $ 就寫 $$</string>
+    <string name="text_variables_kept">%1$s 會原樣打出；要打出 $ 就寫 $$</string>
+    <string name="text_variables_item_hint">整段算一項，比如 $month月$day日</string>
+    <string name="text_mark_variables">變數</string>
+    <string name="text_mark_as_is">原樣</string>
+    <string name="text_mark_on">已開</string>
+    <string name="text_mark_off">已關</string>
+    <string-array name="text_variable_descriptions">
+        <item>年</item>
+        <item>兩位年</item>
+        <item>月</item>
+        <item>兩位月</item>
+        <item>日</item>
+        <item>兩位日</item>
+        <item>星期（數字，週日是 0）</item>
+        <item>24 小時制的時</item>
+        <item>12 小時制的時</item>
+        <item>上午還是下午（AM/PM）</item>
+        <item>上午還是下午</item>
+        <item>分</item>
+        <item>秒</item>
+        <item>中文年</item>
+        <item>中文兩位年</item>
+        <item>中文月</item>
+        <item>中文日</item>
+        <item>中文星期</item>
+        <item>中文時（24 小時制）</item>
+        <item>中文時（12 小時制）</item>
+        <item>中文分</item>
+        <item>中文秒</item>
+    </string-array>
     <string name="long_press_make_first">設為首選</string>
     <string name="long_press_move_left">左移</string>
     <string name="long_press_move_right">右移</string>
@@ -827,6 +916,7 @@
     <string name="dict_refused_too_many">詞太多，超過輸入法能放下的</string>
     <string name="dict_refused_no_pinyin">有些行沒有拼音；沒有拼音的詞只能併入使用者詞庫</string>
     <string name="dict_refused_mismatch">字和讀音大多對不上（讀音不是普通話拼音，或者檔案編碼不對）</string>
+    <string name="dict_refused_too_large">檔案太大，匯入不了這麼大的這類檔案</string>
     <string name="dict_too_large_for_user">這個詞庫太大，請併入基礎詞庫</string>
     <string name="dict_user_imports_full">使用者詞庫裡匯入的詞已近上限，放不下這些詞；請併入基礎詞庫，或先刪掉以前匯入的詞</string>
     <string name="dict_detected_rime">Rime 詞庫</string>
@@ -900,12 +990,19 @@
     <string name="config_unreadable">部分輸入設定讀取失敗。這些設定原樣保留：這次先按預設值打字，變更在重新啟動手機前不會儲存。</string>
     <string name="config_not_settled">輸入設定暫時無法就位。這次打字可能用的是預設設定，變更在重新啟動手機前不會儲存。</string>
     <string name="theme_file_missing">你的某個主題缺了圖片或字型檔案（被刪掉，或還原的備份裡沒有），這個主題不再列出。重新匯入它就能再用。</string>
-    <string name="user_data_unreadable">部分你新增的內容（自訂短語、快速輸入、標點表、主題）讀取失敗或無法就位。它們原樣保留、不會被覆蓋：這次暫時缺少或改用內建的。重新啟動手機後再試。</string>
+    <string name="user_data_unreadable">部分你新增的內容（自訂短語、快速輸入、主題）讀取失敗或無法就位。它們原樣保留、不會被覆蓋：這次暫時缺少或改用內建的。重新啟動手機後再試。</string>
     <string name="user_data_not_settled">你新增的內容和設定這次無法就位，暫時不能修改、備份或還原。重新啟動手機後再試。</string>
-    <string name="split_keyboard">分體鍵盤</string>
-    <string name="split_keyboard_auto">橫屏且螢幕夠寬時</string>
-    <string name="split_keyboard_always">總是</string>
-    <string name="split_keyboard_off">關</string>
+    <string name="learning_unkept">學到的詞暫時無法儲存：只記在記憶體裡，輸入法被系統停止或手機重新啟動後就會遺失（以前存下的不受影響）。清出一些儲存空間後會照常儲存；還不行就重新啟動手機，重新啟動後仍然出現，請附上 開發人員 → 即時紀錄檔 匯出的紀錄檔回報問題。</string>
+    <string name="learning_unkept_locked">手機解鎖前學到的詞不會儲存；解鎖後照常儲存。</string>
+    <string name="learning_kept_aside">學習記錄有讀不出來的內容：原檔案已另存一份，讀得出的部分照常使用，其餘學到的詞這次用不上了。想找回以前學到的詞，可以在 學習備份 裡還原。</string>
+    <string name="learning_not_saving">學到的詞現在沒在儲存：只記在記憶體裡，輸入法被系統停止或手機重新啟動後就會遺失。清出一些儲存空間後會照常儲存；還不行就重新啟動手機。</string>
+    <string name="user_lists_unkept">自訂短語或常用詞的改動沒能儲存：只記在記憶體裡，輸入法被系統停止或手機重新啟動後就會遺失（以前存下的不受影響）。清出一些儲存空間後，下次在鍵盤上再改同一樣（短語或常用詞）時會連這次的一起儲存；還不行就重新啟動手機，重新啟動後仍然出現，請附上 開發人員 → 即時紀錄檔 匯出的紀錄檔回報問題。</string>
+    <string name="keyboard_style_portrait">直向鍵盤樣式</string>
+    <string name="keyboard_style_landscape">橫向鍵盤樣式</string>
+    <string name="keyboard_style_normal">普通</string>
+    <string name="keyboard_style_split">分體</string>
+    <string name="keyboard_style_floating">懸浮</string>
+    <string name="keyboard_style_one_handed">單手</string>
     <string name="split_dock">分體時其他面板</string>
     <string name="split_dock_right">靠右</string>
     <string name="split_dock_left">靠左</string>
@@ -913,13 +1010,20 @@
     <string name="split_dock_move_left">移到左邊</string>
     <string name="split_dock_move_right">移到右邊</string>
     <string name="one_handed">單手模式</string>
-    <string name="one_handed_off">關</string>
-    <string name="one_handed_exit">恢復全寬</string>
+    <string name="one_handed_exit">退出單手模式</string>
     <string name="floating_keyboard">懸浮鍵盤</string>
     <string name="floating_keyboard_dock">鍵盤放回底部</string>
+    <string name="floating_keyboard_resize">調整懸浮鍵盤大小</string>
+    <string name="floating_keyboard_bigger">放大</string>
+    <string name="floating_keyboard_smaller">縮小</string>
+    <string name="floating_keyboard_biggest">已是最大</string>
+    <string name="floating_keyboard_smallest">已是最小</string>
     <string name="code_row_style">編碼行</string>
     <string name="code_row_floating">浮在鍵盤上方</string>
     <string name="code_row_embedded">嵌在鍵盤裡</string>
+    <string name="code_row_in_field">輸入框裡（實驗性）</string>
+    <string name="code_row_in_field_note">拼音帶著底線直接出現在輸入框裡，選了字才換成字。這時應用能看到你正在打的拼音：搜尋框會按拼音搜，按了應用的傳送鍵送出去的就是拼音。轉螢幕、點另一個輸入框、切到別的應用時，拼音可能留在原來的框裡變成普通文字（比如「ni hao」「你hao」），要自己刪掉，輸入法不會替你刪。密碼、數字、終端一類的框，和會改寫你打的字的應用，拼音仍顯示在鍵盤上方。</string>
+    <string name="commit_kept">沒寫進去：%1$s，點一下輸入框</string>
     <string name="floating_handle">懸浮鍵盤拖動條</string>
     <string name="floating_handle_bottom">下面</string>
     <string name="floating_handle_top">上面</string>
@@ -947,6 +1051,7 @@
     <string name="follow_theme">跟隨主題</string>
     <string name="key_border_on">有邊框</string>
     <string name="key_border_off">無邊框</string>
+    <string name="level_very_compact">很緊湊</string>
     <string name="level_loose">寬鬆</string>
     <string name="level_square">直角</string>
     <string name="level_rounded">圓角</string>
@@ -954,7 +1059,6 @@
     <string name="key_style_follow_theme">跟隨主題：用主題裡的樣式；選別的會蓋過主題裡的。</string>
     <string name="key_style_moved">按鍵的圓角、邊框、間距現在跟著主題走，已經存進你的主題裡。</string>
     <string name="section_phrases">短語</string>
-    <string name="punctuation_map_summary">中文輸入時每個標點打成什麼，例如 , 打成 ，</string>
     <string name="custom_phrases_summary">打拼音時打一個縮寫出一段話，例如 dz 出你的地址；長的、多行的、偶爾用的，存到「快速輸入」</string>
     <string name="common_words">常用詞</string>
     <string name="common_words_summary">打一個詞的拼音或首字母，先出你定的替換項，例如 mzp 出「米」「糸」</string>
@@ -977,9 +1081,9 @@
     <string name="learning_done_delete_common_word">已從常用詞中刪除「%1$s」</string>
     <string name="im_page_size_summary">只用於實體鍵盤的候選窗，所有輸入法都用，包括英文</string>
     <string name="home_input_methods_summary">新增、排序，每種輸入法自己的選項</string>
-    <string name="home_shared_input_summary">各輸入法共用：聯想、表情、滑行、模糊音、標點</string>
+    <string name="home_shared_input_summary">各輸入法共用：聯想、表情、滑行、模糊音</string>
     <string name="home_words_summary">你的詞、匯入的詞庫、自訂短語</string>
-    <string name="home_look_summary">主題、鍵盤大小，單手 / 分體 / 懸浮</string>
+    <string name="home_look_summary">主題、佈局、鍵盤大小，單手 / 分體 / 懸浮</string>
     <string name="home_keys_summary">長按、劃動、空白鍵、鍵上的字元</string>
     <string name="home_sound_summary">按鍵音、振動</string>
     <string name="home_clipboard_summary">剪貼簿歷史、表情膚色</string>
@@ -1059,6 +1163,7 @@
     <string name="mark_at_bottom_right">右下</string>
     <string name="mark_at_top_left">左上</string>
     <string name="mark_at_bottom_left">左下</string>
+    <string name="mark_at_top">頂部</string>
     <string name="mark_at_bottom">底部</string>
     <string name="mark_at_none">無</string>
     <string name="mark_at_taken">%1$s（%2$s）</string>
@@ -1086,6 +1191,11 @@
     <string name="shortcut_trad_simp">切簡繁</string>
     <string name="shortcut_choose_keyboard">切鍵盤</string>
     <string name="shortcut_hide_keyboard">收起鍵盤</string>
+    <string name="shortcut_stroke_h">筆畫：橫</string>
+    <string name="shortcut_stroke_s">筆畫：豎</string>
+    <string name="shortcut_stroke_p">筆畫：撇</string>
+    <string name="shortcut_stroke_n">筆畫：點</string>
+    <string name="shortcut_stroke_z">筆畫：折</string>
     <string name="field_cleared">已清除</string>
     <string name="nothing_to_restore">沒有可恢復的內容</string>
     <string name="nothing_to_copy">沒有內容可以複製</string>
@@ -1102,8 +1212,9 @@
     <string name="shortcut_page_zyfull">注音全鍵盤</string>
     <string name="shortcut_page_number">數字鍵盤</string>
     <string name="shortcut_page_function">功能鍵</string>
+    <string name="shortcut_shared_tag">共用</string>
+    <string name="shortcut_shared_with">和「%1$s」共用：這裡改了，那邊的同名鍵也跟著變</string>
     <string name="shortcut_key_elsewhere">在功能鍵頁改 %s</string>
-    <string name="shortcut_text_too_long">最多 %d 個字</string>
     <string name="fn_key_space">空白</string>
     <string name="fn_key_backspace">退格</string>
     <string name="fn_key_return">Enter</string>
@@ -1115,9 +1226,7 @@
     <string name="fn_key_lang">切換輸入法</string>
     <string name="fn_key_retype">重輸（九鍵）</string>
     <string name="fn_key_zero">0（九鍵）</string>
-    <string name="fn_key_separator">分詞（14/18 鍵）</string>
-    <string name="fn_key_up">上滑</string>
-    <string name="fn_key_down">下滑</string>
+    <string name="fn_key_separator">分詞（14/18/26 鍵）</string>
     <string name="quick_phrases">快速輸入</string>
     <string name="quick_phrases_summary">長按「符」，打關鍵詞的開頭挑一段存好的文字；什麼都不打時列出全部</string>
     <string name="quick_phrases_page_hint">長按「符」進來，打關鍵詞的開頭挑一段存好的文字；什麼都不打時列出全部，像翻筆記本。打拼音時順手出的縮寫，用「自訂短語」。</string>
@@ -1159,6 +1268,7 @@
     <string name="quick_phrase_saved">已儲存</string>
     <string name="quick_phrase_import_done_too_long">匯入 %1$d 條，略過 %2$d 條重複、%3$d 條超過 %4$d 字</string>
     <string name="quick_phrase_import_bad_key">%1$s；另略過 %2$d 條沒有關鍵詞或關鍵詞、註釋太長的（關鍵詞最多 %3$d 個字元，註釋最多 %4$d 個字）</string>
+    <string name="import_over_limit">%1$s；另有 %2$d 條沒匯入：匯入最多加到 %3$d 條</string>
     <string name="quick_phrase_discard_confirm">放棄這次的修改？</string>
     <string name="quick_phrase_discard">放棄</string>
     <string name="quick_phrase_keep_editing">繼續編輯</string>
@@ -1169,7 +1279,9 @@
     <string name="clipboard_save_quick_phrase">存為快速輸入</string>
     <string name="voice_no_model">語音模型載入失敗</string>
     <string name="voice_no_microphone">無法使用麥克風</string>
+    <string name="voice_recognition_failed">語音辨識出錯</string>
     <string name="voice_model_credit">語音辨識：X-ASR 中英模型（Gilgamesh-J）；由 sherpa-onnx（k2-fsa）與 silero VAD 執行</string>
+    <string name="voice_tagger_credit">語音整理（口頭禪、標點、數字）：本專案訓練的模型，由 Chinese ELECTRA small（哈工大訊飛聯合實驗室）微調，訓練資料是 MagicData-RAMC、RealTalk-CN、CS2W 的轉寫和以 FineWeb-2 句子合成的口語。語音包另行授權，僅供非商業使用（CC BY-NC-SA 4.0）；應用程式的程式碼仍依其自身授權（LGPL-2.1-or-later）</string>
     <string name="voice_hold_listening">正在聽…</string>
     <string name="voice_hold_preparing">準備中…</string>
     <string name="voice_hold_silent">麥克風沒有聲音</string>
@@ -1231,7 +1343,7 @@
     <string name="letter_case_upper">總是大寫</string>
     <string name="slot_first">長按首選</string>
     <string name="slot_empty">空</string>
-    <string name="slot_section_off">（現在關著，在鍵盤設定裡打開）</string>
+    <string name="slot_stroke_drawn">在鍵上劃選了筆畫篩選時，打著拼音滑這個鍵按畫出的形狀算，不發這一筆</string>
     <string name="swipe_slots_hint">點一個鍵，改它長按彈出的字元，和上滑、下滑做什麼。</string>
     <string name="swipe_slots_hint_page">點一個鍵，改它上滑、下滑做什麼，和長按彈出的字元。</string>
     <string name="swipe_slots_hint_function">點一個鍵，改它上滑、下滑做什麼。</string>
@@ -1248,6 +1360,22 @@
     <string name="swipe_both_ways">兩個都</string>
     <string name="swipe_selected">已選 %d 個</string>
     <string name="swipe_none_selected">點鍵來選中。</string>
+    <string name="shortcut_card_selected">已選中</string>
+    <string name="shortcut_card_unselected">未選中</string>
+    <string name="shortcut_card_edited">%1$s，改過 %2$d 個鍵</string>
+    <string name="shortcut_card_strip">%1$s，已選 %2$d 個，共 %3$d 個鍵</string>
+    <string name="shortcut_card_count">%1$d/%2$d</string>
+    <string name="long_press_card">長按選單</string>
+    <string name="long_press_card_summary">首選 %1$s · 共 %2$d 個</string>
+    <string name="long_press_card_summary_no_first">無首選 · 共 %1$d 個</string>
+    <string name="long_press_card_summary_none">長按不彈出字元</string>
+    <string name="long_press_card_read_only">唯讀</string>
+    <string name="long_press_card_line">點一個字元選中它，再調整</string>
+    <string name="settings_card_expanded">已展開</string>
+    <string name="settings_card_collapsed">已收起</string>
+    <string name="settings_card_info">說明</string>
+    <string name="slot_card_off">%1$s（已關閉）</string>
+    <string name="slot_card_off_note">這個方向現在關著，在鍵盤設定裡開啟。</string>
     <string name="swipe_changed">已修改</string>
     <string name="swipe_preset_confirm">所有鍵盤的所有鍵都回到這個預設。之後可以還原。</string>
     <string name="swipe_way_said">%1$s %2$s</string>
@@ -1256,11 +1384,166 @@
     <string name="swipe_fate_sign">畫不下，鍵上顯示為圖示</string>
     <string name="swipe_fate_dropped">畫不下，鍵上不顯示（滑動照常有效）</string>
     <string name="swipe_fate_roots">字根佔了位置，鍵上不顯示（滑動照常有效）</string>
-    <string name="swipe_fate_both">直向%1$s，橫向%2$s</string>
+    <string name="swipe_fate_both">直拿%1$s，橫拿%2$s</string>
     <string name="swipe_fate_part_as_set">照常顯示</string>
     <string name="swipe_fate_part_shortened">顯示為「%s」</string>
     <string name="swipe_fate_part_sign">顯示為圖示</string>
     <string name="swipe_fate_part_dropped">不顯示（滑動照常有效）</string>
     <string name="swipe_fate_key">%1$s %2$s：%3$s</string>
     <string name="swipe_fate_on">%1$s：%2$s</string>
+    <string name="rare_chars">生僻字屏蔽</string>
+    <string name="rare_chars_off">關</string>
+    <string name="rare_chars_held">已屏蔽 %1$s 個字</string>
+    <string name="rare_chars_switch">屏蔽生僻字</string>
+    <string name="rare_chars_note">%1$s · 候選、聯想、手寫、語音裡都不出現 · 改動在離開本頁後生效</string>
+    <string name="rare_chars_note_off">關 · 改動在離開本頁後生效</string>
+    <string name="rare_chars_search_hint">搜拼音或貼上一個字</string>
+    <string name="rare_chars_common">%1$s：常用字，不能屏蔽</string>
+    <string name="rare_chars_not_ours">%1$s：不是這裡管的字</string>
+    <string name="rare_chars_no_cell">%1$s 不單列（沒有讀音資料，或本輸入法打不出），隨「%2$s」一起屏蔽 / 放行</string>
+    <string name="rare_chars_none_found">沒有讀 %1$s 的字</string>
+    <string name="rare_group_l3">三級字</string>
+    <string name="rare_group_trad">繁體字</string>
+    <string name="rare_group_out">其它表外字</string>
+    <string name="rare_group_ext">擴展區</string>
+    <string name="rare_chars_unread">另有 %1$s 個字沒有讀音資料，隨本組一起屏蔽 / 放行</string>
+    <string name="rare_chars_unshown">%1$s 個本機顯示不了</string>
+    <string name="rare_chars_box_all">全部屏蔽</string>
+    <string name="rare_chars_box_some">部分屏蔽</string>
+    <string name="rare_chars_box_none">全部放行</string>
+    <string name="rare_chars_group_a11y">%1$s，%2$s 個，%3$s</string>
+    <string name="rare_chars_cell_a11y">%1$s，%2$s</string>
+    <string name="rare_chars_reset">恢復預設</string>
+    <string name="rare_chars_reset_confirm">回到只屏蔽擴展區，並清空單獨屏蔽和放行的字？</string>
+    <string name="rare_chars_changed_held">已屏蔽 %1$s 個字</string>
+    <string name="rare_chars_changed_allowed">已放行 %1$s 個字</string>
+    <string name="rare_chars_newer">這份設定是更新版本的幽默輸入法寫的，本版本不能改</string>
+    <string name="rare_chars_unreadable">讀不出生僻字屏蔽的設定，這次按關處理</string>
+    <string name="rare_word_has">含屏蔽的字：%1$s</string>
+    <string name="rare_allow_one">放行 %1$s</string>
+    <string name="rare_allow_these">放行這幾個字</string>
+    <string name="rare_add_hint">「%1$s」是屏蔽的生僻字，加了也打不出</string>
+    <string name="rare_allow_this">放行這個字</string>
+    <string name="rare_chars_unavailable">這裡用不了生僻字屏蔽：讀不出字的分級表</string>
+    <string name="rare_chars_letters">按字母跳轉</string>
+    <string name="rare_group_ext_about">古字、方言字，多數手機顯示不了</string>
+    <string name="rare_group_l3_about">多見於人名、地名，平時很少打</string>
+    <string name="rare_group_trad_about">簡體字對應的繁體寫法</string>
+    <string name="rare_group_out_about">規範字表以外的異體字、日文漢字等</string>
+    <string name="rare_chars_card_held">已屏蔽 %1$s/%2$s</string>
+    <string name="rare_chars_card_a11y">%1$s，%2$s 個，已屏蔽 %3$s</string>
+    <string name="rare_chars_card_open">查看這一組的字</string>
+    <string name="rare_chars_view_only">開關關著：只能看</string>
+    <string name="rare_chars_found_in">%1$s · %2$s 個</string>
+    <string name="settings_card_expand">展開</string>
+    <string name="settings_card_collapse">收起</string>
+    <string name="settings_card_partial">部分選中</string>
+    <string name="layout_tab">佈局</string>
+    <string name="layout_section_letters">字母鍵盤</string>
+    <string name="layout_section_number">數字鍵盤</string>
+    <string name="layout_section_symbols">符號面板</string>
+    <string name="layout_unreadable">%1$s（讀不出）</string>
+    <string name="layout_add">新增佈局</string>
+    <string name="layout_add_import">匯入佈局檔案</string>
+    <string name="layout_add_web">在網頁上做佈局</string>
+    <string name="layout_import_title">匯入佈局 %1$s？</string>
+    <string name="layout_import_replaces">取代已有的『%1$s』%2$s → %3$s</string>
+    <string name="layout_import_replaces_plain">取代已有的『%1$s』</string>
+    <string name="layout_import_refused">這個佈局匯入不了</string>
+    <string name="layout_import_more">……還有 %1$d 條</string>
+    <string name="layout_import_line">第 %1$d 行：%2$s</string>
+    <string name="layout_import_too_big">檔案超過 64 KB，佈局不會這麼大</string>
+    <string name="layout_import_not_text">這個檔案不是佈局（不是 UTF-8 文字）</string>
+    <string name="layout_import_too_many">已經有 %1$d 個自己的佈局，先刪掉一個再匯入</string>
+    <string name="layout_import_commits">這個佈局裡有 %1$d 個鍵會直接打出寫好的文字：%2$s</string>
+    <string name="layout_import_commits_more">%1$s，還有 %2$d 個</string>
+    <string name="layout_imported">已匯入 %1$s</string>
+    <string name="layout_used_for">能用在：%1$s</string>
+    <string name="layout_for_ims">%1$s的鍵盤</string>
+    <string name="layout_for_pads">數字鍵盤：%1$s</string>
+    <string name="layout_for_symbols">符號面板</string>
+    <string name="layout_im_pinyin">拼音</string>
+    <string name="layout_im_shuangpin">雙拼</string>
+    <string name="layout_im_english">英文</string>
+    <string name="layout_im_table">五筆等碼表</string>
+    <string name="layout_pad_full">123</string>
+    <string name="layout_pad_digits">只有數字</string>
+    <string name="layout_pad_signed">帶負號</string>
+    <string name="layout_pad_decimal">小數</string>
+    <string name="layout_pad_signed_decimal">帶負號的小數</string>
+    <string name="layout_pad_phone">電話</string>
+    <string name="layout_pad_datetime">日期時間</string>
+    <string name="layout_info_description">說明：%1$s</string>
+    <string name="layout_info_commits">直接打出寫好的文字的鍵：%1$s</string>
+    <string name="layout_quoted">「%1$s」</string>
+    <string name="layout_not_deleted">%1$s 沒有刪掉</string>
+    <string name="layout_info_unreadable">這個佈局的檔案讀不出，只能刪除。</string>
+    <string name="delete_layout">刪除佈局</string>
+    <string name="delete_layout_msg">刪除「%1$s」嗎？給它的鍵設的長按、上下滑留著，再匯入同一個佈局就回來。</string>
+    <string name="layout_use">用在…</string>
+    <string name="layout_use_title">「%1$s」用在</string>
+    <string name="layout_use_now">現在就用在 %1$s 上嗎？</string>
+    <string name="layout_use_now_many">現在就用在</string>
+    <string name="layout_use_yes">用</string>
+    <string name="layout_use_no">先不用</string>
+    <string name="layout_use_none">沒有輸入法能用「%1$s」</string>
+    <string name="layout_use_refused">這個版本讀不了「%1$s」：%2$s</string>
+    <string name="layout_use_number">數字鍵盤用這個</string>
+    <string name="layout_use_symbols">符號面板用這個</string>
+    <string name="layout_use_now_panel">現在就用作%1$s嗎？</string>
+    <string name="layout_panel_uses">%1$s現在用「%2$s」</string>
+    <string name="layout_panel_number">數字鍵盤</string>
+    <string name="layout_panel_symbols">符號面板</string>
+    <string name="layout_used_by_unread">用在：%1$s（讀不出，暫用內建的）</string>
+    <string name="layout_used_by_missing">用在：%1$s（選的佈局不見了，暫用內建的）</string>
+    <string name="layout_used_by">用在：%1$s</string>
+    <string name="layout_list_separator">、</string>
+    <string name="layout_goes_back">%1$s換回 %2$s</string>
+    <string name="delete_layout_in_use_panel">刪除「%1$s」嗎？%2$s正在用它，刪掉後換回內建的。</string>
+    <string name="delete_layout_in_use">刪除「%1$s」嗎？%2$s正在用它，刪掉後%3$s。給它的鍵設的長按、上下滑留著，再匯入同一個佈局就回來。</string>
+    <string name="layout_role_symbols">符</string>
+    <string name="layout_role_back">返回</string>
+    <string name="layout_role_numbers">123</string>
+    <string name="layout_finding_read">讀不進來：%1$s</string>
+    <string name="layout_finding_newer">需要幽默輸入法 %1$s 或更新（min-app）</string>
+    <string name="layout_finding_id_length">id「%1$s」太長：最多 %2$s 個字元</string>
+    <string name="layout_finding_id_built_in">id「%1$s」和 App 內建的鍵盤或片段重名，換一個</string>
+    <string name="layout_finding_id_prefix">id「%1$s」是 App 按鍵名的前綴，換一個</string>
+    <string name="layout_finding_name_length">名字（name）要 1–%2$s 個字元</string>
+    <string name="layout_finding_family">family「%1$s」不認：只能是 letters、grouped、nine、number、symbols</string>
+    <string name="layout_finding_based_on">based-on「%1$s」不認：只能是 qwerty、k14、k18、nine、number、symbols</string>
+    <string name="layout_finding_based_on_missing">缺 based-on：從哪塊內建鍵盤改來</string>
+    <string name="layout_finding_too_big">檔案 %1$s 位元組，超過 %2$s KB</string>
+    <string name="layout_finding_too_many_keys">鍵太多：%1$s 個，最多 %2$s</string>
+    <string name="layout_finding_commit_long">點按打出的文字太長：一個最多 %1$s 個字元</string>
+    <string name="layout_finding_too_many_commits">打出一段文字的動作太多：%1$s 個，最多 %2$s</string>
+    <string name="layout_finding_label_long">鍵「%1$s」顯示的字太長：最多 %2$s 個字元</string>
+    <string name="layout_finding_include">App 沒有叫「%1$s」的片段（include 只能引用 App 內建的）</string>
+    <string name="layout_finding_layout_target">「%1$s」切換到的面板 App 沒有</string>
+    <string name="layout_finding_base">和底稿（based-on）對不上：%1$s</string>
+    <string name="layout_finding_scene">在「%1$s」排不出來：%2$s</string>
+    <string name="layout_finding_blank">鍵「%1$s」在「%2$s」什麼都不顯示（沒有字也沒有圖示）</string>
+    <string name="layout_finding_name_no_slash">按鍵名「%1$s」不是 App 的：新鍵的名字寫成「佈局 id/鍵 id」</string>
+    <string name="layout_finding_name_prefix">按鍵名「%1$s」用了 App 的前綴，App 卻沒有這個鍵</string>
+    <string name="layout_finding_lacks">少了必需的鍵：%1$s</string>
+    <string name="layout_finding_groups">字母分組不對：%1$s</string>
+    <string name="layout_finding_hidden_chars">%1$s 裡有看不見的字元（控制字元、方向字元、零寬字元或換行）</string>
+    <string name="layout_finding_command">鍵 %1$s 的 %2$s 是命令：字母鍵和空白鍵只能用底稿同一個鍵上有的命令</string>
+    <string name="layout_finding_no_way">沒有鍵能切到%1$s</string>
+    <string name="layout_finding_narrow">鍵「%1$s」很窄，可能不好按</string>
+    <string name="layout_finding_commits">%1$s 個鍵點按打出寫死的文字</string>
+    <string name="layout_finding_theme_blank">目前主題下這個鍵什麼都不顯示：%1$s</string>
+    <string name="layout_finding_unnamed">鍵「%1$s」沒有按鍵名（shortcut=）：在 App 裡改不了它的長按、上下滑</string>
+    <string name="layout_finding_held">%1$s 是%2$s的鍵，這裡寫的長按、角標、滑動不起作用</string>
+    <string name="layout_finding_held_letters">%1$s 是%2$s的鍵，長按跟它走，不按這裡寫的字母；要用這些字母，給它取個自己的鍵名</string>
+    <string name="layout_finding_held_popups">這裡寫的 popups= 不起作用，跟%1$s一樣</string>
+    <string name="layout_board_emoji">表情</string>
+    <string name="layout_board_emoticon">顏文字</string>
+    <string name="layout_board_emoji_search">表情搜尋</string>
+    <string name="layout_board_expanded_side">展開候選</string>
+    <string name="layout_board_number_row">數字列</string>
+    <string name="layout_finding_gap_look">空位（gap）的 look=、class= 不起作用</string>
+    <string name="layout_finding_pad_lacks">數字鍵盤「%1$s」缺 %2$s：這種輸入框裡打不出來</string>
+    <string name="layout_finding_bottom_left">左下角通常是 %1$s（和 App 內建的一樣）</string>
+    <string name="layout_finding_split_scaled">分體時這一行在「%2$s」有 %1$s 個鍵，不是 9 或 10 個，分不成左右兩半，只能整行縮小</string>
 </resources>

@@ -5,16 +5,20 @@
 package org.fcitx.fcitx5.android.data.theme
 
 import android.content.res.Configuration
+import android.os.Looper
 import android.widget.Toast
 import androidx.annotation.Keep
 import androidx.annotation.VisibleForTesting
 import androidx.core.content.edit
 import androidx.preference.PreferenceManager
 import org.fcitx.fcitx5.android.R
+import org.fcitx.fcitx5.android.data.layout.ThemeLayoutsToList
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
 import org.fcitx.fcitx5.android.data.prefs.ManagedPreferenceProvider
 import org.fcitx.fcitx5.android.data.theme.ThemeManager.activeTheme
-import org.fcitx.fcitx5.android.input.keyboard.OneHanded
+import org.fcitx.fcitx5.android.input.bar.BarIconDrawables
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardArea
+import org.fcitx.fcitx5.android.input.keyboard.canvas.PackIcons
 import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneThemes
 import org.fcitx.fcitx5.android.input.theme.KeyStyleChoice
 import org.fcitx.fcitx5.android.scene.look.ThemeLook
@@ -52,6 +56,12 @@ object ThemeManager {
         ThemeLookMigration.monetLook = it.monetLook()
         // before the keyboard's size is read
         it.migrateSizeFollow()
+        // before a keyboard asks how it is shown
+        it.migrateKeyboardStyle()
+    }
+
+    private val keyboardStyleKeys = with(prefs) {
+        setOf(keyboardStylePortrait.key, keyboardStyleLandscape.key, keyboardStyleUnderPortrait.key, keyboardStyleUnderLandscape.key)
     }
 
     // the built-in packs' names ([BuiltinPacks], unpacked here first): a 3.0 theme of the user's named as one (a file
@@ -65,8 +75,12 @@ object ThemeManager {
     private val customThemes: MutableList<Theme.Custom> = listCustomThemes(prefs).first.toMutableList()
 
     // the user's theme 4.0 packs, each version one (060-render-p3 T8a); listed after the 3.0 themes, whose
-    // listing clears what a kill left of a save first
-    private var packs: List<Theme.Pack> = ThemeFilesManager.listPacks(builtinThemes)
+    // listing clears what a kill left of a save first. Those of before 0.6.1 given 分词 first, once (FB12): before
+    // anything of theirs is read, so nothing read is stale
+    private var packs: List<Theme.Pack> = run {
+        ThemeSeparators.addSeparatorsOnce()
+        ThemeFilesManager.listPacks(builtinThemes)
+    }
 
     // the built-in themes that are packs (BuiltinPacks), unpacked once a version; after the user's, whose
     // one of the same name (imported before it was built in) is shown instead
@@ -295,8 +309,25 @@ object ThemeManager {
     // the theme's picture decoded ahead, off the main thread, as wide as the screen (the keyboard's, nearly)
     private fun prefetch() {
         val dm = appContext.resources.displayMetrics
-        val landscape = appContext.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        ThemeAssets.prefetch(shownLook(_activeTheme), landscape, dm.widthPixels, dm.density)
+        val landscape = KeyboardArea.landscape(appContext)
+        val look = shownLook(_activeTheme)
+        // the bar's icons of the theme's own read ahead too (061-toolbar-icons §2.4): the bar is made with the input
+        // view, and a button whose icon the theme writes draws none till it is read. Queued before the picture and its
+        // blurs (the decode thread is one: behind them they were hundreds of ms late); asked on the main thread, where
+        // they are kept
+        val icons = PackIcons.of(_activeTheme)
+        val picture = Runnable { ThemeAssets.prefetch(look, landscape, dm.widthPixels, dm.density) }
+        when {
+            icons === PackIcons.EMPTY -> picture.run()
+            Looper.myLooper() == Looper.getMainLooper() -> {
+                BarIconDrawables.readAhead(icons)
+                picture.run()
+            }
+            else -> ThemeAssets.poster(Runnable {
+                BarIconDrawables.readAhead(icons)
+                picture.run()
+            })
+        }
     }
 
     // the last look shown and what it was made of: the same object while neither changes, as what is
@@ -485,10 +516,9 @@ object ThemeManager {
         when (key) {
             in prefs.dayNightModePrefNames -> activeTheme = evaluateActiveTheme()
             // InputView moves the board itself: made anew, the symbols shown would go back to the letters.
-            // The side one-handed mode is put at, from wherever (status area, arrows, settings page), is
-            // where the status area's toggle opens it again; remembered, it changes nothing shown
-            prefs.oneHanded.key -> OneHanded.sideToRemember(prefs.oneHanded.getValue())?.let(prefs.oneHandedSide::setValue)
-            prefs.splitDock.key, prefs.oneHandedSide.key -> Unit
+            // A style the service makes the views anew for where it floats or splits otherwise, keeping what is
+            // typed (ViewRebuild.STYLE), and InputView slides it between 普通 and 单手; the other shape's, nothing
+            prefs.splitDock.key, prefs.oneHandedSide.key, in keyboardStyleKeys -> Unit
             in keyStyleKeys -> {
                 keyStyle = prefs.keyStyleChoice()
                 fireChange()
@@ -507,9 +537,20 @@ object ThemeManager {
         packsListed()
         _activeTheme = evaluateActiveTheme()
         settleKeyStyle()
+        listPackLayouts()
         // fire all `OnThemeChangedListener`s on theme preferences change
         prefs.registerOnChangeListener(onThemePrefsChange)
         prefetch()
+    }
+
+    // the packs' boards of before 0.6.1 put in 外观 → 布局 once, and those a backup restored (061-custom-layout §11), off
+    // the main thread: the theme shown and the other slot's of 跟随系统深色模式 as they switch, the packs in use, the
+    // choices they stood for switched
+    private fun listPackLayouts() {
+        ThemeLayoutsToList.atStart(packs) {
+            val other = if (prefs.followSystemDayNightTheme.getValue()) (if (isDarkMode) prefs.lightModeTheme else prefs.darkModeTheme).getValue() else null
+            ThemeLayoutsToList.InUse(_activeTheme, other, isDarkMode)
+        }
     }
 
     // the key style settings before theme file 3.0 into the themes in use (ThemeLookMigration step 2), once
@@ -557,6 +598,8 @@ object ThemeManager {
             else remove(ThemeLookMigration.MONET_KEY)
             // the sizes' 跟随主题 moved (no managed preference): before the first unlock not moved again
             putBoolean(ThemePrefs.SIZES_FOLLOW_MIGRATED, prefs.sizeFollowMigrated)
+            // the styles moved (no managed preference): not again from the old keys before the first unlock
+            putBoolean(ThemePrefs.KEYBOARD_STYLE_MIGRATED, prefs.keyboardStyleMigrated)
         }
     }
 

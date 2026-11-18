@@ -8,7 +8,15 @@ import tempfile
 import time
 import zipfile
 
-from uat import (PKG, Blocked, case, check, choose, home, pinyin_keyboard, script)
+from uat import (PKG, Blocked, Fail, case, check, choose, gear, home, in_picker, pinyin_keyboard, script, to_downloads)
+
+
+def debuggable(d, what):
+    """the debug build only: a release build is not debuggable, `run-as` there prints its refusal to stderr and
+    nothing to stdout, so a check on its output passes or fails for nothing (0.6.1 release run: ST-143, ST-164, ST-175)"""
+    import uat
+    if uat.BUILD == "release":
+        raise Blocked(f"正式包不能 run-as（{what}）：在 debug 包上跑")
 
 
 def kb_box(d, s=None):
@@ -67,6 +75,8 @@ case("ST-33", needs="jvm:SettingsUatTest.pagesFromTopToBottom、SettingsUatTest.
 
 
 case("ST-34", needs="jvm:TablesUatTest.predictionOffHoldsForTablesToo")(lambda d: None)
+case("ST-134", needs="jvm:StrokeUatTest.theSensitivityIsReadAtEachTouch")(lambda d: None)
+case("ST-135", needs="jvm:InputMethodSettingsScreenTest.theStrokeRowsAreThereWhileStrokesAreDrawn")(lambda d: None)
 
 
 # ---------------------------------------------------------------- 外观
@@ -519,7 +529,8 @@ case("ST-35", needs="jvm:SettingsMenuUatTest.themesAreImportedAndOnesOwnExported
 case("ST-36", needs="jvm:SettingsMenuUatTest.followingTheSystemAThemeTappedTakesBothSlots、ThemeSlotsTest")(lambda d: None)
 
 
-case("ST-10", needs="jvm:SettingsEffectUatTest.keyboardHeightFollowsTheSetting")(lambda d: None)
+case("ST-10", needs="jvm:SettingsEffectUatTest.keyboardHeightFollowsTheSetting、KeyboardSizesTest.turnedTheRowIsTheSameOnEveryScreenOfAKind")(lambda d: None)
+case("ST-141", needs="manual:横屏的主题预览和键盘比高度（常见手机和折叠屏、三键和手势导航）；预览用的可用高度由 KeyboardAreaTest.theRoomPredictedLeavesTheStatusBarAndTheInputMethodsBarOut 查")(lambda d: None)
 
 
 case("ST-11", needs="jvm:SettingsEffectUatTest.sideAndBottomMarginsNarrowAndLiftTheKeys")(lambda d: None)
@@ -572,7 +583,7 @@ case("ST-15", needs="jvm:SettingsEffectUatTest.swipeUpThenDisabled、KeySwipeTes
 case("ST-16", needs="jvm:SettingsEffectUatTest.aLongerLongPressDelay")(lambda d: None)
 
 
-case("ST-17", needs="jvm:SettingsEffectUatTest.holdingTheSpaceGoesToTheNextInputMethod")(lambda d: None)
+case("ST-17", needs="jvm:SettingsEffectUatTest.holdingTheSpaceGoesToTheNextInputMethod、SpaceLongPressNextImTest")(lambda d: None)
 
 
 case("ST-18", needs="jvm:SettingsEffectUatTest.spaceSwipeOffLeavesTheCursor")(lambda d: None)
@@ -682,8 +693,7 @@ def st26(d):
     # (UndoChipTest.withAnimationsOffItIsInPlaceAndOpaqueAtOnce): a recording cannot tell it, the
     # notice's first frame being three quarters of the way in already; here a look
     d.step("禁用动画时的提示")
-    script("05-toolbar").copy_word(d, "公园")
-    d.shot("full", "禁用动画，复制后的提示")
+    script("05-toolbar").copy_word(d, "公园", at_copy=lambda: d.shot("full", "禁用动画，复制后的提示"))
     # Android's own 移除动画 does the same with the setting off
     d.step("系统移除动画")
     appearance_tab(d, "大小与样式")
@@ -692,8 +702,7 @@ def st26(d):
     try:
         d.open_page("text")
         sys0, _ = record_toolbar(d)
-        script("05-toolbar").copy_word(d, "公园")
-        d.shot("full", "系统移除动画，复制后的提示")
+        script("05-toolbar").copy_word(d, "公园", at_copy=lambda: d.shot("full", "系统移除动画，复制后的提示"))
     finally:
         d.sh("settings put global animator_duration_scale 1")
     check(sys0 <= 1, f"系统移除动画后工具栏仍有 {sys0} 个过渡帧")
@@ -701,38 +710,10 @@ def st26(d):
             "复制的提示看图")
 
 
-def set_comma(d, mark):
-    """中文标点 → , set to mark, typed by its corner swipe up (、 is m's corner character)"""
-    corner = {"、": "m"}[mark]
-    home(d, "通用输入", "中文标点")
-    def comma(s):
-        return next((n for n in s.app() if n.text == ","), None)
-    try:
-        n = d.wait(comma, 10)   # 5 s ran out with four emulators busy at once
-    except Blocked:   # seen in PR-10: left on 通用输入 after the tap on 中文标点; once more
-        home(d, "通用输入", "中文标点")
-        n = None
-    try:
-        n = n or d.wait(comma, 10)
-    except Blocked:
-        raise Blocked(f"中文标点里没有 ,：{d.top_activity()} {d.screen().texts()[:12]}")
-    d.tap(n.row().c, 1.2)
-    s = d.screen()
-    eds = [n for n in s.app() if "Edit" in n.cls]
-    if len(eds) < 2:
-        raise Blocked(f"编辑框 {[(e.text) for e in eds]}")
-    d.tap(eds[1].c, 0.8)
-    d.clear()
-    m = d.keys()[corner]
-    d.swipe(m, (m[0], m[1] - 130), 150)
-    t = d.field_text()
-    if t != mark:
-        raise Blocked(f"改成「{mark}」没成功：框里「{t}」")
-    d.hide_keyboard()
-    d.tap_text("确定", scroll=False, after=1.0)
+case("ST-28", needs="jvm:SettingsUatTest.everyInputMethodsPageAndTheSharedOnes")(lambda d: None)
 
 
-case("ST-28", needs="jvm:PunctuationMapUatTest.theCommaMappedToAnotherMarkTypesIt")(lambda d: None)
+case("ST-145", needs="jvm:HostConfigDirTest.anEditedPunctuationTableIsDeletedOnceOnTheUpgrade")(lambda d: None)
 
 
 @case("ST-29", base="B0-设置", mutates=True)
@@ -866,8 +847,8 @@ case("ST-80", needs="manual:主题制作网页；在电脑浏览器上手工跑�
 case("ST-81", needs="manual:主题制作网页；在电脑浏览器上手工跑（关页重开、两个标签页的草稿）")(lambda d: None)
 case("ST-69", needs="manual:要真麦克风说话，用过语音后再导入语音包")(lambda d: None)
 case("ST-70", needs="manual:按键字符里选中一项左移、删除，看轮廓和删掉的是哪个")(lambda d: None)
-case("ST-73", needs="manual:要从制作页导出动效示例主题，按键的缩放、下沉、渐隐要人眼看")(lambda d: None)
-case("ST-74", needs="manual:要从制作页导出 17 键示例主题，按它的分组打拼音、看固定的词")(lambda d: None)
+case("ST-73", needs="manual:要从制作页导出动效示例主题「薄荷（动效）」，按键的缩放、下沉、渐隐要人眼看")(lambda d: None)
+case("ST-74", needs="manual:要导入 0.6.0 的薄荷 17 键旧主题包（mint-k17 测试数据），按它的分组打拼音、看固定的词")(lambda d: None)
 
 
 case("ST-63", needs="release:多选文字包、语音包和一个非包文件导入，读逐文件的结果框、看下载里的原文件还在；结果框出现时转屏只一个框，点确定后再转屏、切到别的应用再回来不再弹出（手工）；结果的说法在 JVM 上：PacksUatTest.eachFilesOutcomeIsToldAndTheUserMayDeleteTheirFiles")(lambda d: None)
@@ -876,7 +857,10 @@ case("ST-63", needs="release:多选文字包、语音包和一个非包文件导
 case("ST-67", needs="release:覆盖安装 0.5.x→0.6.0 和恢复 0.5.x 的备份，发版时的升级检查里手工跑；JVM 见 ThemePrefsMigrationTest、ThemePrefsTest、KeyboardAreaTest")(lambda d: None)
 
 
-case("ST-64", needs="release:要上一版（0.5.x）的包覆盖安装；方法见 dev/design/060-asset-packs.md 的实现记录")(lambda d: None)
+case("ST-64", needs="release:要上一版（0.5.2）的包覆盖安装、它导出的备份带学过的词；方法见 dev/design/060-asset-packs.md 的实现记录")(lambda d: None)
+
+
+case("ST-195", needs="release:发版时手工跑：装 0.6.0 正式版并导入它的文字包 v1、语音包 v2（dev/old-apks/v0.6.0），覆盖安装这一版的发布包，两个包都还在、语音照常")(lambda d: None)
 
 
 case("ST-65", needs="jvm:PacksUatTest.aPackDamagedSinceItsImportIsSaidSoAndImportedAgainMended")(lambda d: None)
@@ -957,6 +941,34 @@ def st95(d):
     return seen
 
 
+@case("ST-160", base="B0-设置", mutates=True, visual=True)
+def st160(d):
+    appearance_tab(d, "大小与样式")
+    d.tap_text("纵向间距", after=0.2, owe=None)
+    box = d.wait(lambda s: s.find(rid="select_dialog_listview"), 10, step=0.15)
+    shown = [n.text for n in box.walk() if n.text]
+    d.back()
+    levels = ["跟随主题", "很紧凑", "紧凑", "标准", "宽松"]
+    check(shown == levels, f"纵向间距的档不是{levels}：{shown}")
+    choose(d, "纵向间距", "很紧凑")
+    choose(d, "横向间距", "紧凑")
+    d.open_page("text")
+    v0, h0 = key_gaps(d)
+    d.shot("kb", "纵向很紧凑、横向紧凑")
+    appearance_tab(d, "大小与样式")
+    choose(d, "键盘高度", "紧凑")
+    d.open_page("text")
+    v1, h1 = key_gaps(d)
+    d.shot("kb", "键盘高度紧凑")
+    seen = f"上下/左右缝 dp：标准高度 {v0}/{h0}，紧凑高度 {v1}/{h1}"
+
+    def near(got, want):
+        return abs(got - want) <= 1.6
+    check(near(v0, 4) and near(h0, 4), f"很紧凑的缝不是约 4/4：{seen}")
+    check(near(v1, 2) and near(h1, 4), f"紧凑高度的缝不是约 2/4：{seen}")
+    return seen + "（横屏手工看）"
+
+
 @case("ST-66", base="B0-设置")
 def st66(d):
     out = []
@@ -1009,43 +1021,69 @@ def push_layouts_pack(d):
     push_download(d, p, "uat-layouts")
 
 
+def answer_pack(d, with_layouts=True):
+    """the open 导入主题 dialog answered 导入, its 一起导入 ticked or not (061-custom-layout §11)"""
+    try:   # the dialog reads the pack first (加载中)
+        box = d.wait(lambda x: x.find(text="一起导入", where="all"), 15, what="确认框里的「一起导入」")
+    except Blocked:
+        box = None
+    check(box, f"确认框里没有「一起导入」：{d.screen().texts('all')[:10]}")
+    if not with_layouts:
+        d.tap(box.c, 0.5)
+    d.tap_text("导入", where="all", scroll=False, after=3.0)
+
+
+def types_q(d):
+    """the q key on the test page: what reaches the field"""
+    d.open_page("text")
+    d.tap(d.keys(refresh=True)["q"], 1.0)
+    text = d.field_text() or ""
+    d.clear()
+    return text
+
+
+def use_theme(d):
+    appearance_tab(d, "主题")
+    item = custom_item(d)
+    check(item, "导入后主题列表里没有它")
+    d.tap(item.c, 1.5)
+
+
 @case("ST-72", base="B0-设置", mutates=True)
 def st72(d):
-    from uat import gear
     appearance_tab(d, "大小与样式")
     d.switch("跟随系统深色模式", False)
     push_layouts_pack(d)
     d.step("导入")
     import_theme(d, "uat-layouts", confirm=False)
-    # the app's 26 keys' four (/ @ . .com) and q's; k14 does not read
-    for told in ("此主题包含自定义布局：k18, qwerty（其中 5 个动作直接输入布局里写的文字）", "缺键盘必需的键，或不是已有的键盘）：k14"):
+    # its 26 and 18 keys made layouts of the user's; k14 does not read; no keyboard stood for
+    for told in ("这个主题带 2 个布局：uat-layouts · 主题 26 键、uat-layouts · 主题 18 键，导入后在 外观 → 布局 里。",
+                 "缺键盘必需的键，或不是已有的键盘）：k14"):
         check(d.wait_text(told, timeout=8, where="all", contains=True), f"确认框没写「{told}」：{d.screen().texts('all')[:10]}")
-    d.tap_text("导入", where="all", scroll=False, after=3.0)
-    appearance_tab(d, "主题")
-    item = custom_item(d)
-    check(item, "导入后主题列表里没有它")
-    d.tap(item.c, 1.5)
-    d.step("打字")
-    d.open_page("text")
-    d.type("q")
-    d.expect_field("你好", msg="点 q 没有输入布局里写的「你好」")
-    d.step("切键盘")
+    check(not d.screen().find(contains="此主题包含自定义布局", where="all"), "确认框仍说这个主题顶替键盘")
+    answer_pack(d)
+    use_theme(d)
+    d.step("不再顶替")
+    check("你好" not in types_q(d), "用这个主题时 q 仍打出主题 26 键的「你好」")
+    d.step("布局页")
+    check(layout_card(d, "uat-layouts · 主题 18 键"), "布局页没有「uat-layouts · 主题 18 键」")
+    card = layout_card(d, "uat-layouts · 主题 26 键")
+    check(card, "布局页没有「uat-layouts · 主题 26 键」")
+    d.tap(card.c, 1.0)
+    d.tap_text("用在…", where="all", scroll=False, after=1.5)
+    check(d.wait_text("「uat-layouts · 主题 26 键」用在", timeout=5, where="all"), f"没出「用在」勾选：{d.screen().texts('all')[:10]}")
+    d.tap_text("拼音", where="all", scroll=False, after=0.5)
+    d.tap_text("确定", where="all", scroll=False, after=2.0)
+    got = types_q(d)
+    check("你好" in got, f"拼音用 uat-layouts · 主题 26 键 时 q 没打出「你好」：{got!r}")
     gear(d, "拼音")
     d.tap_text("键盘", after=1.0)
+    d.wait_text("注音全键盘", timeout=10, where="all")
     opts = d.screen().texts("all")
     d.back(after=0.5)
-    for want in ("全键盘（主题：主题 26 键）", "18 键（主题：主题 18 键）", "14 键"):
-        check(want in opts, f"键盘选项里没有「{want}」：{opts[:12]}")
-    out = []
-    for option in ("18 键（主题：主题 18 键）", "14 键"):
-        gear(d, "拼音")
-        choose(d, "键盘", option)
-        d.open_page("text")
-        n = len(d.keys(refresh=True))
-        check(n > 10, f"{option} 没弹出（{n} 个键）")
-        out.append(f"{option} {n} 键")
-    return "提示 5 个 commit:、k14 不用；q 打出你好；" + "、".join(out)
-
+    check(not any("（主题：" in t for t in opts), f"键盘选项里还有「（主题：…）」：{opts[:12]}")
+    check("uat-layouts · 主题 26 键（自定义）" in opts, f"键盘选项里没有「uat-layouts · 主题 26 键（自定义）」：{opts[:12]}")
+    return "确认框列出 2 个布局、k14 不用、勾着一起导入；主题不顶替；布局页两张卡片；用在拼音后 q 打出你好"
 
 SOUNDS_ICONS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fixtures", "theme-sounds-icons")
 
@@ -1149,7 +1187,7 @@ def st90(d):
     return f"空格上星的红点 {n}，换回内置后 {m}"
 
 
-case("ST-82", needs="release:要一个比手机上旧的签名文字包（v1）；发版时在发布包上手工跑（问框、保留、替换、转屏）")(lambda d: None)
+case("ST-82", needs="release:发版时手工跑：A、B 在 debug 包上（测试密钥签的语音包 v1，用不上，直接说；比手机上旧、用得上的文字包 v1，问框、保留、替换、转屏；只有 debug 包认测试密钥），C 在发布包上（装着 0.6.1 测试版语音包 v3 时导入 0.6.0 的语音包 v2，先问、替换）")(lambda d: None)
 case("ST-83", needs="manual:要切系统深色模式并点主题卡；规则由 ThemePackListingTest 查，在模拟器或真机上手工跑")(lambda d: None)
 case("ST-84", needs="manual:要从 from-app.theme 改出 monokai.theme；规则由 ThemePackImportTest 查，提示在设备上手工看")(lambda d: None)
 case("ST-85", needs="release:要打 v0.6.0-beta1 标签构建的包；发测试版时跑，规则由 ThemePackMinAppTest 查")(lambda d: None)
@@ -1165,7 +1203,8 @@ case("ST-93", needs="manual:主题制作网页；在电脑浏览器上手工跑�
 
 @case("ST-96", base="B0-设置")
 def st96(d):
-    """纠错's summary on the device: 双拼 only the ü-key slip, its 18 and 14 keys 不适用"""
+    """纠错's summary on the device: keys tapped off-centre read by where they land, 双拼's full keyboard the
+    ü-key slip; no 不适用 line (注音九键 reads slips too since the user's 11-16)"""
     title = "纠正错拼和按偏的键"
     d.goto("通用输入")
     r = None
@@ -1178,9 +1217,9 @@ def st96(d):
             break
     check(r is not None, f"通用输入里没有「{title}」：{d.screen().texts()[:10]}")
     summary = " ".join(n.text for n in r.walk() if n.rid == "summary" and n.text)
-    check("双拼：只认" in summary, f"说明里没有「双拼：只认」：{summary}")
-    for im in ("双拼 · 18 键", "双拼 · 14 键", "双拼 · 九键"):
-        check(im in summary.split("不适用")[-1], f"不适用里没有「{im}」：{summary}")
+    check(summary.startswith("按在键的边上、靠着旁边哪个键，也按那个键读") and "双拼全键盘还认 j、q、x、y 后的 u 按成了 ü 的键" in summary,
+          f"说明不对：{summary}")
+    check("不适用" not in summary, f"说明里还有不适用：{summary}")
     d.shot("full", "纠正错拼和按偏的键的说明")
     return summary
 
@@ -1202,20 +1241,13 @@ def page_key(d, label):
 
 
 def slots_tab(d, tab):
-    """the 按键字符和快捷键 page on its tab [tab] (全键盘 … 功能键): the row of tabs scrolls sideways"""
+    """the 按键字符和快捷键 page on the keyboard [tab] (全键盘 … 功能键): its card tapped, all eight on the first screen"""
     slots_page(d)
-    for _ in range(3):
-        s = d.screen()
-        n = next((n for n in s.app() if n.cls.endswith("RadioButton") and n.text == tab), None)
-        if n:
-            d.tap(n.c, 1.5)
-            return
-        row = [n for n in s.app() if n.cls.endswith("RadioButton")]
-        if not row:
-            raise Blocked("按键字符和快捷键页上没有分页")
-        y = row[0].c[1]
-        d.swipe((row[-1].c[0], y), (row[0].c[0], y), 300, after=0.8)
-    raise Blocked(f"按键字符和快捷键页上没有「{tab}」页")
+    s = d.screen()
+    n = next((n for n in s.app() if n.cls.endswith("RadioButton") and n.text == tab), None)
+    if not n:
+        raise Blocked(f"按键字符和快捷键页上没有「{tab}」卡片：{[n.text for n in s.app() if n.cls.endswith('RadioButton')]}")
+    d.tap(n.c, 1.5)
 
 
 def key_dialog(d, label):
@@ -1226,12 +1258,53 @@ def key_dialog(d, label):
     if not n:
         raise Blocked(f"页上没有 {label} 键：{[n.desc for n in s.app() if n.clickable and n.desc][:12]}")
     d.tap(n.c, 0.5)
-    return d.wait(lambda s: s.find(text="设为首选"), 5, what=f"{label} 的对话框")
+    # 下滑's title row: every key's dialog has it, the last of its cards (so all three are laid out), open or
+    # folded, said 下滑（已关闭） where that way is off
+    return d.wait(lambda s: next((h for h in dialog_heads(s) if head_name(h) == "下滑"), None), 5, what=f"{label} 的对话框")
+
+
+CARDS = ("长按菜单", "上滑", "下滑")
+
+
+def head_name(n):
+    """which of the key dialog's cards a title row is (its node says the title, then what is set)"""
+    return next((c for c in CARDS if (n.desc or n.text).startswith(c)), None)
+
+
+def dialog_heads(s):
+    """the key dialog's cards' title rows on screen, top to bottom: the clickable rows said 长按菜单…, 上滑…, 下滑…"""
+    return sorted((n for n in s.app() if n.clickable and head_name(n)), key=lambda n: n.b[1])
+
+
+def dialog_card(d, title):
+    """the key dialog's card [title] (长按菜单, 上滑, 下滑) open: one is where something to tap lies between its title
+    row and the next one's (the last card's: 确定), only one open at a time"""
+    def opened(s, head):
+        heads = dialog_heads(s)
+        nxt = next((h for h in heads if h.b[1] > head.b[1]), None)
+        ok = s.find(text="确定")
+        end = nxt.b[1] if nxt else (ok.b[1] if ok else 10 ** 6)
+        return any(n.clickable and head.b[3] <= n.b[1] < end for n in s.app() if n is not head and not head_name(n))
+    for _ in range(3):
+        s = d.screen()
+        head = next((h for h in dialog_heads(s) if head_name(h) == title), None)
+        if not head:
+            dialog_scroll(d)
+            continue
+        if opened(s, head):
+            return
+        d.tap(head.c, 0.8)
+        s = d.screen()
+        head = next((h for h in dialog_heads(s) if head_name(h) == title), None)
+        if head and opened(s, head):
+            return
+    raise Blocked(f"对话框里打不开「{title}」：{[h.desc or h.text for h in dialog_heads(d.screen())]}")
 
 
 def dialog_add_digits(d, text):
     """添加 [text] (digits, typed on the keyboard's 123 page: adb's input text is a hardware keyboard's keys,
     which turn the soft keyboard into its small 实体键盘 bar) to the open key dialog's list"""
+    dialog_card(d, "长按菜单")
     s = d.screen()
     e = next((n for n in s.app() if n.cls.endswith("EditText") and n.text in ("", "添加字符，空格分隔")), None)
     if not e:
@@ -1252,6 +1325,7 @@ def dialog_add_digits(d, text):
 
 def dialog_pick(d, item):
     """an item of the open dialog's list selected (by what it reads out)"""
+    dialog_card(d, "长按菜单")
     s = d.screen()
     n = next((n for n in s.app() if n.clickable and n.desc == item), None)
     if not n:
@@ -1260,36 +1334,19 @@ def dialog_pick(d, item):
 
 
 def dialog_way(d, way, option):
-    """上滑 or 下滑's [option] (长按首选, 文字, 空) in the open dialog, scrolled to where it is"""
-    for _ in range(3):
-        s = d.screen()
-        heads = sorted((n for n in s.app() if n.text in ("上滑", "下滑") and not n.clickable), key=lambda n: n.b[1])
-        head = next((n for n in heads if n.text == way), None)
-        if head:
-            nxt = next((n for n in heads if n.b[1] > head.b[1]), None)
-            opts = [n for n in s.app() if n.text.startswith(option) and n.b[1] > head.b[1] and (not nxt or n.b[1] < nxt.b[1])]
-            if opts:
-                d.tap(min(opts, key=lambda n: n.b[1]).c, 0.4)
-                return
-        dialog_scroll(d)
-    raise Blocked(f"对话框里找不到{way}的「{option}」")
+    """上滑 or 下滑's [option] (长按首选, 命令, 空, 文字) in the open dialog: its card opened, the only one whose
+    choices are on screen"""
+    dialog_card(d, way)
+    s = d.screen()
+    opts = [n for n in s.app() if n.cls.endswith("RadioButton") and n.text.startswith(option)]
+    if not opts:
+        raise Blocked(f"对话框里找不到{way}的「{option}」：{[n.text for n in s.app() if n.cls.endswith('RadioButton')]}")
+    d.tap(opts[0].c, 0.4)
 
 
 def dialog_text(d, way, pinyin, word):
     """上滑 or 下滑 set to the text [word], typed as [pinyin] and picked from the candidates"""
-    dialog_way(d, way, "文字")
-    eds = []
-    for _ in range(3):
-        s = d.screen()
-        head = next((n for n in s.app() if n.text == way and not n.clickable), None)
-        picked = next((n for n in sorted(s.app(), key=lambda n: n.b[1]) if n.text == "文字" and head and n.b[1] > head.b[1]), None)
-        eds = [n for n in s.app() if n.cls.endswith("EditText") and picked and n.b[1] > picked.b[1]]
-        if eds:
-            break
-        dialog_scroll(d)
-    if not eds:
-        raise Blocked(f"{way}的文字框不在屏上")
-    ed = min(eds, key=lambda n: n.b[1])
+    ed = dialog_text_field(d, way)
     # at its right end, and what is in it backspaced first: the box opens with the text stored, and [word]
     # replaces it
     d.tap((ed.b[2] - 12, ed.c[1]), 0.8)
@@ -1308,6 +1365,36 @@ def dialog_text(d, way, pinyin, word):
     time.sleep(0.8)
 
 
+def dialog_text_field(d, way):
+    """上滑 or 下滑 set to 文字: its field, the one on screen (the other cards folded)"""
+    dialog_way(d, way, "文字")
+    # where it stays: the dialog grows with the card opened and centres itself again a moment later, past the
+    # Dumper's quiet wait; a field read before that was tapped below itself and 好 went in ahead of the old text
+    # (0.6.1 release run: ST-106, KB-72)
+    eds, last = [], None
+    for _ in range(10):
+        eds = [n for n in d.screen().app() if n.cls.endswith("EditText")]
+        at = [n.b for n in eds]
+        if at == last:
+            break
+        last = at
+        time.sleep(0.3)
+    if len(eds) != 1:
+        raise Blocked(f"{way}的文字框不是屏上唯一的输入框：{[n.text for n in eds]}")
+    return eds[0]
+
+
+def dialog_note(d, way, test):
+    """the texts of [way]'s card that pass [test] (its notes are at its end): the card opened, scrolled where none shows"""
+    dialog_card(d, way)
+    for _ in range(3):
+        got = [t for t in d.screen().texts("all") if test(t)]
+        if got:
+            return got
+        dialog_scroll(d)
+    return []
+
+
 def dialog_scroll(d):
     """the open dialog's content moved up a third of the screen (its buttons stay)"""
     s = d.screen()
@@ -1324,24 +1411,10 @@ def dialog_ok(d):
 @case("ST-97", base="B0-设置", mutates=True, visual=True)
 def st97(d):
     slots_page(d)
-    d.tap(page_key(d, "q").c, 0.5)
-    # the dialog is taller than the screen: 上滑's 空 at the fold, 下滑's text field under it
-    s = d.wait(lambda s: s if any(n.text == "空" for n in s.app()) else None, 5, what="q 的对话框")
-    empties = sorted((n for n in s.app() if n.text == "空"), key=lambda n: n.b[1])
-    if not empties:
-        raise Blocked(f"对话框里没有上滑一段：{s.texts()[-16:]}")
-    d.tap(empties[0].c, 0.4)
-    e = empties[0].c
-    d.swipe((e[0], e[1]), (e[0], e[1] - 600), 400, after=0.8)
-    s = d.screen()
-    texts = sorted((n for n in s.app() if n.text == "文字"), key=lambda n: n.b[1])
-    if not texts:
-        raise Blocked(f"对话框里没有下滑一段：{s.texts()[-16:]}")
-    down = texts[-1]
-    eds = [n for n in s.app() if "Edit" in n.cls and n.b[1] > down.b[1]]
-    if not eds:
-        raise Blocked(f"下滑的文字框不在屏上：{s.texts()[-16:]}")
-    d.tap(min(eds, key=lambda n: n.b[1]).c, 0.8)
+    key_dialog(d, "q")
+    dialog_way(d, "上滑", "空")
+    ed = dialog_text_field(d, "下滑")
+    d.tap(ed.c, 0.8)
     d.type("okay")
     d.enter()
     d.hide_keyboard()
@@ -1359,7 +1432,8 @@ def st97(d):
     check("1" not in up, f"q 上滑是空槽，却打出了「{up}」")
     d.clear()
     slots_page(d)
-    d.tap_text("撤销", scroll=False, after=1.0)
+    # the title bar's ↶: no text, said 撤销
+    d.tap(d.wait(lambda s: next((n for n in s.app() if n.desc == "撤销" and n.clickable), None), 5, what="标题栏的 ↶").c, 1.0)
     d.open_page("text")
     d.clear()
     q = d.keys(refresh=True)["q"]
@@ -1416,7 +1490,7 @@ def st98(d):
 case("ST-99", needs="jvm:PopupOverridesFragmentTest$Dialog.selectedKeysAreSetAtOnce")(lambda d: None)
 
 
-case("ST-100", needs="jvm:PopupOverridesFragmentTest$Dialog.anotherKeyboardsLongPressIsSetByName、PopupOverridesFragmentTest$Dialog.everyKeysEditorStartsFromItsKeyboardsOwnLongPress、PopupOverridesFragmentTest$Dialog.aListBackToTheEditorsDefaultStoresNothing、PopupOverridesFragmentTest$Row.anEmptiedListIsOffItsRowGoneToo、SwipeSlotsUatTest.aGroupKeysLongPressSetByName、HandwritingSceneGesturesTest.theCommasLongPressSetByNameIsTheUsers")(lambda d: None)
+case("ST-100", needs="jvm:PopupOverridesFragmentTest$Dialog.anotherKeyboardsLongPressIsSetByName、PopupOverridesFragmentTest$Dialog.everyKeysEditorStartsFromItsKeyboardsOwnLongPress、PopupOverridesFragmentTest$Dialog.aListBackToTheEditorsDefaultStoresNothing、PopupOverridesFragmentTest$Row.anEmptiedListIsOffItsRowGoneToo、SwipeSlotsUatTest.aGroupKeysLongPressSetByName")(lambda d: None)
 
 
 
@@ -1557,9 +1631,7 @@ def st106(d):
     key_dialog(d, "j")
     dialog_text(d, "下滑", "xianzaizenmeyangle", "现在怎么样了")
     time.sleep(1.5)
-    dialog_scroll(d)
-    s = d.screen()
-    note = [t for t in s.texts("all") if "画不下" in t or "显示为" in t]
+    note = dialog_note(d, "下滑", lambda t: "画不下" in t or "显示为" in t)
     d.shot("full", "j 的对话框：下滑段下说键上画成什么")
     dialog_ok(d)
     s = d.screen()
@@ -1577,8 +1649,7 @@ def st106(d):
     key_dialog(d, "j")
     dialog_text(d, "下滑", "hao", "好")
     time.sleep(1.5)
-    dialog_scroll(d)
-    gone = [t for t in d.screen().texts("all") if "画不下" in t or "显示为" in t]
+    gone = dialog_note(d, "下滑", lambda t: "画不下" in t or "显示为" in t)
     dialog_ok(d)
     check(note, "下滑段下没有说键上画成什么")
     check(page and page[0].split("：", 1)[-1] == note[0], f"页面键下面的说明 {page} 和对话框的 {note} 不同")
@@ -1611,7 +1682,7 @@ def st112(d):
     s = d.screen()
     field = next((n for n in s.app() if n.cls.endswith("EditText") and n.text in ("", "添加字符，空格分隔")), None)
     check(s.find(rid="keyboard_view", where="ime") is None, "点完成后键盘没收起")
-    check(s.find(text="设为首选") is not None, "点完成后对话框关了")
+    check(any(head_name(h) == "下滑" for h in dialog_heads(s)), "点完成后对话框关了")
     check(any(n.clickable and n.desc == "7" for n in s.app()), "点完成后列表里没有 7")
     check(field is not None, f"点完成后添加框没清空：{[n.text for n in s.app() if n.cls.endswith('EditText')]}")
     dialog_ok(d)
@@ -1657,3 +1728,1142 @@ def st114(d):
     check("我" in c[:5], f"打 wo 的候选 {c[:8]}，没有「我」")
     return f"长按 QW 弹出 {shown[:10]}；wo 候选 {c[:5]}"
 
+
+case("ST-115", needs="jvm:PackLayoutRefusedTest.aLayoutTheEngineRefusesDrawsTheAppsOwnOfItsId、"
+     "PackLayoutRefusedTest.theAppsOwnLayoutDrawnInsteadIsTypedAsTheBuiltInGroups、"
+     "PackLayoutRefusedTest.aLayoutRefusedIsNotMadeAgainAsWhatTheKeysShowChanges、"
+     "PackLayoutRefusedTest.aRefusalInUseIsKeptThroughManyOthersAndLoggedOnce、"
+     "PackLayoutRefusedTest.aLayoutRefusedInOneStateIsDrawnInAnotherAtTheSameSize、"
+     "PackLayoutRefusedTest.theKeysTypedOnBeforeTheLayoutDrawnChangedSendTheDrawnLayoutsCodes、"
+     "PackLayoutRefusedTest.aZhuyinKeyWhoseFaceChangedSendsTheSymbolItShows")(lambda d: None)
+case("ST-116", needs="manual:主题制作网页；在电脑浏览器上手工跑（只有深色版的主题从背景图取色、勾「这个主题有浅色版」）")(lambda d: None)
+
+
+case("ST-117", needs="jvm:SettingsUatTest.theCodeRowsThreePlacesTheFieldOnlyOnceItsNoteIsAgreedTo")(lambda d: None)
+
+
+case("ST-118", needs="jvm:FloatingCodeStripUatTest.withTheCodeInTheFieldTheStripShowsTheSyllablesAlone、FloatingCodeStripUatTest.theKeyboardIsAsHighOnEveryKeyboardAndLowerThanEmbedded")(lambda d: None)
+
+
+case("ST-119", needs="jvm:DeveloperUatTest.voiceCorrectionsAskedAndRememberedAreCounted")(lambda d: None)
+
+
+@case("ST-120", base="B0-设置", mutates=True, visual=True)
+def st120(d):
+    pinyin_keyboard(d, "九键")
+    slots_tab(d, "九键")
+    key_dialog(d, "3")
+    dialog_way(d, "上滑", "命令")
+    # its 换 (the only one on screen: 下滑's card folded) opens the commands' own list, a dialog over the key's
+    s = d.screen()
+    change = [n for n in s.app() if n.text == "换"]
+    if len(change) != 1:
+        raise Blocked(f"上滑卡片里的「换」不是一个：{s.texts()[-16:]}")
+    d.tap(change[0].c, 0.8)
+    # the five strokes at the list's end
+    for _ in range(4):
+        if any(n.text == "笔画：撇" for n in d.screen().app()):
+            break
+        dialog_scroll(d)
+    s = d.wait(lambda s: s if any(n.text == "笔画：撇" for n in s.app()) else None, 5, what="命令列表里的笔画")
+    strokes = [t for t in ("笔画：横", "笔画：竖", "笔画：撇", "笔画：点", "笔画：折") if any(n.text == t for n in s.app())]
+    d.shot("app", "命令列表：五种笔画")
+    check(len(strokes) == 5, f"命令列表里的笔画只有 {strokes}")
+    d.tap_text("笔画：撇", scroll=False, after=0.6)
+    dialog_ok(d)
+    d.open_page("text")
+    d.clear()
+    d.shot("kb", "九键 3 键角上画着撇")
+    k = d.keys(refresh=True)
+    three = k["3"]
+    d.taps([k[c] for c in "9264"], gap=0.35, after=0.6)
+    before = d.preedit()
+    d.swipe(three, (three[0], three[1] - 130), 150, after=0.8)
+    typed = d.preedit()
+    d.shot("kb", "打着 wang 上滑 3：编码行多一个丿")
+    check("丿" in typed and "丿" not in before, f"打着拼音上滑 3，编码行由「{before}」变成「{typed}」，没多一个丿")
+    check("d" not in typed.replace(before, ""), f"上滑 3 打了 DEF：「{typed}」")
+    d.clear()
+    d.swipe(three, (three[0], three[1] - 130), 150, after=0.8)
+    empty = d.preedit() + d.field_text()
+    check(empty == "", f"什么都没打时上滑 3，打出了「{empty}」")
+    d.step("在键上划选笔画筛选")
+    home(d, "通用输入")
+    choose(d, "在键上划", "笔画筛选")
+    d.open_page("text")
+    d.clear()
+    three = d.keys(refresh=True)["3"]
+    d.swipe(three, (three[0], three[1] - 130), 150, after=0.8)
+    filtered = d.preedit() + d.field_text()
+    check(filtered == "", f"笔画筛选、什么都没打时上滑 3，打出了「{filtered}」")
+    # the dialog says the stroke is not reached while typing now
+    slots_tab(d, "九键")
+    key_dialog(d, "3")
+    note = "在键上划选了笔画筛选时，打着拼音滑这个键按画出的形状算，不发这一笔"
+    said = bool(dialog_note(d, "上滑", lambda t: t == note))
+    d.shot("app", "笔画筛选时 3 的对话框：上滑的命令下面说打字时滑不到")
+    check(said, "笔画筛选时 3 的对话框里没有说打着拼音时滑不到")
+    d.back(after=0.5)
+    return f"命令里有 {len(strokes)} 种笔画；wang 上滑 3：「{before}」→「{typed}」；没打字上滑：「{empty}」；笔画筛选没打字上滑：「{filtered}」；对话框说明：{said}"
+
+
+case("ST-125", needs="jvm:PopupMarksEditorTest.aFieldOfVariablesIsOneItemOfThemPreviewedAndTold")(lambda d: None)
+
+case("ST-126", needs="manual:导出备份、恢复，覆盖装 0.6.0 再装回；JVM 见 DowngradeTo060Test")(lambda d: None)
+
+case("ST-127", needs="jvm:PopupMarksEditorTest.noChinesePunctuationIsForTheMarksATableConverts")(lambda d: None)
+
+case("ST-128", needs="jvm:BarIconsThemeTest.aThemesBarIconsAreDrawnTheOnesItDoesNotWriteTheApps、BarIconsThemeTest.aBuiltInThemeDrawsTheAppsAgain")(lambda d: None)
+
+case("ST-129", needs="jvm:BarIconsThemeTest.aThemesUndoIsTheToolbarsAndTheShortcutsAlike")(lambda d: None)
+
+case("ST-130", needs="jvm:BarIconsThemeTest.menuIconsNoneDrawnTurnTheAppsAsEver、BarIconsThemeTest.aThemeOfOneMenuStateDrawsThatOneTheOtherTheAppsTurnedNeitherTurned、"
+               "BarIconsThemeTest.hideKeyboardsImagesAreEachPlacesOwnTillAThemeWritesIt")(lambda d: None)
+
+case("ST-131", needs="manual:主题制作网页；在电脑浏览器上手工看候选栏预览（分组由 panels-smoke.mjs 查）")(lambda d: None)
+
+case("ST-132", needs="jvm:BarIconsThemeTest.theStatusPanelsCellsAndGearAreTheThemes、BarIconsThemeTest.thePanelsButtonsDoingACommandsJobAreTheThemes、"
+               "BarIconsThemeTest.theButtonsBesideTheKeysAreTheThemes、BarIconsThemeTest.theFloatingCandidateWindowsKeyboardButtonIsTheThemes")(lambda d: None)
+
+case("ST-121", needs="jvm:SettingsUatTest.keyDrawingIsOneListOfItsChoices、InputMethodSettingsScreenTest.keyDrawingIsOneChoiceSummarizedByItself、"
+               "InputMethodSettingsScreenTest.thePauseOnTheSharedPageIsTheAppsPreference、HandwritingUatTest.aShortAndALongPause")(lambda d: None)
+
+case("ST-122", needs="jvm:KotlinHostHandwritingTest.handwritingIsNoInputMethodToAdd")(lambda d: None)
+
+case("ST-123", needs="jvm:HandwritingModeTest.theThemesInkOnlyWhereItStandsOutFromTheLetters、PanelThemeTest.theInkOverTheLetters")(lambda d: None)
+
+case("ST-124", needs="jvm:InputMethodSettingsScreenTest.aSharedOptionSaysUnderItWhatItIsNoUseTo")(lambda d: None)
+
+
+def push_zhuyin_held_pack(d):
+    """uat-zhuyin-held.theme in 下载: Nord as a pack of its own with the app's 注音全键盘, its ㄅ (zyfull/1) writing a
+    corner ! and a swipe up typing ㄅㄅ of its own, as a 0.6.0 pack could"""
+    def read(*p):
+        with open(os.path.join(SCENE, *p), encoding="utf-8") as f:
+            return f.read()
+    zhuyin = read("layouts", "zhuyin.xml")
+    assert 'shortcut="zyfull/1"' in zhuyin, "the app's 注音 no longer names ㄅ zyfull/1"
+    zhuyin = zhuyin.replace('shortcut="zyfull/1"', 'shortcut="zyfull/1" alt="!" swipe-up="commit:ㄅㄅ"', 1)
+    p = os.path.join(tempfile.gettempdir(), f"uat-zhuyin-held-{d.port}.theme")
+    with zipfile.ZipFile(p, "w") as z:
+        z.writestr("theme.xml", read("themes", "nord.xml").replace('name="nord"', 'name="uat-zhuyin-held"', 1))
+        z.writestr("layouts/zhuyin.xml", zhuyin)
+    push_download(d, p, "uat-zhuyin-held")
+
+
+@case("ST-133", base="B0-注音全键盘", mutates=True, visual=True)
+def st133(d):
+    def bo():
+        d.open_page("text")
+        d.clear()
+        b = d.face("ㄅ")
+        corner = b.desc
+        d.swipe(b.c, (b.c[0], b.c[1] - 130), 150, after=0.8)
+        up = d.field_text()
+        d.clear()
+        return corner, up
+    before = bo()
+    appearance_tab(d, "大小与样式")
+    d.switch("跟随系统深色模式", False)
+    push_zhuyin_held_pack(d)
+    d.step("导入")
+    import_theme(d, "uat-zhuyin-held", confirm=False)
+    for told in ("此主题包含自定义布局：zhuyin", "主题自带的布局里有 2 处长按、角标、滑动的写法不起作用"):
+        check(d.wait_text(told, timeout=8, where="all", contains=True), f"确认框没写「{told}」：{d.screen().texts('all')[:10]}")
+    d.tap_text("导入", where="all", scroll=False, after=3.0)
+    appearance_tab(d, "主题")
+    item = custom_item(d)
+    check(item, "导入后主题列表里没有它")
+    d.tap(item.c, 1.5)
+    d.step("看 ㄅ")
+    after = bo()
+    d.open_page("text")
+    d.face("ㄅ")
+    d.shot("kb", "主题自带注音全键盘：ㄅ 的键角是内置的，不是 !")
+    check(after[0] == before[0] and "!" not in after[0], f"ㄅ 的键角读作「{after[0]}」，内置的是「{before[0]}」")
+    check(after[1] == before[1] and "ㄅㄅ" not in after[1], f"ㄅ 上滑打出「{after[1]}」，内置的是「{before[1]}」")
+    return f"确认框提示 2 处不起作用；ㄅ 键角「{after[0]}」、上滑「{after[1]}」，和内置的一样"
+
+
+case("ST-140", needs="jvm:KeyboardStyleSettingsUatTest.theTwoStylesInPlaceOfTheThree、KeyboardStyleSettingsUatTest.notSetShowsTheTurnedScreensOwn、KeyboardStyleSettingsUatTest.aStyleChangedFromTheKeyboardShowsAtOnce")(lambda d: None)
+
+
+# ---------------------------------------------------------------- 按偏的键按落点读 (061-neighbour-correction)
+
+
+case("ST-136", needs="jvm:SettingsUatTest.everyInputMethodsPageAndTheSharedOnes、NeighbourSlipTest.theNineKeysReadADigitAsTheOneItWasTappedTowards")(lambda d: None)
+
+
+case("ST-137", needs="jvm:SettingsUatTest.pinyinsKeyboardOnItsPageAndTheSharedOptionsSayingFourteenKeys")(lambda d: None)
+
+
+SHIFT060 = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fixtures", "theme-shift060")
+
+
+def push_shift060_pack(d, name):
+    """<name>.theme in 下载: Nord as a pack of its own with 0.6.0's 26 keys (uat/fixtures/theme-shift060), its Shift
+    `when="!table"` and no 分词"""
+    with open(os.path.join(SCENE, "themes", "nord.xml"), encoding="utf-8") as f:
+        xml = f.read()
+    assert 'name="nord"' in xml
+    p = os.path.join(tempfile.gettempdir(), f"{name}-{d.port}.theme")
+    with zipfile.ZipFile(p, "w") as z:
+        z.writestr("theme.xml", xml.replace('name="nord"', f'name="{name}"', 1))
+        z.write(os.path.join(SHIFT060, "qwerty.xml"), "layouts/qwerty.xml")
+    push_download(d, p, name)
+
+
+def typing_xi(d):
+    """the keys' ids while xi is typed on the full keyboard, the field cleared after"""
+    d.open_page("text")
+    d.type("xi")
+    ids = set(d.keys(refresh=True))
+    d.clear()
+    return ids
+
+
+@case("ST-143", base="B0-设置", mutates=True)
+def st143(d):
+    debuggable(d, "删启动标记")
+    appearance_tab(d, "大小与样式")
+    d.switch("跟随系统深色模式", False)
+    push_shift060_pack(d, "uat-shift060")
+    d.step("导入旧包")
+    import_theme(d, "uat-shift060", confirm=False)
+    answer_pack(d, with_layouts=False)
+    use_theme(d)
+    ids = typing_xi(d)
+    # since 0.6.1 (061-custom-layout §11) the pack's 26 keys stand for the app's no more: the app's, 分词 its own
+    check("apostrophe" in ids and "shift" not in ids, f"导入后画的应是自带的 26 键，打 xi 时那格是分词：{sorted(ids)[:40]}")
+    d.step("当作升级后第一次启动")
+    out = d.sh(f"run-as {PKG} rm no_backup/theme-separator-added no_backup/theme-layouts-listed; am force-stop {PKG}")
+    check("No such file" not in out, f"标记文件不在（第一次启动没写？）：{out.strip()[:120]}")
+    # the start lists and switches off the main thread (seconds for a 26 keys'): 外观 → 布局 waits for it to end, the
+    # input method's page does not, so it is opened after (as ST-175)
+    check(layout_card(d, "uat-shift060 · 旧 26 键"), "布局页没有「uat-shift060 · 旧 26 键」")
+    gear(d, "拼音")
+    check(d.wait_text("uat-shift060 · 旧 26 键（自定义）", timeout=5, contains=True), f"重启后拼音没换成转出来的 26 键：{d.screen().texts()[:16]}")
+    keyboard_back(d)
+    ids = typing_xi(d)
+    # a layout of the user's is found by its labels (分词), the app's by its scene ids too (apostrophe)
+    sep = "apostrophe" if "apostrophe" in ids else "分词"
+    check(sep in ids and "shift" not in ids, f"重启后打 xi 时那格不是分词：{sorted(ids)[:40]}")
+    d.open_page("text")
+    d.type("xi")
+    d.tap(d.keys(refresh=True)[sep], 0.6)
+    d.type("an")
+    code = d.preedit()
+    d.clear()
+    check("xi'an" in code.replace(" ", ""), f"分词后编码不是 xi'an：{code!r}")
+    d.step("之后导入的不改")
+    push_shift060_pack(d, "uat-shift060b")
+    import_theme(d, "uat-shift060b", confirm=False)
+    answer_pack(d)
+    pinyin_keyboard(d, "uat-shift060b · 旧 26 键（自定义）")
+    ids = typing_xi(d)
+    check("shift" in ids and not {"apostrophe", "分词"} & ids, f"之后导入的包的 26 键打 xi 时那格应是 ⇧：{sorted(ids)[:40]}")
+    return "导入后是自带的分词；重启后拼音换成转出来的 26 键，打字时是分词（xi'an）；之后导入的那块仍是 ⇧"
+
+
+# 0.6.0's theme maker example 薄荷 17 键 (a pack with its own layouts/k18.xml), keyboard-scene's test data since L8
+MINT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "lib", "keyboard-scene", "src", "commonTest", "data", "mint-k17")
+
+
+def push_mint_pack(d, name="uat-mint"):
+    """<name>.theme in 下载: 0.6.0's 薄荷 17 键 example pack (its theme.xml and layouts/k18.xml) renamed"""
+    with open(os.path.join(MINT, "theme.xml"), encoding="utf-8") as f:
+        xml = f.read()
+    assert 'name="薄荷 17 键"' in xml
+    p = os.path.join(tempfile.gettempdir(), f"{name}-{d.port}.theme")
+    with zipfile.ZipFile(p, "w") as z:
+        z.writestr("theme.xml", xml.replace('name="薄荷 17 键"', f'name="{name}"', 1))
+        z.write(os.path.join(MINT, "layouts", "k18.xml"), "layouts/k18.xml")
+    push_download(d, p, name)
+
+
+def keyboard_back(d, tries=3):
+    """the test page's keyboard after a force-stop: the system starts the input method again late (another one meanwhile)"""
+    for i in range(tries):
+        try:
+            d.open_page("text")
+            return d.keys(refresh=True)
+        except Blocked:
+            if i == tries - 1:
+                raise
+            time.sleep(5.0)
+
+
+def unseen_notice(d):
+    """the theme layouts' notice waiting to be said on the keyboard (KotlinHost.tellUnseen), "" none"""
+    out = d.sh(f"run-as {PKG} cat shared_prefs/{PKG}_preferences.xml")
+    m = re.search(r'<string name="theme_layouts_unseen">([^<]*)</string>', out)
+    return m.group(1) if m else ""
+
+
+@case("ST-175", base="B0-设置", mutates=True)
+def st175(d):
+    debuggable(d, "删启动标记")
+    appearance_tab(d, "大小与样式")
+    d.switch("跟随系统深色模式", False)
+    pinyin_keyboard(d, "18 键")
+    push_mint_pack(d)
+    import_theme(d, "uat-mint", confirm=False)
+    answer_pack(d, with_layouts=False)
+    use_theme(d)
+    d.step("当作升级后第一次启动")
+    out = d.sh(f"run-as {PKG} rm no_backup/theme-layouts-listed; am force-stop {PKG}")
+    check("No such file" not in out, f"标记文件不在（第一次启动没写？）：{out.strip()[:120]}")
+    told = "主题「uat-mint」带的17 键已放进 外观 → 布局，拼音正在用"
+    # the settings first: the app's start lists and switches off the main thread, 外观 → 布局 waits for it; a keyboard
+    # asked for at once waits on the system to start the input method again (over 10 s after a force-stop on an emulator)
+    d.step("布局页、拼音的键盘")
+    check(layout_card(d, "uat-mint · 17 键"), "布局页没有「uat-mint · 17 键」")
+    check(d.wait_text("用在：拼音", timeout=5, where="all"), f"卡片下没写「用在：拼音」：{d.screen().texts()[:20]}")
+    gear(d, "拼音")
+    check(d.wait_text("uat-mint · 17 键（自定义）", timeout=5, contains=True), f"拼音的「键盘」不是 uat-mint · 17 键：{d.screen().texts()[:16]}")
+    d.step("键盘上的提示")
+    # the notice stays 4 s (ThemeLayoutsToList.NOTICE_MS), yet a screen dump as the keyboard comes up may miss it: what
+    # waits to be said is read off the settings (internal.themeLayoutsUnseen), then seen as the keyboard shows it
+    check(told in unseen_notice(d), f"等着说的提示不是「{told}」：{unseen_notice(d)!r}")
+    keyboard_back(d)
+    d.wait(lambda x: not unseen_notice(d), 15, what="提示说过")
+    d.step("再启动不再提示")
+    d.sh(f"am force-stop {PKG}")
+    keyboard_back(d)
+    time.sleep(2.0)
+    check(not d.screen().find(contains=told, where="ime") and not unseen_notice(d), "再启动又提示了一次")
+    return "重启后提示一次；布局页 uat-mint · 17 键 用在：拼音；拼音的键盘是它；再启动不提示"
+
+
+case("ST-176", needs="jvm:ThemeLayoutsToListTest.bothSlotsPacksOfOneBoardTheShownOnesChosenTheOthersToldOf")(lambda d: None)
+case("ST-193", needs="jvm:RenamedKeysTest.aLongPressTurnedOffIsCopiedOff、RenamedKeysTest.swipesAreCopiedEachWayApart、ThemeLayoutsToListTest.theSettingsOfARenamedKeyAreCopiedUnderItsNewName")(lambda d: None)
+
+case("ST-156", needs="jvm:SettingsMenuUatTest.searchingAChoiceOpensItsSetting、SettingsIndexTest.strokeFilterFindsFourInEachLanguage")(lambda d: None)
+
+case("ST-151", needs="jvm:PopupOverridesFragmentTest$Cards.theKeyboardsAreEightCardsToPickNotARowToSwipe、SettingsCardsLayoutTest.smallPhonesWindow")(lambda d: None)
+
+case("ST-152", needs="jvm:PopupOverridesFragmentTest$Cards.aKeyboardsCardSaysHowManyOfItsKeysAreChanged、PopupOverridesFragmentTest$Cards.theFunctionKeysAreTwelveCellsFourAcross、"
+               "PopupOverridesFragmentTest$Cards.undoIsTheTitleBarsAndResetAllInItsMenu")(lambda d: None)
+
+case("ST-153", needs="jvm:PopupOverridesFragmentTest$Cards.theEditorsCardsOpenOneAtATimeEachSayingWhatIsSet、PopupOverridesFragmentTest$Row.aGroupOfNoFirstIsSaidToHaveNone、SettingsCardsLayoutTest.smallPhonesWindow、FoldCardTest.a card folded over its focused field lets the focus and the keyboard go")(lambda d: None)
+
+case("ST-154", needs="jvm:PopupOverridesFragmentTest$Cards.theEditorsCardsOpenOneAtATimeEachSayingWhatIsSet、PopupOverridesFragmentTest$Cards.nothingMovesAsAnItemIsSelectedOrATextChosen")(lambda d: None)
+
+case("ST-155", needs="jvm:PopupOverridesFragmentTest$Cards.multiSelectsStripsChooseAKeyboardsKeysAllOrNone")(lambda d: None)
+
+case("ST-157", needs="jvm:SettingsMenuUatTest.searchingAKeyCommandOpensTheKeysPageWithAHint")(lambda d: None)
+
+case("ST-158", needs="jvm:SettingsMenuUatTest.searchingBySynonym")(lambda d: None)
+
+case("ST-159", needs="jvm:SettingsMenuUatTest.strokeFilterFindsTheSameFourInTraditionalChinese、SettingsMenuUatTest.strokeFilterFindsTheSameFourInEnglish、SettingsIndexTest.strokeFilterFindsFourInEachLanguage")(lambda d: None)
+
+
+def settings_search(d, code, word=None):
+    """the settings search (🔍 on the home page) with what code types: the candidate word picked, or the letters as typed"""
+    home(d)
+    d.tap(d.wait(lambda s: s.find(desc="搜索设置"), 8, what="首页的 🔍").c, 1.0)
+    field = d.wait(lambda s: next((n for n in s.app() if n.cls.endswith("EditText")), None), 8, what="搜索框")
+    if not d.screen().find(rid="candidate_view", where="ime") and not d.keys(refresh=True):
+        d.tap(field.c, 1.0)
+    d.type(code)
+    if word:
+        d.pick(word)
+    else:
+        d.enter()
+    d.hide_keyboard()
+
+
+def open_result(d, title, under):
+    """the result titled title whose line under it has under, tapped (the log emptied first: flash_shot reads it)"""
+    def row(s):
+        for t in s.app():
+            if t.text == title and any(under in n.text and t.b[1] < n.c[1] < t.b[1] + 260 for n in s.app()):
+                return t
+    n = d.wait(row, 10, step=0.3, what=f"「{title}」（{under}）那条结果")
+    d.sh("logcat -c")
+    d.tap(n.c, 0)
+
+
+def flash_shot(d, id, note):
+    """the screen the moment the page flashes id (SearchHighlight logs 「search: flashed <id>」): the press lasts
+    600 ms, past a dump of the screen; a page that never flashes it fails here"""
+    end = time.time() + 15
+    while "search: flashed " + id not in d.sh(f"logcat -d | grep -F 'search: flashed {id}'"):
+        if time.time() > end:
+            raise Fail(f"没有闪 {id}")
+        time.sleep(0.05)
+    d.shot("app", note, png=d.adb("exec-out", "screencap", "-p", binary=True))
+
+
+@case("ST-165", base="B0-设置", visual=True)
+def st165(d):
+    settings_search(d, "zhuyin", "注音")
+    open_result(d, "注音九键", "按键字符和快捷键")
+    flash_shot(d, "view:keys/board/zy9", "搜注音点注音九键：按键字符和快捷键，注音九键的卡片按下的样子")
+    s = d.wait(lambda s: sum(n.text == "注音九键" for n in s.app()) >= 2 and s, 8, step=0.3, what="选中注音九键（卡片和下面的标题）")
+    check(s.find(text="翻转上下滑"), f"不在按键字符和快捷键：{s.texts()[:10]}")
+    d.back(1.0)
+    field = d.wait(lambda s: next((n for n in s.app() if n.cls.endswith("EditText")), None), 8, what="回到搜索页")
+    d.tap(field.c, 1.0)
+    d.press("bksp", 4, after=0.3)
+    d.type("fanzhuan")
+    d.pick("翻转")
+    d.hide_keyboard()
+    open_result(d, "翻转上下滑", "按键字符和快捷键")
+    flash_shot(d, "view:keys/flip", "搜翻转点翻转上下滑：翻转上下滑按钮按下的样子")
+    return "注音九键选中，两张注音九键的字；翻转上下滑的页"
+
+
+@case("ST-166", base="B0-设置", visual=True)
+def st166(d):
+    groups = ("三级字", "繁体字", "其它表外字", "扩展区")
+    settings_search(d, "fanti", "繁体")
+    open_result(d, "繁体字", "生僻字屏蔽")
+    flash_shot(d, "view:rare/group/TRAD", "搜繁体点繁体字：生僻字屏蔽的四张卡片，繁体字那张按下的样子")
+    s = d.wait(lambda s: all(next((n for n in s.app() if n.desc.startswith(g + "，") or n.text == g), None) for g in groups) and s,
+               30, step=0.1, what="四张组卡片")
+    check(not s.find(text="全部屏蔽") or s.find(text="三级字"), "打开了繁体字的网格")
+    return "四张组卡片都在"
+
+
+case("ST-167", needs="jvm:SettingsMenuUatTest.anActionOfThePagesMenuSaysWhereItIs")(lambda d: None)
+
+case("ST-168", needs="jvm:SettingsMenuUatTest.aRowOfAPageDrawnByHandIsPointedAt、SettingsPagesTest.everyTappableTextOnAHandPageIsSearched")(lambda d: None)
+
+
+@case("ST-169", base="B0-设置", visual=True)
+def st169(d):
+    settings_search(d, "pixel")
+    open_result(d, "Pixel", "外观")
+    flash_shot(d, "view:theme/pixel", "搜 Pixel：外观的主题页，Pixel 那张按下的样子")
+    s = d.wait(lambda s: s.find(text="Pixel") and s.find(text="大小与样式") and s, 10, step=0.1, what="外观的主题页上的 Pixel")
+    return "外观的主题页，Pixel 看得见"
+
+
+case("ST-194", needs="jvm:SettingsIndexTest.theTablesKeyboardIsFoundWhileALayoutOfTheUsersHasItsKeys")(lambda d: None)
+
+
+# ---------------------------------------------------------------- 外观 → 布局 (061-custom-layout §4)
+
+
+LAYOUTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fixtures", "layouts")
+
+
+def push_layout(d, name):
+    """uat/fixtures/layouts/<name>.layout into 下载, scanned so the file picker lists it"""
+    d.sh(f"rm -f /sdcard/Download/{name}*.layout")
+    d.adb("push", os.path.join(LAYOUTS, f"{name}.layout"), f"/sdcard/Download/{name}.layout")
+    d.sh(f"am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Download/{name}.layout")
+    time.sleep(1)
+
+
+def preview_png(d):
+    """the 外观 page's upper part, the preview, above the tabs"""
+    tab = d.screen().find(text="主题")
+    if not tab:
+        raise Blocked("外观页没有页签")
+    im = d.png().convert("L")
+    return im.crop((0, tab.b[1] // 3, im.size[0], tab.b[1] - 4)).resize((80, 40))
+
+
+def differs(a, b):
+    # measured on the emulator: 14 键 against 26 键 1.4, the same board drawn twice 0.3
+    return sum(abs(x - y) for x, y in zip(a.getdata(), b.getdata())) / (80 * 40) > 0.8
+
+
+def import_layout(d, name):
+    """布局's + → 导入布局文件 → [name] in the picker; the dialog that follows left open"""
+    appearance_tab(d, "布局")
+    # the + a moment after the tab (seen missing on the first case after a boot)
+    plus = d.wait(lambda s: s.find(desc="新增布局"), 8, what="布局页的 +")
+    d.tap(plus.c, 1.5)
+    d.tap_text("导入布局文件", scroll=False, after=0.5)
+    # the picker cold-started after a boot takes seconds to draw: until DocumentsUI is the top activity and shows nodes
+    # of its own. Before it does the screen holds only the launcher's taskbar, whose 返回 主屏幕 最近用过 are its
+    # buttons' content-desc, no picker's (L6 review S3); so only DocumentsUI's nodes are read below
+    in_picker(d, timeout=15)
+    if "documentsui" not in d.top_activity():
+        raise Blocked(f"没出文件选择：{d.top_activity()}")
+
+    def picker(s):
+        return [k for k in s.nodes if k.pkg.endswith("documentsui")]
+
+    def file(s):
+        return next((k for k in picker(s) if k.text and k.text.startswith(name)), None)
+
+    def titled(s, *texts):
+        return next((k for k in picker(s) if k.text in texts), None)
+
+    s = d.screen()
+    n = file(s)
+    if not n and titled(s, "下载", "Downloads"):
+        d.tap(titled(s, "下载", "Downloads").c, 2.0)
+        s = d.screen()
+        n = file(s)
+    # opened on DocumentsUI's 最近用过, 下载 not on screen: the drawer's ☰, as 15-privacy-backup has it
+    if not n and titled(s, "最近用过", "近期的文件", "最近", "Recent"):
+        to_downloads(d, s)
+        s = d.screen()
+        n = file(s)
+    if not n:
+        raise Blocked(f"文件选择里没有 {name}：{[k.text for k in picker(s) if k.text][:8]}")
+    d.tap(n.c, 3.0)
+
+def skip_use(d):
+    """after 导入: 现在就用在…？ (L3, §4.2 step 5) answered 先不用"""
+    try:
+        d.wait_text("现在就用在", timeout=6, where="all", contains=True)
+    except Blocked:
+        raise Blocked(f"导入后没问现在就用在哪：{d.screen().texts('all')[:10]}")
+    d.tap_text("先不用", where="all", scroll=False, after=1.5)
+
+
+def layout_card(d, name):
+    appearance_tab(d, "布局")
+    n = d.screen().find(text=name)
+    # down the list, then back up: the tab comes back where it was left, possibly past the card
+    for frm, to in [((540, 1800), (540, 1200))] * 3 + [((540, 900), (540, 1500))] * 6:
+        if n:
+            break
+        d.swipe(frm, to, 300, after=1.0)
+        n = d.screen().find(text=name)
+    # the line under it (用在：…) on screen too
+    if n and n.c[1] > 1700:
+        d.swipe((540, 1800), (540, 1200), 300, after=1.0)
+        n = d.screen().find(text=name)
+    return n
+
+
+@case("ST-147", base="B0-设置", visual=True)
+def st147(d):
+    appearance_tab(d, "主题")
+    s = d.screen()
+    check(all(s.find(text=t) for t in ("主题", "大小与样式", "布局")), f"外观页签不是三页：{s.texts()[:10]}")
+    original = preview_png(d)
+    appearance_tab(d, "布局")
+    s = d.screen()
+    for t in ("字母键盘", "26 键", "18 键", "14 键", "九键", "数字键盘"):
+        check(s.find(text=t), f"布局页没有「{t}」：{s.texts()[:16]}")
+    check(s.find(desc="新增布局"), "布局页右下角没有 +")
+    d.shot("app", "外观 → 布局：字母键盘段的四块自带键盘")
+    d.tap(s.find(text="14 键").c, 1.5)
+    fourteen = preview_png(d)
+    check(differs(original, fourteen), "点 14 键后预览没变")
+    d.shot("app", "点 14 键：上方预览换成 14 键")
+    d.hold(s.find(text="26 键").c, 1000)
+    time.sleep(1.0)
+    check(not d.screen().find(text="删除"), "长按自带的布局出了菜单")
+    appearance_tab(d, "主题")
+    check(not differs(original, preview_png(d)), "切到主题页后预览没回到原来的键盘")
+    return "三页签；布局页四块字母键盘和数字键盘；点 14 键预览换了，回主题页换回"
+
+
+@case("ST-148", base="B0-设置", mutates=True, visual=True)
+def st148(d):
+    for n in ("uat-qwerty-1.0", "uat-qwerty-1.1"):
+        push_layout(d, n)
+    appearance_tab(d, "布局")
+    d.tap(d.screen().find(desc="新增布局").c, 1.5)
+    s = d.screen()
+    check(s.find(text="导入布局文件") and s.find(contains="在网页上做布局"), f"+ 的菜单不对：{s.texts()[:6]}")
+    d.back(after=1.0)
+    import_layout(d, "uat-qwerty-1.0")
+    for told in ("导入布局 UAT 26 键？", "UAT", "1.0", "CC0", "验收测试用", "拼音", "哈哈"):
+        check(d.wait_text(told, timeout=8, where="all", contains=True), f"确认框没写「{told}」：{d.screen().texts('all')[:12]}")
+    d.shot("app", "导入确认框：预览、作者、版本、能用在哪、直接打出的文字")
+    d.tap_text("导入", where="all", scroll=False, after=3.0)
+    skip_use(d)
+    check(layout_card(d, "UAT 26 键"), "导入后列表里没有 UAT 26 键")
+    import_layout(d, "uat-qwerty-1.1")
+    check(d.wait_text("替换已有的『UAT 26 键』1.0 → 1.1", timeout=8, where="all", contains=True),
+          f"1.1 的确认框没写替换：{d.screen().texts('all')[:12]}")
+    d.tap_text("取消", where="all", scroll=False, after=2.0)
+    import_layout(d, "uat-qwerty-1.1")
+    d.wait_text("替换已有的", timeout=8, where="all", contains=True)
+    d.tap_text("导入", where="all", scroll=False, after=3.0)
+    skip_use(d)
+    # scrolled to it first: the built-in cards (L3) can put it below the fold
+    check(layout_card(d, "UAT 26 键"), "替换后列表里没有 UAT 26 键")
+    check(len([n for n in d.screen().app() if n.text == "UAT 26 键"]) == 1, "替换后不止一张 UAT 26 键")
+    card = layout_card(d, "UAT 26 键")
+    d.hold(card.c, 1000)
+    time.sleep(1.0)
+    d.tap_text("信息", scroll=False, after=2.0)
+    check(d.wait_text("1.1", timeout=5, where="all", contains=True), f"替换后信息里不是 1.1：{d.screen().texts('all')[:12]}")
+    d.back(after=1.0)
+    return "确认框写全；1.1 写「替换已有的『UAT 26 键』1.0 → 1.1」，取消不换，导入后只有一张、信息是 1.1"
+
+
+@case("ST-149", base="B0-设置", mutates=True)
+def st149(d):
+    push_layout(d, "uat-qwerty-bad")
+    import_layout(d, "uat-qwerty-bad")
+    check(d.wait_text("这个布局导入不了", timeout=8, where="all"), f"没说导入不了：{d.screen().texts('all')[:10]}")
+    check(d.wait_text("显示的字太长：最多 16 个字符", timeout=3, where="all", contains=True), f"没列出问题：{d.screen().texts('all')[:10]}")
+    d.shot("app", "不合格的布局：列出第几行什么问题")
+    d.tap_text("确定", where="all", scroll=False, after=1.5)
+    # a picture: not text
+    d.sh("cp /system/media/bootanimation.zip /sdcard/Download/uat-not-text.layout 2>/dev/null || "
+         "head -c 2048 /dev/urandom > /sdcard/Download/uat-not-text.layout")
+    d.sh("am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Download/uat-not-text.layout")
+    time.sleep(1)
+    import_layout(d, "uat-not-text")
+    check(d.wait_text("这个文件不是布局", timeout=8, where="all", contains=True), f"没说不是布局：{d.screen().texts('all')[:10]}")
+    d.tap_text("确定", where="all", scroll=False, after=1.5)
+    said = "不合格的列出「显示的字太长」；不是文字的说不是布局"
+    # the files only: a release build has no run-as, and what is seen above stands on it (R27 F8533)
+    import uat
+    if uat.BUILD == "release":
+        return said + "；正式包不能 run-as，没查 files/layouts（JVM 的 CustomLayoutsTest 查不留文件）"
+    check(d.sh(f"run-as {PKG} ls files/layouts 2>/dev/null").strip() == "", "拒绝后留下了文件")
+    return said + "；什么都没留下"
+
+
+@case("ST-150", base="B0-设置", mutates=True)
+def st150(d):
+    push_layout(d, "uat-qwerty-1.1")
+    import_layout(d, "uat-qwerty-1.1")
+    d.wait_text("导入布局 UAT 26 键？", timeout=8, where="all")
+    d.tap_text("导入", where="all", scroll=False, after=3.0)
+    skip_use(d)
+    card = layout_card(d, "UAT 26 键")
+    check(card, "列表里没有 UAT 26 键")
+    d.hold(card.c, 1000)
+    time.sleep(1.0)
+    s = d.screen()
+    check(all(s.find(text=t) for t in ("信息", "导出", "删除")), f"长按菜单不对：{s.texts()[:6]}")
+    d.tap_text("信息", scroll=False, after=2.0)
+    for told in ("UAT", "1.1", "CC0", "哈哈"):
+        check(d.wait_text(told, timeout=5, where="all", contains=True), f"信息里没有「{told}」")
+    d.back(after=1.0)
+    before = set(d.sh("ls /sdcard/Download/ 2>/dev/null").splitlines())
+    d.hold(layout_card(d, "UAT 26 键").c, 1000)
+    time.sleep(1.0)
+    d.tap_text("导出", scroll=False, after=2.0)
+    if "documentsui" not in d.top_activity():
+        raise Blocked(f"导出后没出保存界面：{d.top_activity()}")
+    d.tap_text("保存", where="all", scroll=False, after=2.5)
+    new = sorted(set(d.sh("ls /sdcard/Download/ 2>/dev/null").splitlines()) - before)
+    check(new == ["UAT 26 键.layout"], f"导出的文件是 {new}")
+    out = os.path.join(tempfile.gettempdir(), f"uat-layout-{d.port}.layout")
+    d.adb("pull", "/sdcard/Download/UAT 26 键.layout", out)
+    with open(out, "rb") as a, open(os.path.join(LAYOUTS, "uat-qwerty-1.1.layout"), "rb") as b:
+        check(a.read() == b.read(), "导出的文件和导入的不一样")
+    d.hold(layout_card(d, "UAT 26 键").c, 1000)
+    time.sleep(1.0)
+    d.tap_text("删除", scroll=False, after=1.5)
+    check(d.wait_text("删除「UAT 26 键」吗", timeout=5, where="all", contains=True), "删除前没问")
+    d.tap_text("确定", where="all", scroll=False, after=2.0)
+    check(not d.screen().find(text="UAT 26 键"), "删除后卡片还在")
+    d.sh("rm -f '/sdcard/Download/UAT 26 键.layout'")
+    return "菜单 信息/导出/删除；信息写全；导出 UAT 26 键.layout 和导入的一样；问一次后删掉"
+
+
+# ---------------------------------------------------------------- 布局用在输入法上 (061-custom-layout §4.2–4.4, §5, L3)
+
+
+def import_uat_qwerty(d, use=None):
+    """uat-qwerty-1.0 imported; 现在就用在 answered with the input methods of use ticked (None: 先不用)"""
+    push_layout(d, "uat-qwerty-1.0")
+    import_layout(d, "uat-qwerty-1.0")
+    d.wait_text("导入布局 UAT 26 键？", timeout=8, where="all")
+    d.tap_text("导入", where="all", scroll=False, after=3.0)
+    if not use:
+        skip_use(d)
+        return
+    d.wait_text("现在就用在", timeout=6, where="all", contains=True)
+    for im in use:
+        d.tap_text(im, where="all", scroll=False, after=0.5)
+    d.tap_text("确定", where="all", scroll=False, after=2.0)
+
+
+def types_haha(d):
+    """the a key on the test page: what reaches the field (the layout's a commits 哈哈, the app's types a)"""
+    d.open_page("text")
+    d.tap(d.keys(refresh=True)["a"], 1.0)
+    text = d.field_text() or ""
+    d.clear()
+    return text
+
+
+@case("ST-161", base="B0-设置", mutates=True, visual=True)
+def st161(d):
+    d.step("导入时用在拼音上")
+    import_uat_qwerty(d, use=["拼音"])
+    card = layout_card(d, "UAT 26 键")
+    check(card, "导入后列表里没有 UAT 26 键")
+    check(d.wait_text("用在：拼音", timeout=5, where="all"), f"卡片下没写「用在：拼音」：{d.screen().texts()[:20]}")
+    d.shot("app", "导入后用在拼音上：卡片下写「用在：拼音」")
+    check("哈哈" in types_haha(d), "拼音用 UAT 26 键时 a 键没打出「哈哈」")
+    d.shot("ime", "拼音的键盘是导入的 UAT 26 键")
+    gear(d, "拼音")
+    check(d.wait_text("UAT 26 键（自定义）", timeout=5, contains=True), f"拼音的「键盘」没写 UAT 26 键（自定义）：{d.screen().texts()[:16]}")
+    d.step("英文没选它")
+    d.open_page("text")
+    d.switch_im("英文")
+    d.tap(d.keys(refresh=True)["a"], 1.0)
+    text = d.field_text() or ""
+    d.clear()
+    d.switch_im("拼音")
+    check("哈哈" not in text, f"英文没选它，a 键却打出了「哈哈」：{text!r}")
+    return "导入时勾拼音：卡片写用在：拼音，拼音的 a 打出哈哈，拼音的键盘写 UAT 26 键（自定义）；英文不受影响"
+
+
+@case("ST-162", base="B0-设置", mutates=True)
+def st162(d):
+    import_uat_qwerty(d)
+    card = layout_card(d, "UAT 26 键")
+    check(card, "导入后列表里没有 UAT 26 键")
+    # its own card's line only: the app's 数字 and 符号 cards say 用在：数字键盘 / 符号面板 (L5) and may be on screen
+    s = d.screen()
+    under = [n.text for n in s.app() if n.text.startswith("用在：") and abs(n.c[0] - card.c[0]) < 200 and 0 < n.c[1] - card.c[1] < 150]
+    check(not under, f"没用在输入法上，卡片下却写了「用在：」：{under}")
+    d.step("点卡片 → 用在… 勾拼音、英文")
+    d.tap(card.c, 1.0)
+    d.tap_text("用在…", where="all", scroll=False, after=1.5)
+    check(d.wait_text("「UAT 26 键」用在", timeout=5, where="all"), f"没出「用在」勾选：{d.screen().texts('all')[:10]}")
+    for im in ("拼音", "双拼", "英文"):
+        check(d.screen().find(text=im, where="all"), f"用在… 里没有{im}")
+    for im in ("拼音", "英文"):
+        d.tap_text(im, where="all", scroll=False, after=0.5)
+    d.tap_text("确定", where="all", scroll=False, after=2.0)
+    check(d.wait_text("用在：拼音、英文", timeout=5, where="all"), f"卡片下没写「用在：拼音、英文」：{d.screen().texts()[:20]}")
+    check("哈哈" in types_haha(d), "拼音的 a 键没打出「哈哈」")
+    d.step("再去掉拼音")
+    card = layout_card(d, "UAT 26 键")
+    d.tap(card.c, 1.0)
+    d.tap_text("用在…", where="all", scroll=False, after=1.5)
+    d.wait_text("「UAT 26 键」用在", timeout=5, where="all")
+    d.tap_text("拼音", where="all", scroll=False, after=0.5)
+    d.tap_text("确定", where="all", scroll=False, after=2.0)
+    check(d.wait_text("用在：英文", timeout=5, where="all"), f"去掉拼音后卡片下不是「用在：英文」：{d.screen().texts()[:20]}")
+    check("哈哈" not in types_haha(d), "去掉拼音后拼音的 a 键仍打出「哈哈」")
+    return "点卡片 用在… 勾拼音、英文后卡片写用在：拼音、英文、拼音 a 打出哈哈；去掉拼音后换回全键盘"
+
+
+@case("ST-163", base="B0-设置", mutates=True)
+def st163(d):
+    import_uat_qwerty(d, use=["拼音"])
+    card = layout_card(d, "UAT 26 键")
+    check(card, "导入后列表里没有 UAT 26 键")
+    d.hold(card.c, 1000)
+    time.sleep(1.0)
+    d.tap_text("删除", scroll=False, after=1.5)
+    check(d.wait_text("拼音正在用它，删掉后拼音换回 全键盘", timeout=5, where="all", contains=True),
+          f"删除确认没说拼音正在用：{d.screen().texts('all')[:10]}")
+    d.shot("app", "删正在用的布局：写清拼音换回全键盘")
+    d.tap_text("确定", where="all", scroll=False, after=2.0)
+    check(not d.screen().find(text="UAT 26 键"), "删除后卡片还在")
+    check("哈哈" not in types_haha(d), "删掉后拼音的 a 键仍打出「哈哈」")
+    gear(d, "拼音")
+    check(d.wait_text("全键盘\n屏幕上打拼音", timeout=5, contains=True), f"删掉后拼音的「键盘」不是全键盘：{d.screen().texts()[:16]}")
+    return "确认框写「拼音正在用它，删掉后拼音换回 全键盘」；删后拼音是全键盘，a 打 a"
+
+
+@case("ST-164", base="B0-设置", mutates=True)
+def st164(d):
+    debuggable(d, "删布局文件")
+    import_uat_qwerty(d, use=["拼音"])
+    check("哈哈" in types_haha(d), "拼音的 a 键没打出「哈哈」")
+    d.step("布局文件不见了")
+    out = d.sh(f"run-as {PKG} rm files/layouts/uat-qwerty.xml")
+    check("No such file" not in out, f"布局文件不在：{out.strip()[:120]}")
+    check("哈哈" not in types_haha(d), "文件删了，拼音的 a 键仍打出「哈哈」")
+    gear(d, "拼音")
+    check(d.wait_text("（读不出，暂用 全键盘）", timeout=5, contains=True), f"拼音的「键盘」没说读不出：{d.screen().texts()[:16]}")
+    d.shot("app", "布局文件不见：键盘一项写「读不出，暂用 全键盘」")
+    return "文件不见后拼音画全键盘（a 打 a），设置写「uat-qwerty（读不出，暂用 全键盘）」，选择不改"
+
+
+case("ST-191", needs="jvm:InputMethodSettingsScreenTest.aLayoutThatReadsButIsNotOfThisInputMethodIsSaidSo")(lambda d: None)
+case("ST-192", needs="jvm:CustomKeyboardTest.oneBasedOnABoardOfAnotherFamilyFallsBackToItsOwnFamilys、"
+                     "LayoutListFragmentTest.aCardBasedOnAnotherFamilysBoardIsPreviewedAsTheKeyboardDrawsIt、"
+                     "LayoutCheckTest.aGroupedLayoutOnTheTwentySixKeysIsHeldToTheEighteenButToldOfItsOwnBase")(lambda d: None)
+
+
+# ---------------------------------------------------------------- 数字键盘、符号面板用自己的布局 (061-custom-layout §7, §8, L5)
+
+
+def import_panel_layout(d, name, shown, use):
+    """uat/fixtures/layouts/<name>.layout imported; 现在就用作数字键盘/符号面板吗？ answered 用 or 先不用"""
+    push_layout(d, name)
+    import_layout(d, name)
+    d.wait_text(f"导入布局 {shown}？", timeout=8, where="all")
+    d.tap_text("导入", where="all", scroll=False, after=3.0)
+    try:
+        d.wait_text("现在就用作", timeout=6, where="all", contains=True)
+    except Blocked:
+        raise Blocked(f"导入后没问现在就用作：{d.screen().texts('all')[:10]}")
+    d.tap_text("用" if use else "先不用", where="all", scroll=False, after=2.0)
+
+
+def number_ones(d, page="text"):
+    """on the test page [page]: the number keyboard's 1 key as it is labelled (壹: uat-number's), 123 tapped on a text field"""
+    d.open_page(page)
+    keys = d.keys(refresh=True)
+    if page == "text":
+        d.tap(keys["123"], 1.0)
+        d.keys(refresh=True)
+    # by the faces: keys() also knows a key by its scene id, and the 壹 key's id is 1
+    faces = {n.texts()[0] for n in d.need_keyboard().walk() if n.clickable and n.texts()}
+    return [k for k in ("1", "壹") if k in faces]
+
+
+@case("ST-170", base="B0-设置", mutates=True, visual=True)
+def st170(d):
+    push_layout(d, "uat-number-1.0")
+    import_layout(d, "uat-number-1.0")
+    d.wait_text("导入布局 UAT 数字？", timeout=8, where="all")
+    check(d.screen().find(contains="数字键盘：123、电话", where="all"), f"确认框没写数字键盘：123、电话：{d.screen().texts('all')[:16]}")
+    d.tap_text("导入", where="all", scroll=False, after=3.0)
+    check(d.wait_text("现在就用作数字键盘吗？", timeout=6, where="all"), f"导入后没问现在就用作数字键盘：{d.screen().texts('all')[:10]}")
+    check(not d.screen().find(contains="现在就用在", where="all"), "数字键盘布局还问了用在哪些输入法")
+    d.tap_text("用", where="all", scroll=False, after=2.0)
+    check(layout_card(d, "UAT 数字"), "导入后列表里没有 UAT 数字")
+    check(d.wait_text("用在：数字键盘", timeout=5, where="all"), f"卡片下没写「用在：数字键盘」：{d.screen().texts()[:20]}")
+    d.shot("app", "导入数字键盘布局后用上：卡片下写「用在：数字键盘」")
+    d.step("123、电话框用它，数字框用自带的")
+    check(number_ones(d) == ["壹"], f"123 的数字键盘不是导入的：{number_ones(d)}")
+    d.shot("ime", "123 的数字键盘：1 键写「壹」")
+    d.tap(d.keys(refresh=True)["壹"], 1.0)
+    typed = d.field_text() or ""
+    d.clear()
+    check("1" in typed, f"点「壹」打出的不是 1：{typed!r}")
+    check(number_ones(d, "tel") == ["壹"], "电话框的数字键盘不是导入的")
+    check(number_ones(d, "number") == ["1"], "数字框的数字键盘不是自带的")
+    return "确认框写数字键盘：123、电话；问现在就用作数字键盘；卡片写用在：数字键盘；123 和电话框 1 键写壹（打出 1），数字框是自带的"
+
+
+@case("ST-171", base="B0-设置", mutates=True)
+def st171(d):
+    import_panel_layout(d, "uat-number-1.0", "UAT 数字", use=False)
+    card = layout_card(d, "UAT 数字")
+    check(card, "导入后列表里没有 UAT 数字")
+    d.step("点卡片 → 数字键盘用这个")
+    d.tap(card.c, 1.0)
+    d.tap_text("数字键盘用这个", where="all", scroll=False, after=2.0)
+    check(d.wait_text("用在：数字键盘", timeout=5, where="all"), f"用上后卡片下没写「用在：数字键盘」：{d.screen().texts()[:20]}")
+    check(number_ones(d) == ["壹"], "用上后 123 的数字键盘不是导入的")
+    d.step("点自带的「数字」→ 换回")
+    builtin = layout_card(d, "数字")
+    check(builtin, "数字键盘段没有自带的「数字」")
+    d.tap(builtin.c, 1.0)
+    d.tap_text("数字键盘用这个", where="all", scroll=False, after=2.0)
+    # 用在：数字键盘 back under the app's card: the one line of it, below 数字 and above UAT 数字
+    # the cards two a row: the line under the app's card, in its column, and none under UAT 数字's
+    builtin = layout_card(d, "数字")
+    s = d.screen()
+    mine = s.find(text="UAT 数字")
+    under = lambda card: [n for n in s.app() if n.text == "用在：数字键盘" and card.b[0] <= n.c[0] <= card.b[2] and n.c[1] > card.c[1]]
+    check(builtin and mine and under(builtin) and not under(mine),
+          f"换回后「用在：数字键盘」不在自带的卡片下：{[(n.text, n.b) for n in s.app() if len(n.text) > 1][-8:]}")
+    check(number_ones(d) == ["1"], "换回后 123 的数字键盘不是自带的")
+    return "点 UAT 数字 → 数字键盘用这个：卡片写用在、123 1 键写壹；点自带的数字换回，用在回到自带的卡片下，1 键写 1"
+
+
+@case("ST-172", base="B0-设置", mutates=True, visual=True)
+def st172(d):
+    def panel():
+        """the symbol panel opened on the test page: its nodes (no keyboard_view: read off the input method's window),
+        the categories' x against the panel's middle"""
+        d.open_page("text")
+        d.tap(d.keys(refresh=True)["符"], 1.5)
+        s = d.screen()
+        nodes = list(s.ime())
+        shown = [n.text or n.desc for n in nodes if n.text or n.desc]
+        cats = [n for n in nodes if n.text in ("常用", "最近")]
+        check(cats, f"符号面板没有分类：{shown[:24]}")
+        middle = (min(n.b[0] for n in nodes) + max(n.b[2] for n in nodes)) / 2
+        return s, shown, cats[0].c[0] > middle
+    # the app's panel made once before (the board then put in place of its own: L5 review S3)
+    d.step("先用自带的打开一次符号面板")
+    s, shown, right = panel()
+    check("返回" in shown and not right, f"自带的符号面板不是分类在左、返回键写返回：{shown[:24]}")
+    d.tap(s.find(text="返回", where="ime").c, 1.0)
+    d.step("导入、用上 UAT 符号（分类栏在右边）")
+    import_panel_layout(d, "uat-symbols-1.0", "UAT 符号", use=True)
+    check(layout_card(d, "UAT 符号"), "导入后列表里没有 UAT 符号")
+    check(d.wait_text("用在：符号面板", timeout=5, where="all"), f"卡片下没写「用在：符号面板」：{d.screen().texts()[:20]}")
+    s, shown, right = panel()
+    check("回去" in shown and "返回" not in shown, f"符号面板的返回键不是「回去」：{shown[:24]}")
+    check(right, f"换板后分类栏没到右边的槽：{shown[:24]}")
+    d.shot("ime", "符号面板用导入的布局：返回键写「回去」，分类在右、格子在左")
+    d.tap(s.find(text="回去", where="ime").c, 1.0)
+    check("q" in d.keys(refresh=True), "点「回去」没回到字母键盘")
+    return "先开过自带的面板；导入后卡片写用在：符号面板；面板返回键写回去，分类栏换到右边的槽，回去回到字母键盘"
+
+
+@case("ST-173", base="B0-设置", mutates=True)
+def st173(d):
+    import_panel_layout(d, "uat-number-1.0", "UAT 数字", use=True)
+    card = layout_card(d, "UAT 数字")
+    check(card, "导入后列表里没有 UAT 数字")
+    d.hold(card.c, 1000)
+    time.sleep(1.0)
+    d.tap_text("删除", scroll=False, after=1.5)
+    check(d.wait_text("数字键盘正在用它，删掉后换回内置的", timeout=5, where="all", contains=True),
+          f"删除确认没说数字键盘正在用：{d.screen().texts('all')[:10]}")
+    d.tap_text("确定", where="all", scroll=False, after=2.0)
+    check(not d.screen().find(text="UAT 数字"), "删除后卡片还在")
+    check(number_ones(d) == ["1"], "删掉后 123 的数字键盘不是自带的")
+    return "确认框写数字键盘正在用它、换回内置的；删后 123 是自带的"
+
+
+# ---------------------------------------------------------------- 网页的布局示例 (061-custom-layout §12.4, W3)
+
+
+EXAMPLES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "web", "theme-maker", "examples", "layouts")
+
+
+def push_example(d, name):
+    """the layout maker's example web/theme-maker/examples/layouts/<name>.layout into 下载, as the page has it"""
+    d.sh(f"rm -f /sdcard/Download/{name}*.layout")
+    d.adb("push", os.path.join(EXAMPLES, f"{name}.layout"), f"/sdcard/Download/{name}.layout")
+    d.sh(f"am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Download/{name}.layout")
+    time.sleep(1)
+
+
+def scene_keys(d):
+    """the keyboard on screen: each key's scene id and its bounds"""
+    return {n.key: n.b for n in d.need_keyboard().walk() if n.clickable and n.key}
+
+
+def han(text):
+    return any("一" <= c <= "鿿" for c in text or "")
+
+
+def types_a_word(d, keys):
+    """[keys] (centres) tapped on the test page under pinyin, then space: a candidate offered, the field's text"""
+    for xy in keys:
+        d.tap(xy, 0.8)
+    offered = [c for c in d.candidates() if han(c)]
+    check(offered, f"没有中文候选：{d.candidates()[:6]}")
+    d.tap(d.keys(refresh=True)["space"], 1.0)
+    text = d.field_text() or ""
+    d.clear()
+    return text
+
+
+@case("ST-177", base="B0-设置", mutates=True, visual=True)
+def st177(d):
+    push_example(d, "k17")
+    import_layout(d, "k17")
+    check(d.wait_text("导入布局 17 键？", timeout=8, where="all"), f"没出导入确认：{d.screen().texts('all')[:10]}")
+    check(d.screen().find(contains="拼音", where="all"), f"确认框没写能用在拼音：{d.screen().texts('all')[:16]}")
+    d.tap_text("导入", where="all", scroll=False, after=3.0)
+    check(d.wait_text("现在就用在 拼音 上吗？", timeout=6, where="all"), f"没直接问用在拼音：{d.screen().texts('all')[:10]}")
+    d.tap_text("用", where="all", scroll=False, after=2.0)
+    check(layout_card(d, "17 键"), "导入后列表里没有 17 键")
+    check(d.wait_text("用在：拼音", timeout=5, where="all"), f"卡片下没写「用在：拼音」：{d.screen().texts()[:20]}")
+    d.step("拼音用 17 键：第二行 A SD FG HJK L")
+    d.open_page("text")
+    keys = scene_keys(d)
+    check("hjk" in keys and "r2c4" not in keys and "r2c5" not in keys, f"键盘不是 17 键：{sorted(keys)[:30]}")
+    y = (keys["hjk"][1] + keys["hjk"][3]) / 2
+    row = sorted(k for k, b in keys.items() if b[1] < y < b[3])
+    check(row == ["hjk", "r2c1", "r2c2", "r2c3", "r2c6"], f"第二行不是 A SD FG HJK L：{row}")
+    d.shot("ime", "拼音用网页示例 17 键：H 和 JK 并成 HJK")
+    centre = lambda b: ((b[0] + b[2]) // 2, (b[1] + b[3]) // 2)
+    text = types_a_word(d, [centre(keys["hjk"]), centre(keys["r2c1"])])
+    check(han(text), f"HJK A 空格没上屏汉字：{text!r}")
+    return f"确认框能用在拼音；直接问用在拼音；第二行 A SD FG HJK L；HJK A 空格上屏「{text}」"
+
+
+@case("ST-178", base="B0-设置", mutates=True, visual=True)
+def st178(d):
+    push_example(d, "azerty")
+    import_layout(d, "azerty")
+    check(d.wait_text("导入布局 AZERTY？", timeout=8, where="all"), f"没出导入确认：{d.screen().texts('all')[:10]}")
+    d.tap_text("导入", where="all", scroll=False, after=3.0)
+    check(d.wait_text("现在就用在", timeout=6, where="all", contains=True), f"导入后没问现在就用在哪：{d.screen().texts('all')[:10]}")
+    for im in ("拼音", "双拼", "英文", "五笔等码表"):
+        check(d.screen().find(text=im, where="all"), f"现在就用在 里没有{im}")
+    for im in ("拼音", "英文"):
+        d.tap_text(im, where="all", scroll=False, after=0.5)
+    d.tap_text("确定", where="all", scroll=False, after=2.0)
+    check(layout_card(d, "AZERTY"), "导入后列表里没有 AZERTY")
+    check(d.wait_text("用在：拼音、英文", timeout=5, where="all"), f"卡片下没写「用在：拼音、英文」：{d.screen().texts()[:20]}")
+    d.step("拼音：AZERTY 的三行")
+    d.open_page("text")
+    keys = scene_keys(d)
+    def row_of(k):
+        y = (keys[k][1] + keys[k][3]) / 2
+        return [i for i, b in sorted(keys.items(), key=lambda kv: kv[1][0]) if b[1] < y < b[3]]
+    check(row_of("a")[:10] == list("azertyuiop"), f"第一行不是 AZERTYUIOP：{row_of('a')}")
+    check(row_of("q")[:10] == list("qsdfghjklm"), f"第二行不是 QSDFGHJKLM：{row_of('q')}")
+    third = row_of("w")
+    check(third[third.index("w"):third.index("w") + 7] == ["w", "x", "c", "v", "b", "n", "quote"], f"第三行不是 W X C V B N '：{third}")
+    d.shot("ime", "拼音用网页示例 AZERTY")
+    centre = lambda b: ((b[0] + b[2]) // 2, (b[1] + b[3]) // 2)
+    text = types_a_word(d, [centre(keys["n"]), centre(keys["i"])])
+    check(han(text), f"N I 空格没上屏汉字：{text!r}")
+    d.step("英文：a z '")
+    d.switch_im("英文")
+    keys = scene_keys(d)
+    for k in ("a", "z", "quote"):
+        d.tap(centre(keys[k]), 0.8)
+    typed = d.field_text() or ""
+    d.clear()
+    d.switch_im("拼音")
+    check(typed.startswith("az'"), f"英文打出的不是 az'：{typed!r}")
+    return f"能用在拼音、双拼、英文；三行是 AZERTYUIOP / QSDFGHJKLM / WXCVBN'；拼音 N I 上屏「{text}」；英文打出 {typed!r}"
+
+
+@case("ST-179", base="B0-设置", mutates=True, visual=True)
+def st179(d):
+    push_example(d, "big-number")
+    import_layout(d, "big-number")
+    check(d.wait_text("导入布局 大按键数字键盘？", timeout=8, where="all"), f"没出导入确认：{d.screen().texts('all')[:10]}")
+    check(d.screen().find(contains="数字键盘：123、只有数字、小数", where="all"), f"确认框没写管哪几种：{d.screen().texts('all')[:16]}")
+    d.tap_text("导入", where="all", scroll=False, after=3.0)
+    check(d.wait_text("现在就用作数字键盘吗？", timeout=6, where="all"), f"没问现在就用作数字键盘：{d.screen().texts('all')[:10]}")
+    d.tap_text("用", where="all", scroll=False, after=2.0)
+    check(layout_card(d, "大按键数字键盘"), "导入后列表里没有 大按键数字键盘")
+    check(d.wait_text("用在：数字键盘", timeout=5, where="all"), f"卡片下没写「用在：数字键盘」：{d.screen().texts()[:20]}")
+    d.step("123：一行四个键，回车跨两行")
+    d.open_page("text")
+    d.tap(d.keys(refresh=True)["123"], 1.0)
+    keys = scene_keys(d)
+    check("=" not in keys and "," not in keys and "space" in keys, f"123 的数字键盘不是大按键的：{sorted(keys)}")
+    y = (keys["1"][1] + keys["1"][3]) / 2
+    first = [k for k, b in sorted(keys.items(), key=lambda kv: kv[1][0]) if b[1] < y < b[3]]
+    check(first == ["1", "2", "3", "backspace"], f"第一行不是 1 2 3 ⌫：{first}")
+    tall, one = keys["enter"][3] - keys["enter"][1], keys["1"][3] - keys["1"][1]
+    check(tall > 1.8 * one, f"回车没跨两行：高 {tall}，1 键高 {one}")
+    d.shot("ime", "123 用网页示例大按键数字键盘：一行四个，回车跨两行")
+    centre = lambda b: ((b[0] + b[2]) // 2, (b[1] + b[3]) // 2)
+    for k in ("1", "2", "backspace", "5"):
+        d.tap(centre(keys[k]), 0.6)
+    typed = d.field_text() or ""
+    d.clear()
+    check(typed == "15", f"1 2 ⌫ 5 打出的不是 15：{typed!r}")
+    d.step("小数框用它，电话框用自带的")
+    d.open_page("decimal")
+    keys = scene_keys(d)
+    check("." in keys and "=" not in keys and "space" in keys, f"小数框的数字键盘不是大按键的：{sorted(keys)}")
+    d.open_page("tel")
+    keys = scene_keys(d)
+    # the app's phone pad: enter one row tall
+    check("enter" in keys and "1" in keys and keys["enter"][3] - keys["enter"][1] < 1.5 * (keys["1"][3] - keys["1"][1]),
+          f"电话框的数字键盘不是自带的：{sorted(keys)}")
+    return "确认框写 123、只有数字、小数；卡片写用在：数字键盘；123 一行四个、回车跨两行、1 2 ⌫ 5 打出 15；小数框是它，电话框是自带的"
+
+
+@case("ST-180", base="B0-设置", mutates=True)
+def st180(d):
+    push_layout(d, "uat-split-1.0")
+    import_layout(d, "uat-split-1.0")
+    check(d.wait_text("导入布局 UAT 分体？", timeout=8, where="all", contains=True), f"没出导入确认：{d.screen().texts('all')[:10]}")
+    for told in ("注意：", "有 8 个键，不是 9 或 10 个，分不成左右两半，只能整行缩小"):
+        check(d.wait_text(told, timeout=5, where="all", contains=True), f"确认框没写「{told}」：{d.screen().texts('all')[:16]}")
+    d.tap_text("导入", where="all", scroll=False, after=3.0)
+    skip_use(d)
+    check(layout_card(d, "UAT 分体"), "导入后列表里没有 UAT 分体")
+    return "确认框能导入，警告第一行分体时 8 个键整行缩小；导入后列表里有 UAT 分体"
+
+
+# ---------------------------------------------------------------- 布局的键名 (061-custom-layout §9, §19.4, L6)
+
+
+def import_uat_names(d, use=True):
+    """uat-names imported; 现在就用在 拼音 上吗？ answered 用 (or 先不用); the confirm dialog's texts returned"""
+    push_layout(d, "uat-names")
+    import_layout(d, "uat-names")
+    d.wait_text("导入布局 UAT 键名？", timeout=8, where="all")
+    told = d.screen().texts("all")
+    d.tap_text("导入", where="all", scroll=False, after=3.0)
+    if not use:
+        skip_use(d)
+        return told
+    d.wait_text("现在就用在 拼音 上吗？", timeout=6, where="all")
+    d.tap_text("用", where="all", scroll=False, after=2.0)
+    return told
+
+
+def slots_tabs(d):
+    """the 按键字符和快捷键 page's keyboard cards, as they read"""
+    slots_page(d)
+    return [n.text for n in d.screen().app() if n.cls.endswith("RadioButton")]
+
+
+@case("ST-185", base="B0-设置", mutates=True, visual=True)
+def st185(d):
+    import_uat_names(d)
+    tabs = slots_tabs(d)
+    check("UAT 键名" in tabs, f"按键字符和快捷键里没有「UAT 键名」：{tabs}")
+    check(tabs.index("UAT 键名") == tabs.index("功能键") - 1, f"「UAT 键名」不在功能键前面：{tabs}")
+    slots_tab(d, "UAT 键名")
+    d.shot("full", "按键字符和快捷键的 UAT 键名：WE 下写共用，HJK、哈 没有")
+    we, hjk, ha = page_key(d, "WE"), page_key(d, "HJK"), page_key(d, "哈")
+    check(we.desc.endswith("共用"), f"WE 没写共用：{we.desc!r}")
+    check(not hjk.desc.endswith("共用") and not ha.desc.endswith("共用"), f"HJK、哈 写了共用：{hjk.desc!r} {ha.desc!r}")
+    key_dialog(d, "WE")
+    check(d.wait_text("和「18 键」共用：这里改了，那边的同名键也跟着变", timeout=5, where="all"), f"WE 的对话框没说和 18 键共用：{d.screen().texts('all')[:8]}")
+    d.tap_text("取消", where="all", scroll=False, after=1.0)
+    key_dialog(d, "哈")
+    dialog_card(d, "长按菜单")
+    s = d.screen()
+    items = [n.desc for n in s.app() if n.clickable and n.desc in ("哈哈", "嘿")]
+    check(items == ["哈哈", "嘿"], f"哈 的长按菜单不是 哈哈、嘿：{items}")
+    up = next((h.desc or h.text for h in dialog_heads(s) if head_name(h) == "上滑"), "")
+    check("哈哈" in up, f"哈 的上滑不是长按首选 哈哈：{up!r}")
+    d.shot("full", "哈 的对话框：长按菜单 哈哈（首选）、嘿")
+    d.tap_text("取消", where="all", scroll=False, after=1.0)
+    return f"卡片 {tabs}；WE 共用、对话框说和 18 键共用；哈 的长按 {items}，上滑「{up}」"
+
+
+@case("ST-186", base="B0-设置", mutates=True)
+def st186(d):
+    import_uat_names(d, use=False)
+    tabs = slots_tabs(d)
+    check(len(tabs) == 8 and "UAT 键名" not in tabs, f"没用的布局却有卡片：{tabs}")
+    card = layout_card(d, "UAT 键名")
+    check(card, f"列表里没有 UAT 键名：{d.screen().texts()[:30]}")
+    d.tap(card.c, 1.0)
+    d.tap_text("用在…", where="all", scroll=False, after=1.5)
+    d.wait_text("「UAT 键名」用在", timeout=5, where="all")
+    d.tap_text("拼音", where="all", scroll=False, after=0.5)
+    d.tap_text("确定", where="all", scroll=False, after=2.0)
+    used = slots_tabs(d)
+    check("UAT 键名" in used, f"用在拼音上后没有卡片：{used}")
+    card = layout_card(d, "UAT 键名")
+    d.tap(card.c, 1.0)
+    d.tap_text("用在…", where="all", scroll=False, after=1.5)
+    d.wait_text("「UAT 键名」用在", timeout=5, where="all")
+    d.tap_text("拼音", where="all", scroll=False, after=0.5)
+    d.tap_text("确定", where="all", scroll=False, after=2.0)
+    gone = slots_tabs(d)
+    check("UAT 键名" not in gone, f"去掉拼音后卡片还在：{gone}")
+    return f"没用 {len(tabs)} 张；用在拼音上多出 UAT 键名；去掉后 {len(gone)} 张"
+
+
+# which keyboard a function key's note names depends on how each draws it (a prefix only where they differ): held
+# to the label by SwipeFates' own test, not to one screen's drawing
+case("ST-187", needs="jvm:SwipeFatesTest.aLayoutOfTheUsersIsNamedByItsName")(lambda d: None)
+
+
+@case("ST-188", base="B0-设置", mutates=True)
+def st188(d):
+    told = import_uat_names(d)
+    warn = "第 14 行：g18/we 是 18 键的键，这里写的长按、角标、滑动不起作用"
+    check(any(warn in t for t in told), f"确认框没提醒 WE 写的不起作用：{told[:12]}")
+    check(any("哈" in t and "直接打出" in t for t in told) or any(t == "哈" for t in told), f"确认框没列出直接打出的「哈」：{told[:12]}")
+    d.open_page("text")
+    d.clear()
+    k = d.keys(refresh=True)
+    we = k.get("we") or k.get("WE")
+    if not we:
+        raise Blocked(f"拼音的键盘上没有 WE：{sorted(k)[:24]}")
+    d.swipe(we, (we[0], we[1] + 130), 150, after=0.8)
+    text = d.field_text() or ""
+    d.clear()
+    check("我们" not in text, f"WE 下滑打出了布局里写的「我们」：{text!r}")
+    return f"确认框提醒「{warn}」；WE 下滑没打出我们（{text!r}）"
+
+
+case("ST-189", needs="manual:键盘布局网页新建、合并、保存，再导入 App 打字：电脑浏览器加设备，手工跑；"
+     "网页一侧 web/theme-maker 的 layout-maker.test.mjs、layout-smoke.mjs 查")(lambda d: None)
+
+
+case("ST-190", needs="manual:键盘布局网页的保存检查、草稿找回、打开 .theme，主题制作网页打开 .layout：电脑浏览器上手工跑；"
+     "web/theme-maker 的 layout-maker.test.mjs、layout-smoke.mjs、maker.test.mjs、panels-smoke.mjs 查")(lambda d: None)

@@ -90,9 +90,11 @@ class VoicePolishTags(val ops: List<String>, val afters: List<String>, val nums:
      *
      * Two more that hold whatever the model (060-pending-decisions L574, the owner's, 2026-11-10; N-kd3b broke
      * both, and which edge sentences a retrain gets right varies run to run): a Chinese number's character
-     * ([NUMBER_CHARS]) is never deleted (「一点一点」 lost an 一), and [num] (if given) marks nothing inside an
-     * idiom of [IDIOMS] (「十全十美」 written 10全十美). A number character's replacement still applies: the rule
-     * is no deletion, and an op writing another word for it (二 as 两, a misheard 十 as 是) is the polish's.
+     * ([NUMBER_CHARS]) is never deleted (「一点一点」 lost an 一), nor an ASCII digit (a hotword's or English
+     * output's, 「iPhone10」: the tagger's vocabulary has 1–8 alone, so it reads 0 and 9 as <unk>), and [num] (if
+     * given) marks nothing inside an idiom of [IDIOMS] (「十全十美」 written 10全十美). A number character's
+     * replacement still applies: the rule is no deletion, and an op writing another word for it (二 as 两, a
+     * misheard 十 as 是, 2个 as 两个) is the polish's.
      *
      * [op], [after] and [num] are changed in place. [lead] is the text just before [text] (a stream window's
      * start cuts an idiom): an idiom found across it unmarks its characters in [text] only.
@@ -101,7 +103,7 @@ class VoicePolishTags(val ops: List<String>, val afters: List<String>, val nums:
         for (i in text.indices) {
             if (text[i] < 0x80 && Character.isLetter(text[i])) op[i] = KEEP
             if (text[i] in STOPS) after[i] = 0
-            if (op[i] == DEL && text[i] in NUMBER_CHARS) op[i] = KEEP
+            if (op[i] == DEL && (text[i] in NUMBER_CHARS || text[i] in '0'.code..'9'.code)) op[i] = KEEP
         }
         if (num == null) return
         for (span in idioms(lead + text)) for (i in span) if (i >= lead.size) num[i - lead.size] = 0
@@ -117,13 +119,13 @@ class VoicePolishTags(val ops: List<String>, val afters: List<String>, val nums:
         private const val ASCII = 0x80
 
         // norm's full width marks, and what English writes for each
-        private val WIDE_MARKS = "，？！：；".codePoints().toArray()
-        private const val ASCII_MARKS = ",?!:;"
-        private val STOPS = ".。？！".codePoints().toArray()
+        private val WIDE_MARKS = VoiceMarks.WIDE.codePoints().toArray()
+        private const val ASCII_MARKS = VoiceMarks.ASCII
+        private val STOPS = VoiceMarks.STOPS.codePoints().toArray()
 
         // marks end a number though the tagger put them in one (numeval.py render); each of VoiceLive.ENDS
         // among them (VoicePolishTest checks), so what is typed as it is said is never cut inside a number
-        internal val NUMBER_BREAKS = setOf("，", "。", "？", "！", "、", "…", "：", "；", ",", "?", "!", ";")
+        internal val NUMBER_BREAKS = VoiceMarks.NUMBER_BREAKS
 
         /** the characters a Chinese number is said with, 点 among them (三点五): never deleted ([guarded]) */
         val NUMBER_CHARS = "一二两三四五六七八九十百千万亿零〇幺点".codePoints().toArray().toSet()
@@ -131,10 +133,10 @@ class VoicePolishTags(val ops: List<String>, val afters: List<String>, val nums:
         /**
          * Idioms and fixed words said with number characters that are no number (「十全十美」, not 10全十美):
          * nothing in them is marked a number ([guarded]). A list here, not the pinyin dictionary: that is
-         * the native engine's, which the voice path (and voice-eval's numeval.py, which checks the same) has
-         * no reach to, and these are a closed set; four characters and more, so a real number beside one
-         * (「三个一心一意的人」) is not taken for it. Nothing ties this list to numeval.py's: a change here
-         * goes there by hand. Each once (VoicePolishTest checks).
+         * the native engine's, which the voice path has no reach to, and these are a closed set; four
+         * characters and more, so a real number beside one (「三个一心一意的人」) is not taken for it.
+         * voice-eval has no copy of it: `ime-eval voice-post --source tagged` scores the tagger's labels
+         * through this code, with `--guard off` to measure what the guards are worth. Each once (VoicePolishTest checks).
          */
         val IDIOMS: List<String> = """
             十全十美 一心一意 七上八下 三心二意 一五一十 四面八方 五颜六色 乱七八糟 一模一样 万无一失 一干二净
@@ -161,7 +163,7 @@ class VoicePolishTags(val ops: List<String>, val afters: List<String>, val nums:
             return found
         }
 
-        private val PAUSE_BEFORE_MARK = Regex("[，、；：]+(?=[。？！…，])")
+        private val PAUSE_BEFORE_MARK = Regex("[${VoiceMarks.PAUSE_BEFORE}]+(?=[。？！…，])")
 
         // a mark English wrote after an English letter (a number still pending in [run] is what it follows, not
         // [out]'s last) as English writes it (「Yes, I know?」): norm made it full width
@@ -279,7 +281,7 @@ class VoicePolishStream(
     private val tagger: Tagger,
     private val freezeAfter: Int = FREEZE_AFTER,
     private val window: Int = WINDOW,
-    /** the labels [VoicePolishTags.guarded]; false only for voice-eval's goldens, which have none */
+    /** the labels [VoicePolishTags.guarded]; false only for voice-eval's goldens, which have none, and `ime-eval voice-post --guard off` */
     private val guard: Boolean = true,
 ) {
     /** The op, after and number labels of [text] (code points), a character each; the model run. */

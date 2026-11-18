@@ -19,6 +19,7 @@ import org.fcitx.fcitx5.android.engine.lattice.Penalties
 import org.fcitx.fcitx5.android.engine.lattice.PinyinDecoder
 import org.fcitx.fcitx5.android.engine.lattice.Predictor
 import org.fcitx.fcitx5.android.engine.lattice.TextWords
+import org.fcitx.fcitx5.android.engine.phrase.CharInfo
 import org.fcitx.fcitx5.android.engine.pinyin.Fuzzy
 import org.fcitx.fcitx5.android.engine.pinyin.GroupedShuangpinSegmenter
 import org.fcitx.fcitx5.android.engine.pinyin.LatinWords
@@ -38,11 +39,11 @@ import org.fcitx.fcitx5.android.engine.stroke.StrokeFilter
 import org.fcitx.fcitx5.android.engine.stroke.Strokes
 import org.fcitx.fcitx5.android.engine.table.TableDictionary
 import org.fcitx.fcitx5.android.engine.table.TableLanguage
+import org.fcitx.fcitx5.android.engine.table.TableSlips
 import org.fcitx.fcitx5.android.engine.user.DictionaryCompiler
 import org.fcitx.fcitx5.android.engine.user.DictionaryFile
 import org.fcitx.fcitx5.android.engine.user.LearningUse
 import org.fcitx.fcitx5.android.engine.user.WordPack
-import org.fcitx.fcitx5.android.eval.parity.PARITY_COMMANDS
 import org.fcitx.fcitx5.android.input.keyboard.ImKeyboards
 import java.io.File
 import java.io.RandomAccessFile
@@ -64,9 +65,11 @@ internal val COMMANDS = listOf(
     },
     Command(
         "pinyin",
-        "<pinyin.data> <set.tsv> <result.tsv> [--scheme <scheme>] [--fuzzy all|<pair>,...] [--half <half>] [--neighbours on|off] [--typos on|off] [--rerank <model.safetensors>] [--refine <model.safetensors>] [--weight <rerank>[,<refine>]] [--limit <rerank>[,<refine>]] [--beam <n>] [--sentences <n>] [--layers <name>=<log10>,...] [--pack <file.words>] [--merged <dictionary.txt> [--stale]] [--threads <n>] [--taps <hand>:<α>[:<seed>]]",
-        3..3, "scheme", "fuzzy", "half", "neighbours", "typos", "rerank", "refine", "weight", "limit", "beam", "sentences", "layers", "pack", "merged", "stale", "threads", "taps",
+        "<pinyin.data> <set.tsv> <result.tsv> [--scheme <scheme>] [--fuzzy all|<pair>,...] [--half <half>] [--neighbours on|off] [--typos on|off] [--rerank <model.safetensors>] [--refine <model.safetensors>] [--weight <rerank>[,<refine>]] [--limit <rerank>[,<refine>]] [--beam <n>] [--sentences <n>] [--layers <name>=<log10>,...] [--pack <file.words>] [--merged <dictionary.txt> [--stale]] [--threads <n>] [--taps <hand>:<α>[:<seed>]] [--sp-abbrev off|<extra penalty>] [--history <words.txt>] [--touch <keyboard>:<hand>:<clean|slip>[:<seed>] [--touched <set.tsv>]]",
+        3..3, "scheme", "fuzzy", "half", "neighbours", "typos", "rerank", "refine", "weight", "limit", "beam", "sentences", "layers", "pack", "merged", "stale", "threads", "taps", "sp-abbrev", "history", "touch", "touched",
     ) { args, _, _ ->
+        // pinyin's --touched is the set its --touch tapped (table-slips' its own taps, preset or not: review F8111)
+        if ("touched" in args.options && "touch" !in args.options) return@Command null
         val (dataPath, setPath, resultPath) = args.operands
         runPinyin(dataPath, setPath, resultPath, RunOptions(args.options), Models(args.options))
     },
@@ -80,33 +83,40 @@ internal val COMMANDS = listOf(
         predict(dataPath, setPath, RunOptions(args.options).threads, args.options["offers"], args.options["rerank"], weight, out)
     },
     Command(
-        "english", "<english.data> <sentences.txt> [--keys nine] [--noise <rate>] [--max-correction <cost>] [--misses <out.tsv>] [--threads <n>]",
-        2..2, "keys", "noise", "max-correction", "misses", "threads",
+        "english", "<english.data> <sentences.txt> [--keys nine] [--noise <rate>] [--hand <s0.2>] [--max-correction <cost>] [--misses <out.tsv>] [--threads <n>]",
+        2..2, "keys", "noise", "hand", "max-correction", "misses", "threads",
     ) { args, out, _ ->
         if (args.options["keys"].let { it != null && it != "nine" }) return@Command null
         val (dataPath, setPath) = args.operands
         val sentences = File(setPath).readLines().filter { it.isNotBlank() && !it.startsWith("#") }
         // checked already: see optionsValid
         val nine = args.options["keys"] == "nine"
-        val run = EnglishRun(EnglishData.load(mapFile(dataPath)), maxCorrection = args.options["max-correction"]?.toFloat() ?: EnglishSession.MAX_CORRECTION, nineKeys = nine)
+        val data = EnglishData.load(mapFile(dataPath))
+        val maxCorrection = args.options["max-correction"]?.toFloat() ?: EnglishSession.MAX_CORRECTION
+        // taps with a place (TouchSim's hand, s0.2 as pinyin's): each set typed as 0.6.1 read it before (the place
+        // not read, `-0`) and as now (`-t`), and a set of a slip a word landing where the hand takes it (`slip1`)
+        val hand = args.options["hand"]?.let(TouchSim::hand)
+        val runs = if (hand == null) {
+            listOf("" to EnglishRun(data, maxCorrection = maxCorrection, nineKeys = nine))
+        } else {
+            listOf(false, true).map { reads -> (if (reads) "-t" else "-0") to EnglishRun(data, maxCorrection = maxCorrection, nineKeys = nine, hand = hand, readsTouch = reads) }
+        }
         val noise = args.options["noise"]?.toDouble() ?: ENGLISH_NOISE
         val threads = RunOptions(args.options).threads
-        if (nine) {
-            // each key meant: no slip to measure; a word not offered at all is spelled by its letters, pinned by long press
-            val r = run.run(sentences, 0.0, ENGLISH_SEED, threads)
-            out.appendLine(EnglishRun.Result.NINE_HEADER)
-            out.appendLine(r.nineRow())
-            args.options["misses"]?.let { path -> File(path).printWriter().use { w -> r.misses.forEach(w::println) } }
-            return@Command 0
+        val misses = ArrayList<String>()
+        out.appendLine(if (nine) EnglishRun.Result.NINE_HEADER else EnglishRun.Result.HEADER)
+        for ((suffix, run) in runs) {
+            // the nine keys: each key meant, no slip of [noise]; a word not offered at all is spelled by its letters, pinned by long press
+            val sets = listOf("clean" to run.run(sentences, 0.0, ENGLISH_SEED, threads)) +
+                (if (nine) emptyList() else listOf("slips" to run.run(sentences, noise, ENGLISH_SEED, threads))) +
+                (if (hand == null) emptyList() else listOf("slip1" to run.run(sentences, 0.0, ENGLISH_SEED, threads, oneSlip = true)))
+            for ((name, r) in sets) {
+                val label = if (nine && hand == null) "nine" else name + suffix
+                out.appendLine(if (nine) r.nineRow(label) else r.row(label))
+                misses += r.misses.map { "$label\t$it" }
+            }
         }
-        out.appendLine(EnglishRun.Result.HEADER)
-        val clean = run.run(sentences, 0.0, ENGLISH_SEED, threads)
-        val slips = run.run(sentences, noise, ENGLISH_SEED, threads)
-        out.appendLine(clean.row("clean"))
-        out.appendLine(slips.row("slips"))
-        args.options["misses"]?.let { path ->
-            File(path).printWriter().use { w -> (clean.misses.map { "clean\t$it" } + slips.misses.map { "slips\t$it" }).forEach(w::println) }
-        }
+        args.options["misses"]?.let { path -> File(path).printWriter().use { w -> misses.forEach(w::println) } }
         0
     },
     Command(
@@ -177,6 +187,13 @@ internal val COMMANDS = listOf(
         lines.forEach(out::appendLine)
         0
     },
+    Command("history", "<pinyin.data> <words> <history.txt>", 3..3) { args, _, _ ->
+        val (dataPath, words, outPath) = args.operands
+        // a history from the tree, for --history and run-on-device.sh's HISTORY (R27 F8530): the dictionary's likeliest words
+        val n = words.toIntOrNull()?.takeIf { it > 0 } ?: return@Command null
+        File(outPath).printWriter().use { w -> TypedHistory.likeliest(loadData(dataPath), n).forEach(w::println) }
+        0
+    },
     Command("predict-set", "<pinyin.data> <set.tsv> <predict.tsv>", 3..3) { args, _, _ ->
         val (dataPath, setPath, outPath) = args.operands
         // after each word of a pinyin set's sentences, what follows: for `predict`
@@ -193,13 +210,42 @@ internal val COMMANDS = listOf(
         sentences(dataPath, setPath, outPath, RunOptions(args.options))
     },
     // the voice post-processing on voice-eval's recorded stretches (seg_app.py), no recognizer: dev/design/060-voice-post.md §5
-    Command("voice-post", "<seg-set.jsonl>... [--source app|top] [--misses <out.tsv>] [--texts <out.tsv>]", 1..Int.MAX_VALUE, "source", "misses", "texts") { args, out, err ->
+    // --source tagged: the rerank's text through the polish tagger's labels as voice-eval exported them (VoicePostRun.Tagged),
+    // the app's whole post-processing; --guard off scores them unguarded
+    Command(
+        "voice-post",
+        "<seg-set.jsonl>... [--source app|top|tagged] [--tagger <polish-tagger.json>] [--guard on|off] [--misses <out.tsv>] [--texts <out.tsv>]",
+        1..Int.MAX_VALUE, "source", "tagger", "guard", "misses", "texts",
+    ) { args, out, err ->
         val source = args.options["source"] ?: "app"
-        if (source !in setOf("app", "top")) {
-            err.appendLine("voice-post: --source app or top, not $source")
+        if (source !in setOf("app", "top", "tagged")) {
+            err.appendLine("voice-post: --source app, top or tagged, not $source")
             return@Command null
         }
-        VoicePostRun.run(args.operands, source, args.options["misses"], out, args.options["texts"])
+        val tagger = args.options["tagger"]
+        if ((source == "tagged") != (tagger != null)) {
+            err.appendLine("voice-post: --tagger goes with --source tagged, and only with it")
+            return@Command null
+        }
+        val guard = args.options["guard"] ?: "on"
+        if (guard !in setOf("on", "off")) {
+            err.appendLine("voice-post: --guard on or off, not $guard")
+            return@Command null
+        }
+        // the guards are the tagger's labels': without them it would run as given and say nothing
+        if (args.options["guard"] != null && tagger == null) {
+            err.appendLine("voice-post: --guard goes with --source tagged, and only with it")
+            return@Command null
+        }
+        try {
+            val polish = tagger?.let { VoicePostRun.Polish(VoicePostRun.tags(File(it)), guard == "on") }
+            VoicePostRun.run(args.operands, source, args.options["misses"], out, args.options["texts"], polish)
+        } catch (e: VoicePostRun.BadInput) {
+            // a tagger file or a record read wrong, named by VoicePostRun: said as a failed run, not a stack trace;
+            // anything else thrown is the tool's own and fails loudly
+            err.appendLine("voice-post: ${e.message}")
+            1
+        }
     },
     Command("lm", "<model.safetensors> <context> <text>...", 3..Int.MAX_VALUE) { args, out, _ ->
         val (modelPath, context) = args.operands
@@ -273,8 +319,8 @@ internal val COMMANDS = listOf(
         learnUx(dataPath, File(scriptPath), args.options, out)
     },
     Command(
-        "strokes", "<pinyin.data> <stroke.data> <set.tsv> [--scheme <scheme>] [--look-ahead <n>] [--first-char] [--rerank <model.safetensors>] [--refine <model.safetensors>]",
-        3..3, "scheme", "look-ahead", "first-char", "rerank", "refine",
+        "strokes", "<pinyin.data> <stroke.data> <set.tsv> [--charinfo <charinfo.data>] [--scheme <scheme>] [--look-ahead <n>] [--first-char] [--rerank <model.safetensors>] [--refine <model.safetensors>]",
+        3..3, "charinfo", "scheme", "look-ahead", "first-char", "rerank", "refine",
     ) { args, out, _ ->
         val (dataPath, strokePath, setPath) = args.operands
         val lookAhead = args.options["look-ahead"]?.let { it.toIntOrNull()?.takeIf { n -> n > 0 } ?: return@Command null } ?: StrokeFilter.LOOK_AHEAD
@@ -320,7 +366,15 @@ internal val COMMANDS = listOf(
             0
         }
     },
-) + PARITY_COMMANDS
+    Command(
+        "table-slips", "<table.data> <set.tsv> [--preset <preset>] [--hand <σ, TouchSim's: s0.2>] [--seed <n>] [--half tune|held-out] [--floor <log10>] [--topping-floor <log10>] [--words <pinyin.data>] [--plan whole|prefix] [--misses <out.tsv>] [--touched <out.tsv>]",
+        2..2, "preset", "hand", "seed", "half", "floor", "topping-floor", "words", "plan", "misses", "touched",
+    ) { args, out, err ->
+        val (dataPath, setPath) = args.operands
+        val o = args.options
+        tableSlips(dataPath, setPath, o["preset"] ?: DEFAULT_PRESET, o, out, err)
+    },
+)
 
 val USAGE = "usage: " + COMMANDS.joinToString("\n       ") { "${it.name} ${it.usage}" } + """
 schemes: ${(ShuangpinSet.SCHEMES.keys + ShuangpinSet.GROUPED.keys + T9Set.SCHEMES + ZhuyinSet.SCHEMES.keys + NO_LATIN).joinToString(" ")}
@@ -403,6 +457,9 @@ private const val NANOS_PER_MILLI = 1_000_000
 /** Full pinyin without the Latin words. */
 private const val NO_LATIN = "no-latin"
 
+// the keyboards whose taps go with a place across the key (--taps)
+private val TAPPED = setOf(NineKeyLetters.G14, NineKeyLetters.G18)
+
 /** `table`'s preset unless given one: [TableRun.PRESETS]' plain, the options' defaults. */
 private const val DEFAULT_PRESET = "plain"
 
@@ -428,16 +485,35 @@ private fun optionsValid(options: Map<String, String>): Boolean {
         valid("user-counts") { it in setOf("full", "none", "multi") },
         valid("short-guard") { it in ON_OFF },
         valid("continuations") { it in ON_OFF },
-        // the taps type the 14 keys: a 14-key scheme
-        valid("taps") { runCatching { Taps.parse(it) }.isSuccess && scheme != null && scheme in T9Set.SCHEMES && T9Set.lettersOf(scheme) == NineKeyLetters.G14 },
+        // the taps type the 14 keys or the 18 keys: such a scheme
+        valid("taps") { runCatching { Taps.parse(it) }.isSuccess && scheme != null && scheme in T9Set.SCHEMES && T9Set.lettersOf(scheme) in TAPPED },
         valid("seed") { (it.toIntOrNull() ?: -1) >= 0 },
+        // table-slips' floors, log10 costs: one not read would run at the app's and be reported as asked (review F8254)
+        listOf("floor", "topping-floor").all { name -> valid(name) { it.toFloatOrNull()?.isFinite() == true } },
         // a merged dictionary's file is what is stale
         valid("stale") { "merged" in options },
         listOf("threads", "beam", "sentences").all { name -> valid(name) { (it.toIntOrNull() ?: 0) > 0 } },
-        // only full pinyin reads slips: 双拼 and the nine keys read none
-        valid("neighbours") { it in ON_OFF && (scheme == null || scheme == NO_LATIN) },
+        // a key read as the one beside it (061-neighbour-correction): full pinyin, 双拼's full keyboard, pinyin's nine, 14 and 18 keys
+        valid("neighbours") { it in ON_OFF && readsNeighbours(scheme) },
+        valid("touch") { "taps" !in options && touchValid(it) },
+        valid("hand") { runCatching { TouchSim.hand(it) }.isSuccess },
         valid("typos") { it in ON_OFF && readsTypos(scheme) },
+        // 双拼's 简拼 in the middle: off, the reading before it, or another extra penalty than the app's
+        valid("sp-abbrev") { readsAbbrev(it, scheme) },
     ).all { it }
+}
+
+/** Whether `--sp-abbrev` [spec] is off or a penalty (finite, not above 0), under a scheme of 双拼, the full keyboard's or the grouped ones' (061-sp-abbrev). */
+private fun readsAbbrev(spec: String, scheme: String?) = (spec == "off" || spec.toFloatOrNull()?.let { it.isFinite() && it <= 0f } == true) && (scheme in ShuangpinSet.SCHEMES || scheme in ShuangpinSet.GROUPED)
+
+/** Whether [scheme]'s segmenter reads a key as the one beside it: every one, 双拼's groups and zhuyin's too (061-neighbour-correction, 061-neighbour-groups). */
+private fun readsNeighbours(scheme: String?) = scheme == null || scheme == NO_LATIN || scheme in ShuangpinSet.SCHEMES || scheme in T9Set.SCHEMES ||
+    scheme in ShuangpinSet.GROUPED || scheme in ZhuyinSet.SCHEMES
+
+/** Whether `--touch` [spec] names a keyboard, a hand, clean or slip and maybe a seed ([TouchSim.convert]). */
+private fun touchValid(spec: String) = spec.split(':').let { p ->
+    p.size in 3..4 && p[2] in setOf("clean", "slip") && (p.size == 3 || p[3].toLongOrNull() != null) &&
+        runCatching { TouchSim.board(p[0]); TouchSim.hand(p[1]) }.isSuccess
 }
 
 /** Whether [scheme]'s segmenter reads common slips: full pinyin's and 双拼's; the grouped keyboards and zhuyin read none. */
@@ -507,13 +583,32 @@ private class RunOptions(options: Map<String, String>) {
     val merged = options["merged"]
     val stale = "stale" in options
 
-    /** The 14 keys tapped by a simulated hand ([Taps]): the set, full pinyin, typed so. */
+    /** Words typed before the run, a file of [TypedHistory]'s lines: 双拼 reads a key alone for those only. */
+    val history = options["history"]
+
+    /** 双拼 reads a key as an initial alone in the middle too (ShuangpinSegmenter): unless off, at this extra penalty. */
+    val abbreviations = options["sp-abbrev"] != "off"
+    val abbrevPenalty = options["sp-abbrev"]?.toFloatOrNull() ?: Penalties().abbrev
+
+    /** The 14 or the 18 keys tapped by a simulated hand ([Taps]): the set, full pinyin, typed so. */
     val taps = options["taps"]?.let(Taps::parse)?.also {
-        require(scheme != null && scheme in T9Set.SCHEMES && T9Set.lettersOf(scheme) == NineKeyLetters.G14) { "--taps types the 14 keys: a 14-key --scheme, not $scheme" }
+        require(scheme != null && scheme in T9Set.SCHEMES && T9Set.lettersOf(scheme) in TAPPED) { "--taps types the 14 or the 18 keys: such a --scheme, not $scheme" }
     }
+
+    /** The keys [taps] types: the scheme's. */
+    val tapKeys: NineKeyLetters get() = T9Set.lettersOf(scheme!!)
+
+    /** Taps with a place ([TouchSim]): each key where a simulated hand tapped it, the keys around it; read where [neighbours] is on. */
+    val touch = options["touch"]?.also { require(taps == null) { "--touch or --taps, not both" } }
+
+    /** Where the set as [touch] tapped it goes, each key's touch in a column ([EvalSet.line]). */
+    val touched = options["touched"]
 
     /** Each syllable spelt out in the preedit, as the app shows 双拼 and the nine keys. */
     val spell = scheme != null && scheme != NO_LATIN
+
+    /** [touch]'s samples with each tap's place across its key where the app sends one ([TouchSim.placed]: the 14 and the 18 keys'). */
+    fun placed(samples: List<Sample>): List<Sample> = scheme?.takeIf { it in T9Set.SCHEMES }?.let { TouchSim.placed(samples, T9Set.lettersOf(it)) } ?: samples
 
     /**
      * Full pinyin reads the Latin words of [data] as the app does, unless the scheme is [NO_LATIN]:
@@ -522,10 +617,10 @@ private class RunOptions(options: Map<String, String>) {
     fun segmenter(data: PinyinData): Segmenter = when (scheme) {
         null -> PinyinSegmenter(fuzzy, typos, neighbours = neighbours, latin = LatinWords.of(data.dictionary))
         NO_LATIN -> PinyinSegmenter(fuzzy, typos, neighbours = neighbours)
-        in ZhuyinSet.SCHEMES -> T9Segmenter(fuzzy, abbreviations = false, letters = ZhuyinSet.SCHEMES.getValue(scheme), toneAllows = data.tones::allows)
-        in T9Set.SCHEMES -> T9Segmenter(fuzzy, abbreviations = T9Set.abbreviates(scheme), letters = T9Set.lettersOf(scheme))
-        in ShuangpinSet.GROUPED -> ShuangpinSet.GROUPED.getValue(scheme).let { (s, letters) -> GroupedShuangpinSegmenter(s, letters, fuzzy) }
-        else -> ShuangpinSegmenter(ShuangpinSet.SCHEMES.getValue(scheme), fuzzy, typos)
+        in ZhuyinSet.SCHEMES -> T9Segmenter(fuzzy, abbreviations = false, letters = ZhuyinSet.SCHEMES.getValue(scheme), toneAllows = data.tones::allows, neighbours = neighbours)
+        in T9Set.SCHEMES -> T9Segmenter(fuzzy, abbreviations = T9Set.abbreviates(scheme), letters = T9Set.lettersOf(scheme), neighbours = neighbours)
+        in ShuangpinSet.GROUPED -> ShuangpinSet.GROUPED.getValue(scheme).let { (s, letters) -> GroupedShuangpinSegmenter(s, letters, fuzzy, neighbours = neighbours, abbreviations = abbreviations) }
+        else -> ShuangpinSegmenter(ShuangpinSet.SCHEMES.getValue(scheme), fuzzy, typos, abbreviations = abbreviations, neighbours = neighbours)
     }
 }
 
@@ -578,18 +673,26 @@ private fun runPinyin(dataPath: String, setPath: String, resultPath: String, opt
     val work = mergedPath?.let { Files.createTempDirectory("ime-eval-merged").toFile() }
     try {
         val merged = mergedPath?.let { compileMerged(it, loadData(dataPath), File(checkNotNull(work), "merged.ymd")) }
+        val typed = options.history?.let { File(it).readLines() }
         // a data file each: its buffers are not to be shared
         val set = Halves.select(readSet(setPath), options.half)
         val selected = options.taps?.let { spec ->
-            Taps.convert(set, spec).also { require(it.isNotEmpty()) { "--taps: no sample of $setPath has one exact reading (a set already of codes?)" } }
+            Taps.convert(set, spec, options.tapKeys).also { require(it.isNotEmpty()) { "--taps: no sample of $setPath has one exact reading (a set already of codes?)" } }
+        } ?: options.touch?.let { spec ->
+            TouchSim.convert(set, spec).also { require(it.isNotEmpty()) { "--touch: no sample of $setPath has a key on that keyboard" } }
+                // the 14 and 18 keys' taps go with where across the key they fell, as the app sends them
+                .let(options::placed)
         } ?: set
+        // the set as tapped, for the device's runner (EngineEvalRunner) to type the same
+        options.touched?.let { path -> File(path).printWriter().use { w -> selected.forEach { w.println(EvalSet.line(it)) } } }
         val results = dealt(selected, options.threads, {
             val data = loadData(dataPath)
             PinyinRun(
-                data, options.segmenter(data), penalties = Penalties(tap = options.taps?.let { -it.alpha } ?: Penalties().tap),
+                data, options.segmenter(data), penalties = Penalties(tap = options.taps?.let { -it.alpha } ?: Penalties().tap, abbrev = options.abbrevPenalty),
                 beam = options.beam, sentenceCount = options.sentences, layers = options.layers, pack = pack,
                 reranker = models.reranker, refiner = models.refiner,
                 merged = merged?.let { DictionaryFile.open(JvmFile(it), verify = false) }, mergedStale = options.stale,
+                typed = typed,
             )
         }) { hand -> run(hand) }
         File(resultPath).printWriter().use { out -> results.forEach { out.println(RunResultFormat.format(it)) } }
@@ -680,7 +783,9 @@ private fun strokes(dataPath: String, strokePath: String, setPath: String, lookA
     val session = PinyinSession(data, RunOptions(o).segmenter(data), prediction = false, reranker = models.reranker?.invoke(), refiner = models.refiner?.invoke())
     val set = readSet(setPath)
     val samples = if ("first-char" in o) firstChars(set, o["scheme"]) else set
-    StrokeRun(session, strokes, lookAhead).run(samples).rows().forEach(out::appendLine)
+    // the mainland's orders as the app has them (StrokeFilter goes by them): without, rime-stroke's alone
+    val charInfo = o["charinfo"]?.let { CharInfo.load(mapFile(it), verify = false) } ?: CharInfo.EMPTY
+    StrokeRun(session, strokes, lookAhead, charInfo).run(samples).rows().forEach(out::appendLine)
     return 0
 }
 
@@ -724,14 +829,16 @@ private fun writeSlipSet(setPath: String, outPath: String, scheme: String?, out:
 
 private fun tune(dataPath: String, setPath: String, slipsPath: String, threads: Int, out: Appendable): Int {
     val tuning = Tuning({ loadData(dataPath) }, readSet(setPath), readSet(slipsPath), threads)
+    // the labels' column as wide as the longest a slip's makes (`default -1.5 (-3.5 a slip)`, with room): the rates under the
+    // header's names (R26 F8474)
     fun row(label: String, point: Tuning.Point) = out.appendLine(
-        String.format(Locale.ROOT, "%-24s", label) +
+        String.format(Locale.ROOT, "%-30s", label) +
             (point.rates + point.mean).joinToString("") { rate ->
                 if (rate == null) String.format(Locale.ROOT, "%17s", "-") else String.format(Locale.ROOT, "%16.1f%%", rate * 100)
             },
     )
     fun header(label: String, point: Tuning.Point, columns: List<String> = Tuning.COLUMNS) = out.appendLine(
-        String.format(Locale.ROOT, "%-24s", label) +
+        String.format(Locale.ROOT, "%-30s", label) +
             (columns.zip(point.sizes) { c, n -> "$c/$n" } + "mean").joinToString("") { String.format(Locale.ROOT, "%17s", it) },
     )
     val default = tuning.measure(Penalties(), Halves.TUNE)
@@ -747,17 +854,22 @@ private fun tune(dataPath: String, setPath: String, slipsPath: String, threads: 
     val off = tuning.measureKeys(Penalties(), Halves.TUNE, read = false)
     header("neighbour (tune)", off, Tuning.KEY_COLUMNS)
     row("off", off)
+    // the neighbour penalty is on top of what a slip costs by its place, the segmenter's own for the slip set's, which
+    // have none: each row says both, the whole the engine uses (review F8142; R26 F8473: read off the segmenter Tuning
+    // measures with, not a SlipCost of its defaults; F8509: that very segmenter, not one built like it)
+    val fixed = tuning.slipFixed
+    fun slip(p: Penalties) = "${p.neighbour} (${fixed + p.neighbour} a slip)"
     val keyPoints = tuning.searchKeys()
-    keyPoints.forEach { row("${it.penalties.neighbour}", it) }
+    keyPoints.forEach { row(slip(it.penalties), it) }
     val keyChoice = tuning.chooseKeys(keyPoints, off)
     val offHeldOut = tuning.measureKeys(Penalties(), Halves.HELD_OUT, read = false)
     header("held-out", offHeldOut, Tuning.KEY_COLUMNS)
     row("off", offHeldOut)
-    row("default ${Penalties().neighbour}", tuning.measureKeys(Penalties(), Halves.HELD_OUT, read = true))
+    row("default ${slip(Penalties())}", tuning.measureKeys(Penalties(), Halves.HELD_OUT, read = true))
     if (keyChoice == null) {
         out.appendLine("chosen: none keeps clean input")
     } else {
-        row("chosen ${keyChoice.penalties.neighbour}", tuning.measureKeys(keyChoice.penalties, Halves.HELD_OUT, read = true))
+        row("chosen ${slip(keyChoice.penalties)}", tuning.measureKeys(keyChoice.penalties, Halves.HELD_OUT, read = true))
     }
     return 0
 }
@@ -932,6 +1044,39 @@ private fun tableHomographs(dataPath: String, setPath: String, preset: String, p
     out.appendLine("重码 words: $n")
     languages.forEachIndexed { i, (label, _) -> out.appendLine(String.format(Locale.ROOT, "  %-24s first %.1f%%", label, 100.0 * first[i] / maxOf(n, 1))) }
 }
+
+// a table's codes tapped (061-neighbour-table): words of [setPath]'s texts, clean and with one key slipped, typed with slips read and without
+private fun tableSlips(dataPath: String, setPath: String, preset: String, o: Map<String, String>, out: Appendable, err: Appendable): Int {
+    val options = TableRun.PRESETS[preset] ?: run {
+        err.appendLine("table-slips: no preset $preset; one of ${TableRun.PRESETS.keys.joinToString()}")
+        return 2
+    }
+    if (o["plan"] !in setOf(null, "whole", "prefix")) {
+        err.appendLine("table-slips: --plan whole or prefix")
+        return 2
+    }
+    val floor = o["floor"]?.toFloatOrNull() ?: TableSlips.SLIPS.cost.floor
+    val topping = o["topping-floor"]?.toFloatOrNull() ?: TableSlips.SLIPS.toppingFloor
+    // the word model as the app's low tier weighs a table by
+    val language = o["words"]?.let { loadData(it) }?.let { TableLanguage(TextWords(it.model, it.wordIndex)) }
+    val run = TableSlipRun(CodeTable.load(mapFile(dataPath)), options, TableSlips.Costs(TableSlips.SLIPS.cost.copy(floor = floor), topping), language)
+    val texts = Halves.select(readSet(setPath), o["half"]).map { it.expected }.distinct()
+    val hand = o["hand"] ?: "s0.2"
+    val seed = o["seed"]?.toLongOrNull() ?: 1L
+    // prefix: each word by the shortest part of a code that shows it first, then the next word's key
+    val prefix = o["plan"] == "prefix"
+    val clean = run.units(texts, hand, slip = false, seed, prefix)
+    val slipped = run.units(texts, hand, slip = true, seed, prefix)
+    val misses = o["misses"]?.let { File(it).printWriter() }
+    val outcome = misses.use { run.measure(clean, slipped, it) }
+    val plan = if (prefix) "parts that show the word first (${run.partial(clean)} of ${clean.size} no whole code)" else "whole codes"
+    out.appendLine(TableSlipRun.report("$preset, $plan, floor $floor, topping $topping, $hand, ${o["half"] ?: "all"}: ${texts.size} texts", outcome))
+    o["touched"]?.let { path -> File(path).writeText((run.touchedSet(clean, TOUCHED_KEYS) + run.touchedSet(slipped, TOUCHED_KEYS)).joinToString("\n", postfix = "\n")) }
+    return 0
+}
+
+// a line of a set the device runner times, about as many keys as pinyin's: 60 keys a sample or a word's few more, the last line fewer
+private const val TOUCHED_KEYS = 60
 
 private val ON_OFF = setOf("on", "off")
 

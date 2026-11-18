@@ -8,13 +8,16 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
 import org.fcitx.fcitx5.android.FcitxApplication
+import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.Uat
 import org.fcitx.fcitx5.android.assertRows as assertNamedRows
 import org.fcitx.fcitx5.android.data.InputFeedbacks
 import org.fcitx.fcitx5.android.data.theme.ThemeManager
 import org.fcitx.fcitx5.android.data.theme.ThemePrefs
 import org.fcitx.fcitx5.android.engine.assertRows
+import org.fcitx.fcitx5.android.input.bar.ToolbarConfig
 import org.fcitx.fcitx5.android.input.keyboard.KeyDrawing
+import org.fcitx.fcitx5.android.input.keyboard.StrokeLift
 import org.fcitx.fcitx5.android.input.keyboard.KeyMarkPosition
 import org.fcitx.fcitx5.android.input.keyboard.LangSwitchBehavior
 import org.fcitx.fcitx5.android.input.keyboard.OneHanded
@@ -68,6 +71,18 @@ class AppPrefsTest {
         assertFalse(prefs.advanced.ignoreSystemCursor.getValue())
     }
 
+    // a restore that could not delete the backup's punctuation table: the mark the backup brings would keep the
+    // start's from trying again
+    @Test
+    fun anImportClearsThePunctuationMark() {
+        sp.edit { putBoolean("punctuation_reset_061", true) }
+        val prefs = AppPrefs(sp)
+        prefs.resetHiddenSettings()
+        assertTrue("not without an import", prefs.internal.punctuationReset061.getValue())
+        prefs.resetHiddenSettings(again = true)
+        assertFalse(prefs.internal.punctuationReset061.getValue())
+    }
+
     // the real application: ThemePrefs, which has the keyboard's size levels, is read through ThemeManager
     @Test
     @Config(application = FcitxApplication::class)
@@ -75,7 +90,7 @@ class AppPrefsTest {
         val prefs = AppPrefs(sp)
         val categories = listOf(prefs.keyboard, prefs.candidates, prefs.clipboard, prefs.symbols, prefs.advanced)
         // AppPrefs' keys alone: ThemeManager.prefs is registered with the application's AppPrefs, not this one.
-        // ThemePrefsTest and aCategoryRegisteredAfterTheResetIsResetAsItRegisters check that its reset keeps what its levels set
+        // ThemePrefsTest checks that its reset keeps what its levels set
         val own = categories.flatMapTo(HashSet()) { it.managedPreferences.keys }
         // what every level sets, one off its default: the keyboard's size on the theme page, the long press, the vibration, the sound
         val levels = (categories + ThemeManager.prefs)
@@ -103,24 +118,55 @@ class AppPrefsTest {
         assertFalse("shown", prefs.keyboard.popupOnKeyPress.getValue())
     }
 
-    // ThemeManager registers ThemePrefs after the reset at the start: what it hides goes back then
+    // a category of the test's own, registered late as ThemePrefs is: a setting without a UI, one a level still sets, one shown
+    private class Late(sp: SharedPreferences) : ManagedPreferenceCategory(R.string.virtual_keyboard, sp) {
+        val unseen = hidden { switch(R.string.ignore_sys_cursor, "late_unseen", false) }
+        val setByALevel = hidden(setByLevels = true) { switch(R.string.hide_key_config, "late_set_by_a_level", false) }
+        val shown = switch(R.string.inline_suggestions, "late_shown", false)
+    }
+
+    // ThemeManager registers ThemePrefs after the reset at the start: what it hides goes back then, what a level sets
+    // is kept (ThemePrefs' own: ThemePrefsTest). R25r2 F7895: on settings declared here, not on navbar_background,
+    // ThemePrefs' last hidden setting (hidden at SDK 29 alone, and B9 deletes the settings without a UI); the
+    // mechanism stays for whatever is hidden next. R25r3 F7937: the test of the same on navbar_background is gone
     @Test
     @Config(application = FcitxApplication::class)
-    fun aCategoryRegisteredAfterTheResetIsResetAsItRegisters() {
-        sp.edit {
-            putString("one_handed_side", "Left")
-            putInt("keyboard_side_padding", 9)
+    fun aCategoryOfTheTestsOwnRegisteredAfterTheResetIsResetAsItRegisters() {
+        fun stored() = sp.edit {
+            putBoolean("late_unseen", true)
+            putBoolean("late_set_by_a_level", true)
+            putBoolean("late_shown", true)
         }
+        stored()
+        val prefs = AppPrefs(sp)
+        prefs.resetHiddenSettings()
+        val late = prefs.registerProvider(::Late)
+        assertFalse("without a UI: back to its default", late.unseen.getValue())
+        assertTrue("a level sets it: kept", late.setByALevel.getValue())
+        assertTrue("shown: the user's", late.shown.getValue())
+        // a later start, the reset done before it: nothing registered then is reset
+        stored()
+        val later = AppPrefs(sp)
+        later.resetHiddenSettings()
+        assertTrue(later.registerProvider(::Late).unseen.getValue())
+    }
+
+    // audit-061 app-rest-1: the side 单手模式 was last at is the app's state, not a hidden setting: neither the
+    // first start's reset nor the one after a backup's import puts it back to the right
+    @Test
+    @Config(application = FcitxApplication::class)
+    @Uat("PR-53")
+    fun theOneHandedSideRememberedIsNotResetByTheResetsOfHiddenSettings() {
+        sp.edit { putString("one_handed_side", "Left") }
         val prefs = AppPrefs(sp)
         prefs.resetHiddenSettings()
         val theme = prefs.registerProvider(::ThemePrefs)
+        assertEquals(OneHanded.Left, theme.oneHandedSide.getValue())
+        prefs.resetHiddenSettings(again = true)
+        assertEquals(OneHanded.Left, theme.oneHandedSide.getValue())
+        // Off is no side: read as the default
+        sp.edit { putString("one_handed_side", "Off") }
         assertEquals(OneHanded.Right, theme.oneHandedSide.getValue())
-        assertEquals("a level sets it", 9, sp.getInt("keyboard_side_padding", -1))
-        // a later start, the reset done before it: nothing registered then is reset
-        sp.edit { putString("one_handed_side", "Left") }
-        val later = AppPrefs(sp)
-        later.resetHiddenSettings()
-        assertEquals(OneHanded.Left, later.registerProvider(::ThemePrefs).oneHandedSide.getValue())
     }
 
     // 0.5's two switches 滑行输入 (glide_typing, 0.4's key too) and 笔画筛选 (stroke_filter) as the one list
@@ -146,6 +192,58 @@ class AppPrefsTest {
             row("one set already is kept", { putBoolean("glide_typing", true); putString("key_drawing", "StrokeFilter") }, KeyDrawing.StrokeFilter),
             row("stored as another type: off, no crash at every start", { putString("glide_typing", "x") }, KeyDrawing.Off),
         )
+    }
+
+    // 0.6.0's 在键上划 = 键盘手写 is 关 now, the toolbar's 手写 pinned for it (not turned on) and the user told once;
+    // a toolbar never arranged has it pinned already (ToolbarConfig.DEFAULT); any other choice is left as it is
+    @Test
+    @Uat("PR-56")
+    fun zeroSixsKeyHandwritingIsOffWithTheToolbarsHandwritingPinned() {
+        fun row(why: String, drawing: String, bar: String, now: KeyDrawing, told: Boolean, barNow: String) =
+            why to {
+                sp.edit { clear(); putString(AppPrefs.KEY_DRAWING, drawing); if (bar.isNotEmpty()) putString("toolbar_buttons", bar) }
+                val prefs = AppPrefs(sp).apply { dropRetired() }
+                assertEquals(now, prefs.keyboard.keyDrawing.getValue())
+                assertEquals(told, prefs.internal.keyHandwritingUnseen.getValue())
+                assertFalse("not turned on", prefs.internal.handwritingOpen.getValue())
+                assertEquals(barNow, prefs.internal.toolbarButtons.getValue())
+            }
+        assertNamedRows(
+            row("键盘手写, the bar never arranged", "Handwriting", "", KeyDrawing.Off, true, ""),
+            row("键盘手写, the bar arranged", "Handwriting", "undo,|,voice,hide", KeyDrawing.Off, true,
+                ToolbarConfig.parse("undo,|,voice,hide").withHandwritingPinned().serialize()),
+            row("滑行输入: as it was, but for 手写 put on a bar from before it", "Glide", "undo,|,voice,hide", KeyDrawing.Glide, false,
+                ToolbarConfig.parse("undo,|,voice,hide").withHandwritingOffered().serialize()),
+        )
+    }
+
+    // a bar arranged in 0.6.0 (no 手写 in it) gets 手写 shown after 表情 at every start, a 0.6.0 backup restored too; the
+    // first test build's, written with it unticked where parse put it, the first start only; one the user took off since
+    // left so; never arranged, nothing written (the default has it)
+    @Test
+    @Uat("TB-66")
+    fun aBarArrangedBeforeHandwritingGetsIt() {
+        val zeroSix = "undo,redo,cursor_move,clipboard,|,emoji,voice,hide"
+        val offered = ToolbarConfig.parse(zeroSix).withHandwritingOffered().serialize()
+        fun start(bar: String, looked: Boolean = false): String {
+            sp.edit {
+                clear()
+                if (bar.isNotEmpty()) putString("toolbar_buttons", bar)
+                putBoolean("toolbar_handwriting_looked", looked)
+            }
+            return AppPrefs(sp).apply { dropRetired() }.internal.toolbarButtons.getValue()
+        }
+        assertTrue(offered, offered.startsWith("undo,redo,cursor_move,clipboard,") && offered.endsWith(",|,emoji,handwriting,voice,hide"))
+        assertEquals("0.6.0's", offered, start(zeroSix))
+        assertEquals("0.6.0's restored after a start", offered, start(zeroSix, looked = true))
+        val beta = ToolbarConfig.parse(zeroSix).serialize()
+        assertEquals("the first test build's", offered, start(beta))
+        assertEquals("unticked on the toolbar since", beta, start(beta, looked = true))
+        val off = offered.replace("handwriting", "-handwriting")
+        assertEquals("unticked at the right", off, start(off))
+        assertEquals("never arranged", "", start(""))
+        val prefs = AppPrefs(sp).apply { dropRetired() }
+        assertTrue("looked at once", prefs.internal.toolbarHandwritingLooked.getValue())
     }
 
     // a 0.5 backup imported: the start after it resets the hidden settings (the import's marker) and then
@@ -181,25 +279,31 @@ class AppPrefsTest {
         )
         assertRows(
             listOf(
-                // 0.4's Full and Keys14 as they were; Keys18 and NineKeys since I1
+                // 0.4's Full and Keys14 as they were; Keys18 and NineKeys since I1; Custom (a layout of the user's) since 0.6.1
                 Row(
-                    "全拼's keyboard", listOf("Full", "Keys18", "Keys14", "NineKeys", "ZhuyinNine", "ZhuyinFull"), PinyinKeyboard.entries, "pinyin_keyboard", AppPrefs.PINYIN_KEYBOARD,
+                    "全拼's keyboard", listOf("Full", "Keys18", "Keys14", "NineKeys", "ZhuyinNine", "ZhuyinFull", "Custom"), PinyinKeyboard.entries, "pinyin_keyboard", AppPrefs.PINYIN_KEYBOARD,
                     { it.keyboard.pinyinKeyboard.setValue(PinyinKeyboard.Keys14) }, "Keys14", "Keys16",
                     { it.keyboard.pinyinKeyboard.getValue() }, PinyinKeyboard.Full,
                 ),
                 Row(
-                    "双拼's keyboard", listOf("Full", "Keys18", "Keys14", "NineKeys"), ShuangpinKeyboard.entries, "shuangpin_keyboard", AppPrefs.SHUANGPIN_KEYBOARD,
+                    "双拼's keyboard", listOf("Full", "Keys18", "Keys14", "NineKeys", "Custom"), ShuangpinKeyboard.entries, "shuangpin_keyboard", AppPrefs.SHUANGPIN_KEYBOARD,
                     { it.keyboard.shuangpinKeyboard.setValue(ShuangpinKeyboard.NineKeys) }, "NineKeys", "Keys16",
                     { it.keyboard.shuangpinKeyboard.getValue() }, ShuangpinKeyboard.Full,
                 ),
-                // 在键上划 since 0.6; Handwriting stored before it is offered (a later version's backup)
+                // 在键上划 since 0.6; 0.6.0's Handwriting moved over at the start (migrateKeyHandwriting)
                 Row(
-                    "在键上划", listOf("Glide", "StrokeFilter", "Handwriting", "Off"), KeyDrawing.entries, "key_drawing", AppPrefs.KEY_DRAWING,
+                    "在键上划", listOf("Glide", "StrokeFilter", "Off"), KeyDrawing.entries, "key_drawing", AppPrefs.KEY_DRAWING,
                     { it.keyboard.keyDrawing.setValue(KeyDrawing.StrokeFilter) }, "StrokeFilter", "Strokes",
                     { it.keyboard.keyDrawing.getValue() }, KeyDrawing.Off,
                 ),
+                // 笔画筛选灵敏度 since 0.6.1
                 Row(
-                    "English's keyboard", listOf("Full", "NineKeys"), EnglishKeyboard.entries, "english_keyboard", AppPrefs.ENGLISH_KEYBOARD,
+                    "笔画筛选灵敏度", listOf("High", "Medium", "Low"), StrokeLift.entries, "stroke_lift", AppPrefs.STROKE_LIFT,
+                    { it.keyboard.strokeLift.setValue(StrokeLift.High) }, "High", "Extreme",
+                    { it.keyboard.strokeLift.getValue() }, StrokeLift.Medium,
+                ),
+                Row(
+                    "English's keyboard", listOf("Full", "NineKeys", "Custom"), EnglishKeyboard.entries, "english_keyboard", AppPrefs.ENGLISH_KEYBOARD,
                     { it.keyboard.englishKeyboard.setValue(EnglishKeyboard.NineKeys) }, "NineKeys", "Keys14",
                     { it.keyboard.englishKeyboard.getValue() }, EnglishKeyboard.Full,
                 ),

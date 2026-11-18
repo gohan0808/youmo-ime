@@ -42,15 +42,14 @@ class KeyResolverGoldenTest {
         Board("shuangpin-18-ms", "k18", KeyboardVariant(Form.Grouped18, semicolon = true)),
         Board("zhuyin-full", "zhuyin", KeyboardVariant(Form.ZhuyinFull)),
         Board("zhuyin-nine", "zhuyin-nine", KeyboardVariant(Form.ZhuyinNine)),
-        Board("handwriting", "handwriting", KeyboardVariant(Form.Handwriting)),
         Board("number", "number", KeyboardVariant(Form.Number)),
         Board("symbols", "symbols", KeyboardVariant(Form.Panel)),
         Board("emoji", "emoji", KeyboardVariant(Form.Panel)),
         Board("emoticon", "emoticon", KeyboardVariant(Form.Panel)),
         Board("emoji-search", "emoji-search", KeyboardVariant(Form.Panel)),
         Board("expanded-side", "expanded-side", KeyboardVariant(Form.Panel)),
-        // a theme's own groups and corners (the theme maker's example of an 18 keys of its own)
-        Board("theme-k18", "../../web/theme-maker/examples/k17-motion/layouts/k18", KeyboardVariant(Form.Grouped18)),
+        // a theme's own groups and corners (the 0.6.0 theme maker example's 18 keys of its own, now keyboard-scene's test data)
+        Board("theme-k18", "../keyboard-scene/src/commonTest/data/mint-k17/layouts/k18", KeyboardVariant(Form.Grouped18)),
     )
 
     private val zh = ChinesePunctuation.map

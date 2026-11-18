@@ -40,7 +40,7 @@ import org.robolectric.Shadows.shadowOf
 /**
  * The settings app on a [FakeHostApi], as [SettingsUatTest] has it: pages opened by their route,
  * read through their preferences. Engine config a page builds from is put in [api] first
- * (`setImOptions`, `setPunctuationMap`); [intent], what it is opened with. [close] at the end: the daemon seam is global.
+ * (`setImOptions`); [intent], what it is opened with. [close] at the end: the daemon seam is global.
  */
 class SettingsHarness(
     val api: FakeHostApi = FakeHostApi(),
@@ -144,6 +144,9 @@ class SettingsHarness(
     fun capture(path: String) {
         idle()
         val root = activity.window.decorView
+        // a check box or switch just set animates to its state on frames the paused looper never draws: drawn
+        // mid-way (a box empty that is checked, no "−")
+        root.jumpDrawablesToCurrentState()
         if (!comparesScreenshots) {
             // drawn all the same (see SCREENSHOT_SDK)
             root.draw(Canvas(Bitmap.createBitmap(root.width.coerceAtLeast(1), root.height.coerceAtLeast(1), Bitmap.Config.ARGB_8888)))

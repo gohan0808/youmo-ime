@@ -8,6 +8,7 @@ import org.fcitx.fcitx5.android.engine.lattice.TextWords
 import org.fcitx.fcitx5.android.engine.phrase.CustomPhrases
 import org.fcitx.fcitx5.android.engine.phrase.EmojiCandidates
 import org.fcitx.fcitx5.android.engine.phrase.PhraseBook
+import org.fcitx.fcitx5.android.engine.pinyin.Touch
 import org.fcitx.fcitx5.android.engine.platform.jvm.JvmClock
 import org.fcitx.fcitx5.android.engine.session.Action
 import org.fcitx.fcitx5.android.engine.session.Choice
@@ -114,6 +115,8 @@ class TableSession(
     private val clock: () -> Calendar = JvmClock::calendar,
     /** Whether the 拼 key is on: the engine's, a session made anew keeps it. */
     private val lookUpMode: LookUpMode = LookUpMode(),
+    /** What reading a tap as a key around it costs ([TableSlips]); null: a key is read as typed (纠正错拼和按偏的键 off). */
+    slips: TableSlips.Costs? = null,
 ) : Session {
 
     /** Whether the 拼 key has the table look letters up by pinyin ([Action.LookUp]). */
@@ -143,6 +146,8 @@ class TableSession(
 
     private val input = StringBuilder()
     private var cursor = 0 // where in the code the next key goes; in a lookup the pinyin's (PinyinLookUp)
+    // a key read as the one beside it: such a code never commits itself as it is typed, only on a key that cannot go on ([waits])
+    private val slipReader = slips?.let { TableSlips(it, options, table, language, ::isCode, ::leadsAnywhere, ::topped) }
     private var ranking = Ranking.NONE
     private val pager = Pager(options.pageSize)
 
@@ -284,7 +289,7 @@ class TableSession(
 
     // [action] where no lookup has the keys
     private fun typed(action: Action): Snapshot = when (action) {
-        is Action.Key -> type(action.char, action.glided)
+        is Action.Key -> type(action.char, action.glided, action.touch)
         Action.Backspace -> backspace()
         is Action.Select -> select(action.index)
         is Action.Pick -> pick(action.index)
@@ -303,7 +308,9 @@ class TableSession(
             snapshot(commit = text, handled = text.isNotEmpty())
         }
         Action.Refine -> refine()
-        is Action.Ink, is Action.Glide, is Action.Stroke, is Action.Syllable, is Action.Letter, is Action.NineKey, Action.LookUp -> snapshot()
+        // the offer, if any, went in apply, as any action not its own ends it
+        is Action.Ink, is Action.Glide, is Action.Stroke, is Action.Syllable, is Action.Letter, is Action.NineKey, Action.LookUp,
+        Action.DropPredictions -> snapshot()
         is Action.Cursor -> moveCursor(action.at)
         is Action.Step -> moveCursor(action.applyTo(cursor, input.length))
         Action.Reset, is Action.Context -> {
@@ -459,7 +466,10 @@ class TableSession(
         return ranking.page(from, count).map { Choice(it.text, if (options.hint) options.shown(hint(it, wild)) else "") }
     }
 
-    private fun type(c: Char, glided: Boolean = false): Snapshot {
+    private fun type(typed: Char, glided: Boolean = false, touch: Touch? = null): Snapshot {
+        // a slip read as the key meant before anything else reads the key: the next key's commit (顶字) and the
+        // empty code's drop never see it. One read so leads on, so it is no selection key nor the app's
+        val c = if (touch == null) typed else slipped(typed, touch)
         val startsLookUp = startsLookUp(c)
         // a selection key picks while there are candidates, a key of the codes too, as in fcitx;
         // with none it goes on as any other key
@@ -487,11 +497,29 @@ class TableSession(
         return typeInto(c, commit)
     }
 
+    // [c], tapped at [touch], as [TableSlips] reads it, at the code's end only: past its first key (one leading
+    // nowhere is the app's), short of a full code or an end key (the key is the next code's), with no wildcard in it
+    private fun slipped(c: Char, touch: Touch): Char =
+        slipReader?.takeIf { typingAtEnd() && !wild() && input.length < table.maxLength && input.last() !in options.endKeys }?.read(c, touch, input) ?: c
+
+    // what a key leading nowhere commits (autoCommit: 顶字, or a code read from a slip that waits), else null
+    private fun topped(): String? = if (options.autoSelect && hasEntry() && topsOnNoMatch()) firstShown()?.text else null
+
+    // whether a key leading nowhere commits what is typed: 顶字, or a code that [waits]
+    private fun topsOnNoMatch() = reaches(options.noMatchAutoSelectLength) || waits()
+
+    // whether the code has a key read as the one beside it ([TableSlips]) and its one candidate would have committed
+    // itself but for that: it waits to be seen, then a key that cannot go on commits it, as a full code's next key
+    // does (the user's call, DECISIONS 形码临键纠错：改读出的唯一码自动上屏)
+    private fun waits() = slipReader?.marks() == true && ranking.only()?.let { !it.pinyin && it.phrase == null && commitsWhole(it.code) } == true
+
     // [c] put in the code at the cursor, after [committed]
     private fun typeInto(c: Char, committed: String): Snapshot {
         var commit = committed
         // a full code mended: the key has nowhere to go, the code shortened first
         if (table.pinyinMarker == null && input.length >= table.maxLength && !typingAtEnd()) return snapshot(commit = commit)
+        // a key put in before those read as their neighbours moves them on
+        slipReader?.inserted(cursor, input.length)
         input.insert(cursor++, c)
         update()
         val only = ranking.only()
@@ -509,18 +537,21 @@ class TableSession(
 
     /**
      * Whether [c] cannot go on the code typed: it is full (pinyin has no length limit), ends
-     * with an end key, or [c] would lead nowhere.
+     * with an end key, or [c] would lead nowhere where that commits (顶字, or a code that [waits]).
      */
     private fun endsCode(c: Char) =
         (table.pinyinMarker == null && input.length >= table.maxLength) ||
             input.last() in options.endKeys ||
-            (reaches(options.noMatchAutoSelectLength) && !leadsAnywhere("$input$c"))
+            (topsOnNoMatch() && !leadsAnywhere("$input$c"))
 
     /** Whether [item], the only candidate, is committed without asking. */
     private fun commitsItself(item: Item): Boolean {
         // a pinyin entry waits to be picked, shown for the code to learn; so does a code found
         // through the matching key, and a phrase
         if (item.pinyin || item.phrase != null) return false
+        // a code with a key read as the one beside it waits to be seen (061-neighbour-table): never a guess
+        // committed unseen, only by a key that cannot go on ([waits])
+        if (slipReader?.marks() == true) return false
         return commitsWhole(item.code)
     }
 
@@ -536,12 +567,10 @@ class TableSession(
     private fun hasEntry() = ranking[0]?.let { it.phrase == null } == true
 
     /** Commits the first candidate on the page shown, or the first of all where that is an emoji; none where only phrases are. */
-    private fun autoCommit(): String {
-        if (!hasEntry()) return take(null)
-        // an emoji first on a page (past the first) is no reading of the code: the first that is
-        val first = ranking[pager.from]?.takeUnless { it.emoji } ?: ranking[0]
-        return take(first)
-    }
+    private fun autoCommit(): String = if (hasEntry()) take(firstShown()) else take(null)
+
+    // an emoji first on a page (past the first) is no reading of the code: the first that is
+    private fun firstShown() = ranking[pager.from]?.takeUnless { it.emoji } ?: ranking[0]
 
     private fun backspace(): Snapshot {
         if (input.isEmpty()) {
@@ -553,6 +582,8 @@ class TableSession(
         // at the start of the code: nothing before it is the session's to delete
         if (cursor == 0) return snapshot()
         input.deleteCharAt(--cursor)
+        // a key read as its neighbour deleted: gone; one before those: they move back
+        slipReader?.deleted(cursor)
         update()
         return snapshot()
     }
@@ -704,6 +735,7 @@ class TableSession(
     private fun clear() {
         input.setLength(0)
         cursor = 0
+        slipReader?.clear()
         ranking = Ranking.NONE
         homographs = null
         // nothing left to weigh: a code that commits itself may have set it (a row twice in the table, shown once)
@@ -746,7 +778,11 @@ class TableSession(
         val entries = if (spelt.isEmpty()) coded else coded + spelt
         val here = keyed(code)
         val blockedHere = language?.blockedUnder?.invoke(here).orEmpty()
-        val alone = spelt.isEmpty() && alone(coded, blockedHere)
+        // what the code shows not: blocked under it, or with a character 生僻字屏蔽 holds back. The lone one left
+        // of 重码 so commits itself, and a code whose one entry is held back commits none (design §5.1)
+        val held = language?.held
+        val hidden: (String) -> Boolean = if (held == null) blockedHere::contains else { t -> t in blockedHere || held(t) }
+        val alone = spelt.isEmpty() && alone(coded, hidden)
         // saved phrases are found by their plain code; the matching key is for the table's
         val savedHere = if (alone) emptyList() else saved.saved(code).map { (c, text) -> Item(c, text) }
         val others = if (alone) emptyList() else shared.words(code).filterNot { (c, text) -> saved.isSaved(c, text) }.map { (c, text) -> Item(c, text) }
@@ -775,7 +811,7 @@ class TableSession(
         val order = tail.order.prefix(if (options.sortByCodeLength) maxOf(reach, tail.order.indexOfFirst { !found.spelt(it) } + 1) else Int.MAX_VALUE)
         ownFirst(order, found::spelt)
         val pinned = habits.pinned(here)?.text
-        val blocked = { item: Item -> item.text in blockedHere || (!item.inTable && shared.blocked(item.text)) }
+        val blocked = { item: Item -> hidden(item.text) || (!item.inTable && shared.blocked(item.text)) }
         // a code that commits itself is typed blind: no phrase stops it (D8), nor under a wildcard, which is no key
         val custom = if (alone) emptyList() else phrasesUnder(code)
         // the table's own first, before 调频's models and the habits ranked it: picked over another shown first, a use of it (F2739)
@@ -788,18 +824,18 @@ class TableSession(
             Ranking(blocked, emojiOf, phrasesOf, own, custom) { if (read.hasNext()) tail.item(read.next()) else null }
         }
         if (reach == 0) return made(order)
-        return weighed(code, order, reach, { k -> kind(code, found, order[k]) }, blockedHere, made)
+        return weighed(code, order, reach, { k -> kind(code, found, order[k]) }, hidden, made)
     }
 
     /**
-     * Whether the table's entries [coded] are one text, not [blocked], whose code commits itself
-     * (D8): a row the table has twice is one text, a blocked one none. Done at the second text.
+     * Whether the table's entries [coded] are one text, not [hidden], whose code commits itself
+     * (D8): a row the table has twice is one text, a hidden one none. Done at the second text.
      */
-    private fun alone(coded: IntArray, blocked: Set<String>): Boolean {
+    private fun alone(coded: IntArray, hidden: (String) -> Boolean): Boolean {
         var text: String? = null
         for (e in coded) {
             val t = table.text(e)
-            if (t in blocked || t == text) continue
+            if (t == text || hidden(t)) continue
             if (text != null || !commitsWhole(table.code(e))) return false
             text = t
         }
@@ -856,14 +892,14 @@ class TableSession(
     /**
      * [made] with the 重码 of [code] in [order] placed ([kind] of each of its first [reach] positions,
      * past which there are none: a table entry, or [OTHER]): the table's by the word and sentence
-     * models, one blocked under the code ([blockedHere]) left where it is (it is not shown). In the
+     * models, one not shown ([hidden]: blocked under the code, or held back) left where it is. In the
      * table's order where it does not order by use (调频), or a wildcard was typed.
      */
-    private fun weighed(code: String, order: IntArray, reach: Int, kind: (Int) -> Int, blockedHere: Set<String>, made: (IntArray) -> Ranking): Ranking {
+    private fun weighed(code: String, order: IntArray, reach: Int, kind: (Int) -> Int, hidden: (String) -> Boolean, made: (IntArray) -> Ranking): Ranking {
         val language = language?.takeIf { options.orderByUse } ?: return made(order)
         if (options.matchingKey != null && code.contains(options.matchingKey)) return made(order)
         val kinds = IntArray(reach, kind)
-        val rankable = kinds.indices.filter { kinds[it] >= 0 && table.text(kinds[it]) !in blockedHere }
+        val rankable = kinds.indices.filter { kinds[it] >= 0 && !hidden(table.text(kinds[it])) }
         if (rankable.size < 2) return made(order)
         val (prev2, prev) = TextWords.previous(language.words.lastTwo(predictions.before))
         val texts = rankable.map { table.text(kinds[it]) }

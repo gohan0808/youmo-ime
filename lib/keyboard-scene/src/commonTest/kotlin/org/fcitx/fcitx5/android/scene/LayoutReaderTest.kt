@@ -9,6 +9,7 @@ import org.fcitx.fcitx5.android.scene.layout.Condition
 import org.fcitx.fcitx5.android.scene.layout.Face
 import org.fcitx.fcitx5.android.scene.layout.Gap
 import org.fcitx.fcitx5.android.scene.layout.Key
+import org.fcitx.fcitx5.android.scene.layout.LayoutMeta
 import org.fcitx.fcitx5.android.scene.layout.LayoutReader
 import org.fcitx.fcitx5.android.scene.layout.Letters
 import org.fcitx.fcitx5.android.scene.layout.OnSplit
@@ -140,6 +141,33 @@ class LayoutReaderTest {
         assertNull(LayoutReader.action("emoji-search:"))
     }
 
+    // 0.6.0's handwriting keyboard's 注 (role and action `reading`), gone with it: a layout written for it still reads,
+    // warned of, the key doing nothing of it (061-handwriting-toolbar §7)
+    @Test
+    fun theHandwritingKeyboardsReadingKeyIsWarnedOfAndRead() {
+        val l = LayoutReader.layout(
+            board(
+                "<row><key id=\"a\" label=\"注\" role=\"reading\" send=\"reading\" long-press=\"reading:tone\">" +
+                    "<popup from=\"list\"><item text=\"x\" send=\"reading\"/></popup>" +
+                    "<menu><item label=\"y\" do=\"reading\"/><item label=\"z\" do=\"lang\"/></menu></key></row>",
+            ),
+        )
+        assertEquals(emptyList(), l.problems().map { it.toString() })
+        assertEquals(5, l.warnings().size, "${l.warnings()}")
+        assertTrue(l.warnings().all { "注 is gone" in it.message }, "${l.warnings()}")
+        // a menu of its 注 items alone (0.6.0's handwriting.xml has one): no menu, each item warned of, still read (R26 F8209)
+        val only = LayoutReader.layout(
+            board("<row><key id=\"a\" label=\"注\"><menu><item label=\"y\" do=\"reading:tone\"/><item label=\"z\" do=\"reading:style\"/></menu></key></row>"),
+        )
+        assertEquals(emptyList(), only.problems().map { it.toString() })
+        assertEquals(2, only.warnings().size, "${only.warnings()}")
+        assertEquals(emptyList(), (only.ok().parts.filterIsInstance<Row>().single().cells.single() as Key).menu)
+        // a menu of no items at all still a problem
+        assertTrue(problems(board("<row><key id=\"a\" label=\"a\"><menu></menu></key></row>")).isNotEmpty())
+        // what is not 0.6.0's still a problem: a role of reading: has no such style
+        assertTrue(problems(board("<row><key id=\"a\" label=\"a\" role=\"reading:tone\"/></row>")).isNotEmpty())
+    }
+
     // a key's preview= (060-render-p2 S4d: 注音九键's tones and ? ! ~ on, its slot off) read with its actions,
     // on or off and nothing else
     @Test
@@ -162,8 +190,8 @@ class LayoutReaderTest {
         // L; whatever its face shows (pinyin's L): the group the engine reads its code by
         assertEquals("l;", k18.single { it.id == "r2c6" }.letters?.group)
         assertNull(k18.single { it.id == "apostrophe" }.letters)
-        // the 18 keys send their codes alone; the 14 keys' two letters a row lean
-        assertTrue(k18.none { it.leans })
+        // the 18 keys' lean too since 061-neighbour-18key (they had lean="off"), as the 14 keys' two letters a row
+        assertEquals(listOf("we", "rt", "io", "sd", "fg", "jk", "l;", "xc", "bn"), k18.filter { it.leans }.map { it.letters!!.group })
         val k14 = Forms.layout("k14").parts.filterIsInstance<Row>().flatMap { it.cells }.filterIsInstance<Key>()
         assertEquals(Letters(listOf("as")), k14.single { it.id == "r2c1" }.letters)
         assertEquals(listOf(true, false), listOf("r2c1", "r2c5").map { id -> k14.single { it.id == id }.leans })
@@ -238,6 +266,36 @@ class LayoutReaderTest {
         assertEquals(emptyList(), problems(ok))
         val half = board("<row><key id=\"a\" label=\"a\" when=\"pad=signed\"/></row>\n<row><key id=\"a\" label=\"b\"/></row>")
         assertTrue(problems(half).single().contains("used twice"))
+        // a row's when= makes its keys as conditional: a number board's rows of one pad and another's
+        val rows = board("<row when=\"pad=signed\"><key id=\"a\" label=\"a\"/></row>\n<row when=\"pad=phone\"><key id=\"a\" label=\"b\"/></row>")
+        assertEquals(emptyList(), problems(rows))
+    }
+
+    // a layout of its own's (0.6.1, 061-custom-layout §2.2): <meta> first, based-on=, a number board's pads=
+    @Test
+    fun aLayoutOfItsOwnSaysWhoMadeItWhatItIsBasedOnAndItsPads() {
+        val row = "<row><key id=\"a\" label=\"a\"/></row>"
+        val meta = "<meta author=\"某人\" version=\"1.2\" license=\"CC-BY-4.0\" min-app=\"0.6.1\" description=\"H 和 JK 并成一个键\"/>"
+        val l = LayoutReader.layout(board("$meta\n<defaults kind=\"letter\"/>\n$row", " based-on=\"symbols\"")).ok()
+        assertEquals(LayoutMeta("某人", "1.2", "CC-BY-4.0", "0.6.1", "H 和 JK 并成一个键"), l.meta)
+        assertEquals("symbols", l.basedOn)
+        assertNull(l.pads)
+        assertEquals(1, l.parts.size, "<meta> is no part")
+        assertNull(Fixtures.qwerty.meta)
+        assertNull(Fixtures.qwerty.basedOn)
+        // <meta> once and first, <defaults> then after it; its texts 1–64, min-app a version
+        assertTrue(problems(board("$row\n$meta")).single().contains("<meta> must come first"))
+        assertTrue(problems(board("$meta\n$meta\n$row")).single().contains("twice"))
+        assertTrue(problems(board("<meta min-app=\"next\"/>\n$row")).single().contains("min-app"))
+        assertTrue(problems(board("<meta author=\"${"x".repeat(65)}\"/>\n$row")).single().contains("author"))
+        assertTrue(problems(board("<meta><x/></meta>\n$row")).single().contains("not allowed"))
+        assertTrue(problems(board(row, " based-on=\"Qwerty\"")).single().contains("based-on"))
+        // pads=: a number board's, the pads NumberPad opens, each once
+        val number = { pads: String -> board(row, " pads=\"$pads\"").replace("family=\"symbols\"", "family=\"number\"") }
+        assertEquals(listOf("full", "decimal"), LayoutReader.layout(number("full decimal")).ok().pads)
+        assertTrue(problems(number("full abacus")).single().contains("abacus"))
+        assertTrue(problems(number("full full")).single().contains("twice"))
+        assertTrue(problems(board(row, " pads=\"full\"")).single().contains("number board"))
     }
 
     @Test
@@ -255,8 +313,7 @@ class LayoutReaderTest {
         val a = assertIs<Key>(cells[0])
         assertEquals(Text.Literal("分词"), a.variants.single().attrs.label)
         assertEquals(16.0, a.variants.single().attrs.textSize)
-        assertEquals("function", assertIs<Gap>(cells[1]).look)
-        assertEquals(listOf("blank"), assertIs<Gap>(cells[1]).classes)
+        assertEquals(Width.Units(1.0), assertIs<Gap>(cells[1]).width, "a 0.6.0 gap's look and class read, drawn no more (NumberPadsTest)")
         assertEquals("function", assertIs<Slot>(cells[2]).look)
         assertTrue(problems(board("<row><key id=\"a\" label=\"a\"><variant label=\"b\"/></key></row>")).single().contains("when"))
         assertTrue(problems(board("<row><gap width=\"1\"><key id=\"a\" label=\"a\"/></gap><key id=\"b\" label=\"b\"/></row>")).isNotEmpty())
@@ -293,6 +350,20 @@ class LayoutReaderTest {
             assertTrue(problems(board("<row><key id=\"a\" label=\"a\" $attr=\"{punct:,.}\"/></row>")).isNotEmpty(), attr)
             assertEquals(emptyList(), problems(board("<row><key id=\"a\" label=\"a\" $attr=\"{punct:,}\"/></row>")), attr)
         }
+    }
+
+    // L8: {group:} takes one or two letters; a group of three or more (17 键's HJK) is written out, letters= its letters,
+    // as the layout maker writes it (layout-edit.js groupLabel)
+    @Test
+    fun aGroupBindingIsOfOneOrTwoLettersAndLongerGroupsAreWrittenOut() {
+        assertEquals(Text.Binding("group", "qw"), LayoutReader.text("{group:qw}"))
+        assertEquals(Text.Binding("group", "l;"), LayoutReader.text("{group:l;}"))
+        assertNull(LayoutReader.text("{group:hjk}"))
+        assertTrue(problems(board("<row><key id=\"hjk\" label=\"{group:hjk}\" letters=\"hjk\"/></row>")).isNotEmpty())
+        val l = LayoutReader.layout(board("<row><key id=\"hjk\" label=\"HJK\" letters=\"hjk\"/></row>")).ok()
+        val hjk = l.parts.filterIsInstance<Row>().single().cells.filterIsInstance<Key>().single()
+        assertEquals(Text.Literal("HJK"), hjk.attrs.label)
+        assertEquals("hjk", hjk.letters?.group)
     }
 
     @Test

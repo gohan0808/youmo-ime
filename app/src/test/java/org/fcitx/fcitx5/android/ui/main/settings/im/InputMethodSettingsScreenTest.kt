@@ -31,6 +31,11 @@ import org.fcitx.fcitx5.android.host.ConfigTree
 import org.fcitx.fcitx5.android.host.EngineOptions
 import org.fcitx.fcitx5.android.input.handwriting.HandwritingPause
 import org.fcitx.fcitx5.android.input.keyboard.KeyDrawing
+import org.fcitx.fcitx5.android.input.keyboard.StrokeLift
+import org.fcitx.fcitx5.android.input.keyboard.forgetTheTestsLayouts
+import org.fcitx.fcitx5.android.input.shortcut.KeyCommand
+import org.fcitx.fcitx5.android.input.shortcut.SwipeSlot
+import org.fcitx.fcitx5.android.input.shortcut.SwipeSlots
 import org.fcitx.fcitx5.android.input.keyboard.T9EnglishTyping
 import org.fcitx.fcitx5.android.input.keyboard.T9MultiTap
 import org.fcitx.fcitx5.android.ui.main.modified.hasDefault
@@ -41,6 +46,14 @@ import org.fcitx.fcitx5.android.ui.main.settings.im.InputMethodSettings.Item
 import org.fcitx.fcitx5.android.ui.main.settings.im.InputMethodSettings.Section
 import org.fcitx.fcitx5.android.ui.main.settings.im.InputMethodSettings.Toggle
 import org.fcitx.fcitx5.android.ui.main.settings.placeholder
+import org.fcitx.fcitx5.android.data.layout.CustomKeyboards
+import org.fcitx.fcitx5.android.data.layout.CustomLayouts
+import org.fcitx.fcitx5.android.input.keyboard.ImKeyboard
+import org.fcitx.fcitx5.android.input.keyboard.ImKeyboards
+import org.fcitx.fcitx5.android.core.EngineState
+import org.fcitx.fcitx5.android.input.keyboard.canvas.BuiltInLayouts
+import org.fcitx.fcitx5.android.utils.appContext
+import java.nio.file.Files
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -148,7 +161,7 @@ class InputMethodSettingsScreenTest {
         appInputMethods.forEach { page ->
             val screen = screen(page)
             val lists = screen.lists()
-            assertEquals(page, InputMethodSettings.of(page)!!.flat().count { it is Choice || it is InputMethodSettings.AppChoice<*> }, lists.size)
+            assertEquals(page, InputMethodSettings.of(page)!!.flat().count { it is Choice || it is InputMethodSettings.AppChoice<*> || it is InputMethodSettings.TableKeyboard }, lists.size)
             lists.forEach {
                 assertNotNull(page, it.key)
                 assertSame("$page ${it.key}", it, screen.findPreference<ListPreference>(it.key))
@@ -187,14 +200,15 @@ class InputMethodSettingsScreenTest {
         keyboard.t9EnglishTyping.setValue(T9EnglishTyping.Predictive)
     }
 
-    // as multi-tap: the pad's own, nothing of it in fcitx's config
+    // as multi-tap: handwriting's own, nothing of it in fcitx's config; on the shared page's 手写 (061-handwriting-toolbar §3.9)
     @Test
-    fun thePauseOnTheHandwritingPageIsTheAppsPreference() {
+    @Uat("ST-121")
+    fun thePauseOnTheSharedPageIsTheAppsPreference() {
         val pref = AppPrefs.getInstance().keyboard.handwritingPause
         pref.setValue(HandwritingPause.Medium)
         val cfg = mutableMapOf<String, String>()
         var saved = 0
-        val list = screen(InputMethodCatalog.HANDWRITING, cfg) { saved++ }.findPreference<ListPreference>(AppPrefs.HANDWRITING_PAUSE)!!
+        val list = create(InputMethodSettings.SHARED, cfg) { saved++ }.findPreference<ListPreference>(AppPrefs.HANDWRITING_PAUSE)!!
         assertEquals(HandwritingPause.Medium.name, list.value)
         assertTrue(list.callChangeListener(HandwritingPause.Slow.name))
         assertEquals(HandwritingPause.Slow, pref.getValue())
@@ -218,31 +232,61 @@ class InputMethodSettingsScreenTest {
         assertTrue(AppPrefs.ENGLISH_AUTO_CAPS !in cfg.flattened())
     }
 
-    // 在键上划: one list of 滑行输入, 笔画筛选, 键盘手写 and off, its summary the choice alone; a choice stored as
-    // it is picked; 键盘手写 said to need the text pack while it is missing
+    // 在键上划: one list of 滑行输入, 笔画筛选 and off, its summary the choice alone; a choice stored as it is picked
+    // (键盘手写 is the toolbar's 手写 now, 061-handwriting-toolbar)
     @Test
+    @Uat("ST-121")
     fun keyDrawingIsOneChoiceSummarizedByItself() {
         val keyboard = AppPrefs.getInstance().keyboard
         try {
             TestShelves.use()
             keyboard.keyDrawing.setValue(KeyDrawing.Glide)
             val drawing = create(InputMethodSettings.SHARED).findPreference<ListPreference>(AppPrefs.KEY_DRAWING)!!
-            assertEquals(listOf(KeyDrawing.Glide, KeyDrawing.StrokeFilter, KeyDrawing.Handwriting, KeyDrawing.Off).map { it.name }, drawing.entryValues.map { it.toString() })
-            val own = PlaceholderStrings(RuntimeEnvironment.getApplication()).getString(R.string.key_drawing_handwriting)
-            assertEquals(own, drawing.entries[2].toString())
+            assertEquals(listOf(KeyDrawing.Glide, KeyDrawing.StrokeFilter, KeyDrawing.Off).map { it.name }, drawing.entryValues.map { it.toString() })
             assertEquals(KeyDrawing.Glide.name, drawing.value)
             assertEquals(drawing.entry.toString(), drawing.summary?.toString())
             assertTrue(drawing.callChangeListener(KeyDrawing.StrokeFilter.name))
             assertEquals(KeyDrawing.StrokeFilter, keyboard.keyDrawing.getValue())
-            assertTrue(drawing.callChangeListener(KeyDrawing.Handwriting.name))
-            assertEquals(KeyDrawing.Handwriting, keyboard.keyDrawing.getValue())
-            TestShelves.use(text = false, voice = true)
-            val gated = create(InputMethodSettings.SHARED).findPreference<ListPreference>(AppPrefs.KEY_DRAWING)!!
-            assertEquals(PlaceholderStrings(RuntimeEnvironment.getApplication()).getString(R.string.key_drawing_needs_text_pack, own), gated.entries[2].toString())
-            assertEquals(KeyDrawing.Handwriting.name, gated.value)
         } finally {
             TestShelves.use()
             keyboard.keyDrawing.setValue(KeyDrawing.Off)
+        }
+    }
+
+    // 笔画筛选灵敏度 there while 笔画筛选 is chosen, 首页单字 then or while a key's swipe is a stroke: each shown or
+    // hidden at once as 在键上划 changes; 首页单字 关 or 1 to 5, 2 by default
+    @Test
+    @Uat("ST-135")
+    fun theStrokeRowsAreThereWhileStrokesAreDrawn() {
+        val keyboard = AppPrefs.getInstance().keyboard
+        val swipes = AppPrefs.getInstance().internal.keySwipes
+        try {
+            keyboard.keyDrawing.setValue(KeyDrawing.Glide)
+            val page = create(InputMethodSettings.SHARED, mutableMapOf(EngineSettings.STROKE_SINGLES to "2"))
+            val drawing = page.findPreference<ListPreference>(AppPrefs.KEY_DRAWING)!!
+            val lift = page.findPreference<ListPreference>(AppPrefs.STROKE_LIFT)!!
+            val singles = page.findPreference<ListPreference>(EngineSettings.STROKE_SINGLES)!!
+            assertFalse(lift.isVisible)
+            assertFalse(singles.isVisible)
+            assertTrue(drawing.callChangeListener(KeyDrawing.StrokeFilter.name))
+            assertTrue(lift.isVisible)
+            assertTrue(singles.isVisible)
+            assertEquals(listOf("High", "Medium", "Low"), lift.entryValues.map { it.toString() })
+            assertEquals(StrokeLift.Medium.name, lift.value)
+            assertEquals(listOf("0", "1", "2", "3", "4", "5"), singles.entryValues.map { it.toString() })
+            assertEquals(placeholder(R.string.swipe_off), singles.entries[0].toString())
+            assertEquals("2", singles.value)
+            assertTrue(drawing.callChangeListener(KeyDrawing.Off.name))
+            assertFalse(lift.isVisible)
+            assertFalse(singles.isVisible)
+            // a key's swipe set to a stroke: 首页单字 reorders what it filters too
+            swipes.setValue(SwipeSlots.Default.with("full/a", up = false, SwipeSlot.Command(KeyCommand.StrokeShu)).serialize())
+            val again = create(InputMethodSettings.SHARED, mutableMapOf(EngineSettings.STROKE_SINGLES to "2"))
+            assertFalse(again.findPreference<ListPreference>(AppPrefs.STROKE_LIFT)!!.isVisible)
+            assertTrue(again.findPreference<ListPreference>(EngineSettings.STROKE_SINGLES)!!.isVisible)
+        } finally {
+            keyboard.keyDrawing.setValue(KeyDrawing.Off)
+            swipes.setValue("")
         }
     }
 
@@ -312,11 +356,13 @@ class InputMethodSettingsScreenTest {
 
     // the shared page says under each what it is no use to; an input method's page, its own alone, says nothing of the kind
     @Test
+    @Uat("ST-124")
     fun aSharedOptionSaysUnderItWhatItIsNoUseTo() {
         val shared = create(InputMethodSettings.SHARED)
         // in the Chinese input methods' section, whose title says English: only the exception within it
         assertEquals(placeholder(R.string.im_prediction_summary), shared.titled(R.string.im_prediction).summary?.toString())
-        assertEquals("${placeholder(R.string.im_emoji_summary)}\n${placeholder(R.string.im_not_for)}", shared.titled(R.string.im_emoji).summary?.toString())
+        // emoji for every Chinese input method now (handwriting, which had none, is the toolbar's over them)
+        assertEquals(placeholder(R.string.im_emoji_summary), shared.titled(R.string.im_emoji).summary?.toString())
         assertNull(shared.titled(R.string.auto_pairs).summary)
         // 在键上划: the choice alone, which input methods each reaches is the docs'
         val drawing = shared.findPreference<ListPreference>(AppPrefs.KEY_DRAWING)!!
@@ -385,6 +431,40 @@ class InputMethodSettingsScreenTest {
             assertEquals(ShuangpinKeyboard.Keys18.name, page.findPreference<ListPreference>(AppPrefs.SHUANGPIN_KEYBOARD)!!.value)
         } finally {
             keyboard.shuangpinKeyboard.setValue(ShuangpinKeyboard.Full)
+        }
+    }
+
+    // R26 F8379: a layout of the user's that reads and draws, chosen for an input method it is not of now (a grouped one for
+    // English): its row says it cannot be used here, not that its file does not read
+    @Test
+    @Uat("ST-191")
+    fun aLayoutThatReadsButIsNotOfThisInputMethodIsSaidSo() {
+        val keyboard = AppPrefs.getInstance().keyboard
+        val dirWas = CustomKeyboards.dir
+        val dir = Files.createTempDirectory("layouts").toFile()
+        try {
+            CustomKeyboards.dir = { dir }
+            val k18 = BuiltInLayouts(appContext).text("k18")!!
+            CustomLayouts.save("mine", k18.replace("name=\"18 键\"", "name=\"我的\"").replaceFirst("id=\"k18\"", "id=\"mine\" based-on=\"k18\""), dir)
+            assertTrue("read and drawn", CustomKeyboards.choice("mine")!!.drawn)
+            keyboard.setImKeyboard(InputMethodCatalog.ENGLISH, ImKeyboard.CUSTOM, "mine")
+            val row = screen(InputMethodCatalog.ENGLISH).findPreference<ListPreference>(AppPrefs.ENGLISH_KEYBOARD)!!
+            val labels = row.entries.map { it.toString() }
+            assertTrue(labels.toString(), placeholder(R.string.keyboard_custom_unusable) in labels)
+            assertFalse(labels.toString(), placeholder(R.string.keyboard_custom_unread) in labels)
+            // chosen still, said by its name and the keyboard typed instead: the full one, English's own
+            assertEquals("Custom:mine", row.value)
+            val real = InputMethodSettings.create(PreferenceManager(appContext), InputMethodSettings.of(InputMethodCatalog.ENGLISH)!!, mutableMapOf(), {}, open = {})
+                .findPreference<ListPreference>(AppPrefs.ENGLISH_KEYBOARD)!!
+            val said = appContext.getString(R.string.keyboard_custom_unusable, "我的", appContext.getString(R.string.pinyin_keyboard_full))
+            assertTrue(real.entries.toList().toString(), real.entries.any { it.toString() == said })
+            assertEquals(ImKeyboard.FULL, ImKeyboards.effective(InputMethodCatalog.ENGLISH, ImKeyboard.CUSTOM, EngineState.shuangpinScheme, CustomKeyboards.choice("mine")))
+        } finally {
+            keyboard.setImKeyboard(InputMethodCatalog.ENGLISH, ImKeyboard.FULL)
+            keyboard.englishKeyboardLayout.setValue(keyboard.englishKeyboardLayout.defaultValue)
+            forgetTheTestsLayouts(dirWas)
+            CustomLayouts.forgetAll()
+            dir.deleteRecursively()
         }
     }
 }

@@ -15,6 +15,7 @@ import org.fcitx.fcitx5.android.input.theme.ThemeAssetLimits
 import org.fcitx.fcitx5.android.input.theme.ThemePackCheck
 import org.fcitx.fcitx5.android.scene.Parsed
 import org.fcitx.fcitx5.android.scene.layout.PackLayouts
+import org.fcitx.fcitx5.android.scene.layout.PackSeparator
 import org.fcitx.fcitx5.android.scene.look.Crop
 import org.fcitx.fcitx5.android.scene.look.Insets
 import org.fcitx.fcitx5.android.scene.look.LookDefaults
@@ -36,6 +37,8 @@ import org.fcitx.fcitx5.android.utils.appContext
 import org.fcitx.fcitx5.android.input.keyboard.canvas.BuiltInLayouts
 import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneLayout
 import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneLayouts
+import org.fcitx.fcitx5.android.data.layout.ThemeLayoutsToList
+import org.fcitx.fcitx5.android.input.layout.LayoutImport
 import org.fcitx.fcitx5.android.utils.errorRuntime
 import org.fcitx.fcitx5.android.utils.isPlainFileName
 import timber.log.Timber
@@ -421,7 +424,10 @@ object ThemePackFiles {
         }
         val warnings = read.warnings.map { it.toString() } +
             listOfNotNull(checks.lowContrast(ThemePackCheck.lowContrast(theme)), still?.let { checks.animatedStill() })
-        val report = ThemePackLayouts.report(File(from, LAYOUTS), layouts, { SceneLayouts.parseBuiltIn(appContext, it) }, BuiltInLayouts(appContext)::text)
+        // its boards the user picks among their own as the layouts of theirs 「一起导入」 would make (061-custom-layout §11)
+        val listed = ThemeLayoutsToList.staged(File(from, LAYOUTS), theme.name, theme.meta, LayoutImport.appVersion(checks.appVersion))
+        val report = ThemePackLayouts.report(File(from, LAYOUTS), layouts, { SceneLayouts.parseBuiltIn(appContext, it) }, BuiltInLayouts(appContext)::text, listed.listed)
+            .listing(listed.replaced, listed.notFitting)
         return Staged(theme, source, from, files.all, layouts, report, warnings, files.preview?.let { File(from, it) })
     }
 
@@ -476,7 +482,7 @@ object ThemePackFiles {
         val own = File(dir, LAYOUTS)
         // the pack's files the app would read (ThemePackLayouts.read: an id it has, within the limit)
         val texts = BuiltInLayouts.RAW.keys.mapNotNull { id -> ThemePackLayouts.read(own, id)?.let { id to it } }.toMap()
-        return PackLayouts.drawn(builtInLayouts.map { BlankKeys.Board(it.layout, it.fragments) }, texts) { BuiltInLayouts(appContext).text(it) }
+        return PackLayouts.drawn(builtInLayouts.map { BlankKeys.Board(it.layout, it.fragments, it.id) }, texts) { BuiltInLayouts(appContext).text(it) }
     }
 
     // the keyboards only: a fragment (grouped-bottom) read as a layout is refused, logged as broken
@@ -555,9 +561,11 @@ object ThemePackFiles {
     @VisibleForTesting
     internal var onRefused: () -> Unit = { ContextCompat.getMainExecutor(appContext).execute { ThemeManager.refreshThemes() } }
 
-    private fun stampOf(dir: File, source: String): String {
+    // [rule]: the blank-key rule's version, the app's own but in a test of a stamp of an earlier one (R26 F8421)
+    @VisibleForTesting
+    internal fun stampOf(dir: File, source: String, rule: Int = BlankKeys.RULE): String {
         val md = MessageDigest.getInstance("SHA-256")
-        md.update("${BlankKeys.RULE} ${builtInHash()}\n${source.removePrefix(BOM)}".toByteArray())
+        md.update("$rule ${builtInHash()}\n${source.removePrefix(BOM)}".toByteArray())
         File(dir, LAYOUTS).listFiles().orEmpty().filter { it.isFile }.sortedBy { it.name }.forEach {
             md.update("\n${it.name}\n".toByteArray())
             md.update(it.readBytes())
@@ -661,6 +669,45 @@ object ThemePackFiles {
             Timber.d(e, "Theme pack dir not synced")
         }
     }
+
+    /**
+     * The pack [dir]'s `layouts/qwerty.xml` given the app's 分词 in Shift's place while pinyin is typed ([PackSeparator],
+     * FB12: once, to the packs installed before 0.6.1), written whole in place as [place] does, `theme.xml` untouched;
+     * why not, where it is left as it is. [app]: the app's qwerty, [appText] its fragments' text. Not one that is not
+     * UTF-8 (a GBK comment): its other bytes would not be written back as they were.
+     */
+    internal fun addSeparator(themes: File, dir: File, app: SceneLayout, appText: (String) -> String?): String? {
+        val layouts = File(dir, LAYOUTS)
+        val file = File(layouts, SEPARATED)
+        if (!file.isFile) return "no $SEPARATED"
+        if (file.length() > ThemeAssetLimits.MAX_LAYOUT_BYTES) return "over the limit"
+        val bytes = file.readBytes()
+        val text = bytes.decodeToString()
+        if (!text.encodeToByteArray().contentEquals(bytes)) return "not UTF-8"
+        val bom = if (text.startsWith(BOM)) BOM else ""
+        val rewrite = PackSeparator.addSeparator(text.removePrefix(BOM), { ThemePackLayouts.read(layouts, it) }, appText, app.layout, app.fragments)
+        if (rewrite is PackSeparator.Rewrite.Kept) return rewrite.why
+        val out = (bom + (rewrite as PackSeparator.Rewrite.Done).text).encodeToByteArray()
+        // the mark counted, as PackLayouts.readable counts it
+        if (out.size > ThemeAssetLimits.MAX_LAYOUT_BYTES) return "over the limit rewritten"
+        // not UUID's: SecureRandom made at a cold start for this alone
+        val temp = File(File(folder(themes), SAVING).apply { mkdirs() }, SEPARATING + System.nanoTime())
+        var done = false
+        try {
+            FileOutputStream(temp).use { it.write(out); it.fd.sync() }
+            beforeInPlace?.invoke()
+            need(temp.renameTo(file), "cannot put ${file.name} in place")
+            sync(layouts)
+            done = true
+        } finally {
+            // the original as it was; what a kill leaves here the next sweep clears
+            if (!done) temp.delete()
+        }
+        return null
+    }
+
+    private const val SEPARATED = "qwerty.xml"
+    private const val SEPARATING = "sep-"
 
     /** The pack [file] in [themes] gone: moved aside at once, then deleted. */
     internal fun delete(themes: File, file: String) {

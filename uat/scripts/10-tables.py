@@ -177,6 +177,9 @@ case("TBL-50", needs="jvm:TablesKeysUatTest.erbisSemicolonHasAKey")(lambda d: No
 
 
 case("TBL-51", needs="jvm:TablesKeysUatTest.wubisAllRootsAreItsNamesAtCompact、TableRootsTest.atCompactAllTheRootsAreShownAsTheirNames")(lambda d: None)
+case("TBL-54", needs="jvm:TableSlipUatTest.cangjiesEmptyCodeIsReadAsTheKeyTheTapLeansTo、TableSlipUatTest.cangjiesLoneCodeReadFromASlipWaitsForTheNextKey、TableSlipTest.aKeyThatMakesAnEmptyCodeIsReadAsTheOneItsTapLeansTo、TableSlipTest.theNearestKeyThatLeadsOnIsTaken、TableSlipTest.aCodeReadFromASlipWithOneCandidateIsCommittedByAKeyThatCannotGoOn、TableSlipTest.aCodeReadFromASlipWaitsOnlyWhereItWouldHaveCommittedItself、TableSlipTest.theKeyAfterAWaitingCodeIsReadAsAToppingKeyIs、TableSlipTest.aWaitingCodeIsCommittedByPunctuationASpaceOrASelectionKeyAsAnyCode、TableSlipTest.everyKeyReadKeepsItsMarkWhenAnotherGoes、TableSlipTest.aKeyPutInMidCodeIsNeverReadAndMovesTheMarks、TableSlipTest.noKeyIsReadAsASelectionKeyNorAnEndKey、TableSlipTest.erbiNeverTopsAndItsPinyinKeyIsNeverRead、EnginesTableSlipTest.aCodeReadFromASlipWaitsThenTheNextKeyThatCannotGoOnCommitsIt")(lambda d: None)
+case("TBL-55", needs="jvm:TableSlipUatTest.wubisToppingKeyIsReadOnlyAtTheEdge、TableSlipTest.aKeyAfterAWholeCodeIsReadOnlyAtTheEdge、TableSlipTest.aKeyIsNeverReadAsOneLeadingToTheTextItWouldCommit、TableSlipTest.aWaitingCodeIsCommittedOnceWhereTheTableTops、TableSlipTest.ziranmaTopsAsWubiDoes、TableSlipTest.wubiPinyinReadsNoKeyAsOneLeadingToPinyinAlone、TableSlipTest.aKeyAfterAWholeCodeIsReadOnlyForACodeTheWordModelWeighsAsMuch、TableSlipTest.aCodeWithAKeyReadAsItsNeighbourNeverCommitsItself、TableSlipTest.aCodeWithEntriesIsNeverChanged、TableSlipTest.aCodesFirstKeyIsNeverRead、TableSlipTest.aFullCodesNextKeyStartsTheNextCode、TableSlipTest.theWildcardIsNeverReadAsAnotherKey")(lambda d: None)
+case("TBL-56", needs="jvm:TableSlipUatTest.slipsOffLeaveTheEmptyCodeToBeDropped、EnginesTableSlipTest.aSlipIntoAnEmptyCodeIsReadAsTheKeyMeantUnlessSlipsAreOff")(lambda d: None)
 
 
 @case("TBL-52", base="B0-五笔", mutates=True)   # 你 blocked stays blocked
@@ -195,3 +198,4 @@ def tbl52(d):
     d.clear()
     check("你" not in again, f"屏蔽后 z n i 还有「你」：{again[:6]}")
     return f"屏蔽前 {c[:4]}，屏蔽后 {again[:4]}（设置里恢复由 JVM 管）"
+case("TBL-53", needs="jvm:EnginesWordCardTest、WordCardUatTest.theExamplesReadAsTheDesignHasThem")(lambda d: None)

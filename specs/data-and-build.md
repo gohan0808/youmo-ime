@@ -4,10 +4,11 @@
 
 | What | Command |
 |---|---|
-| The APK, debug | `./gradlew :app:assembleDebug` |
+| The APK, debug (arm64-v8a alone by default, `Versions.defaultABIs`, as released) | `./gradlew :app:assembleDebug` |
+| What CI checks, one list for CI and local runs (`verifyCore`: ime-core, keyboard-scene and the engine's JS for the theme maker, ime-dict-tool, ime-eval and its uat tests compiled, the build plugins' tests, every module's detekt; `verifyApp`: the app's JVM tests, lint, the device tests compiled; `verifyApp29`: the app's JVM tests at SDK 29; not the APK nor `:lib:ime-eval:uatTest`) | `./gradlew verify` |
 | The two resource packs (below) | `./gradlew :app:packs` → `app/build/packs/` |
-| One ABI only (much faster) | add `-PbuildABI=arm64-v8a` (phones) (also an arm64 emulator) or `-PbuildABI=x86_64` (an x86_64 emulator, redroid) |
-| Release as shipped: the APK, the packs signed with the release key, the two bundles and the pack listing | `./gradlew :app:releaseBundles -PbuildABI=arm64-v8a` (with `youmo.packKey` set; the first release with packs, 0.6.0, adds `-PfirstPackRelease`, below) |
+| Another ABI | add `-PbuildABI=x86_64` (an x86_64 emulator, redroid; CI's emulator and app jobs), or `armeabi-v7a` / `x86` (still in `supportedABIs`, not released) |
+| Release as shipped: the APK, the packs signed with the release key, the two bundles and the pack listing | `./gradlew :app:releaseBundles` (arm64-v8a by default; with `youmo.packKey` set; the first release with packs, 0.6.0, adds `-PfirstPackRelease`, below) |
 | A test build for profiling (simpleperf from the shell on an unrooted phone; never a release) | add `-PbuildProfileable=true` |
 | Engine data alone | `./gradlew :app:compileEngineData` (and `:app:compileEnglishData`, `:app:copySentenceModels`) |
 | Build-logic's own tests | `./gradlew -p build-logic test` |
@@ -49,7 +50,7 @@ BUILDING.md's 5 GB counts the Gradle daemon beside it) and three table compiles 
 | `AndroidLib…`, `AndroidBase…` | library and shared Android defaults |
 | `EngineDataPlugin` | downloads (SHA-256 pinned) and compiles the engine's data into generated assets, stored uncompressed (see below) |
 | `AssetPacksPlugin` | the resource packs (below): `packTextPack`, `packVoicePack` (`packs` both), `releaseBundles`; the trusted public keys into `BuildConfig.PACK_KEYS` |
-| `VoiceDataPlugin` | the voice pack's files: the recognizer's models, the polish tagger (from `youmo.voiceModelDir`, which the voice pack's build needs for now: the pinned release is the offline model; the APK and the text pack build without it), hotword list |
+| `VoiceDataPlugin` | the voice pack's files: the recognizer's models, the polish tagger (from `youmo.voiceModelDir`, which the voice pack's build needs for now: the pinned release is the offline model; the APK and the text pack build without it; its files held to `gradle/voice-pack-v<voice.version>.sha256`, so a directory of another pack version fails the build rather than ship under this one), hotword list |
 | `HandwritingDataPlugin` | `:lib:handwriting` (onnxruntime, `pickFirst` with sherpa-onnx's identical copy) and the handwriting models (the text pack's) |
 | `BuildMetadataPlugin` | build time and git hash into `BuildConfig` (the data release names are `EngineDataPlugin`'s fields) |
 | `DetektConventionPlugin` | detekt on every Kotlin module, one config, a baseline per module |
@@ -81,6 +82,7 @@ GitHub release of this repository, and pinned in `EngineDataPlugin` by tag and S
 | Emoji: the panel's list and groups (Unicode's `emoji-test.txt`, `EMOJI_TEST`), their Chinese keywords (CLDR's `annotations/zh.xml`, `CLDR_RELEASE`), both Unicode-3.0 | pinned files, SHA-256 checked | `ime-dict-tool emoji` with `lexicon/emoji.tsv` and the compiled `pinyin.data` (each word's pinyin for the panel's search, the commoner word first), in the build (`compileEmojiData`) | `engine/emoji.data`, read by the emoji panel and the engine (`EmojiData`) |
 | Characters by their parts (拆字): the open 汉语拆字字典's `chaizi-jt.txt` (kfcd/chaizi, CC BY 3.0, `CHAIZI_COMMIT`) | pinned file, SHA-256 checked | `ime-dict-tool chaizi` with the compiled `pinyin.data` (each part's likeliest reading, a radical read as the character it stands for, 艹 as 草; the commoner character first), in the build (`compileChaiziData`) | `engine/chaizi.data`, read by full pinyin after `u` (`Chaizi`) |
 | A character's radical, strokes and parts (its card): Unihan's kRSUnicode and kTotalStrokes in `Unihan.zip`, each radical's character in `CJKRadicals.txt` (both Unicode 17.0.0, Unicode-3.0), the parts of `chaizi-jt.txt` as above, rime-stroke's orders for a character Unihan counts no strokes of, `lexicon/stroke-order.tsv`, this project's (6,940 simplified characters' and parts' stroke orders as the mainland's 《现代汉语通用字笔顺规范》 gives them, each stroke by its shape in Unicode's CJK Strokes names (HZG 横折钩), its kind 1–5 following; first taken from cnchar's `stroke-order-jian.json`, theajack/cnchar, MIT, its notice in the file's head; cnchar's slips corrected in place, 皙 德 膝 …, and the shapes it writes alike told apart by the part a stroke is in: 横撇 / 横钩, 竖折 / 竖弯 …) | pinned files, SHA-256 checked; the stroke orders checked in | `ime-dict-tool charinfo` (the radical as the mainland writes it where the parts show it, 氵 扌 艹: `CharInfoBuilder.VARIANTS`; `--cover`: how many of the characters handwriting knows have each, and readings; under 94% with the mainland's order fails, about 95% have it; an order whose strokes are not as many as Unihan's kTotalStrokes, or whose kinds are none of rime-stroke's orders of the character, fails unless its line says why: 范 骨 and the 艹 of 茔 荥 荦 荧 莹 萦, which Unihan counts as Taiwan's; a note with nothing to say why of fails too; a character with the order counts its strokes as it does), in the build (`compileCharInfo`) | `engine/charinfo.data` (`DataFile.KIND_CHAR_INFO`, version 3, each stroke a `StrokeShape`), read for a character's card (`CharInfo`): its stroke order the mainland's, for a character it lacks the stroke table's (`engine/stroke.data`) order of Unihan's count, else its first; its strokes counted as the order shown is; none, the card has no radical |
+| 生僻字屏蔽's levels (`CharLevels`): Unihan's kTGH (《通用规范汉字表》's rank, 8,105 characters: 1–3500 一级, 3501–6500 二级, the rest 三级) in the same `Unihan.zip`, and the traditional characters of OpenCC's `TSCharacters.txt` (below); the rest by block: 其它表外字 the basic block and Extension A, 扩展区 Extension B and later | pinned files, as above: no new data | `compileCharLevels` (`ime-dict-tool charlevels`; a kTGH not the table's 8,105 ranked once each fails the build) | `engine/charlevels.data` (`DataFile` kind 6, ~27 KB) **in the APK, not the text pack**: the groups go with the app's version, and the user's choice (`pinyin/rarechars.txt`, groups and exceptions, not the table) follows a table changed. A change to the table is said in CHANGELOG |
 | Traditional-to-simplified character tables: OpenCC's `TSCharacters.txt`, `STCharacters.txt` (Apache-2.0), verbatim from tag [ver.1.2.0](https://github.com/BYVoid/OpenCC/tree/ver.1.2.0/data/dictionary) (SHA-256 `ad870b4f…`, `9cedfb8b…`), the version fcitx's chttrans has | checked in | copied | `app/src/main/assets/learn/`, read by `Simplifier` for the learning record (the text before the cursor read simplified) |
 
 Downloads go to `.gradle/engine-downloads` at the root (survives `clean`). The build also applies
@@ -155,6 +157,15 @@ language model's mix weight (`engine-data.sh`'s score counts its chat and dialog
 `Predictor.USER_WEIGHT`. No model or dictionary is trained on it. New third-party data gets an
 entry in `app/licenses/libraries/` and in README's data section.
 
+The one exception is the voice pack's polish tagger (voice pack v2, 0.6.0's, shipped again in 0.6.1
+after v3's retrained tagger was found worse; `dev/design/060-tagger-data-licenses.md`): fine-tuned from
+HFL's chinese-electra-180g-small-ex (Apache-2.0) on MagicData-RAMC's transcripts (CC BY-NC-ND 4.0),
+RealTalk-CN (CC BY-NC-SA 4.0), CS2W (CC BY-SA 4.0, its sentences RAMC's) and text made from FineWeb-2.
+So the voice pack is licensed apart from the app, for non-commercial use only (CC BY-NC-SA 4.0); the
+APK and the text pack follow the rule above. It is disclosed on the licences page
+(`VoiceFeature.credits`, `voice_tagger_credit`) and in README's data section. KeSpeech
+(non-commercial) and RAMC's test speakers only measure, and help choose checkpoints.
+
 ### `lexicon/`
 
 The curated decisions: `add.tsv` (new words with readings), `reject.tsv` (never again),
@@ -173,7 +184,7 @@ with the system's picker (several at once); the app keeps no network permission.
 | `text` (文字包) | `engine/pinyin.data`, `english.data`, `sentence-model*`, `stroke.data`, `table/`, `handwriting/` | the keyboard is `PackGateView`: 需要导入文字包, a tap opens the page, its 切换输入法 button the system's keyboard picker |
 | `voice` (语音包) | `voice/` (recognizer, VAD, hotwords, polish tagger) | the microphone says 语音输入需要导入语音包 and a tap opens the page; the space's hold does nothing (it is not voice without the pack) |
 
-What stays in the APK (assets 6.7 MB of a 21 MB release APK; 0.6.0's text pack is 311 MB, the voice pack 185 MB): what the
+What stays in the APK (assets 6.7 MB of a 21 MB release APK; 0.6.0's text pack is 311 MB, the voice pack 185 MB: the release assets, 311,318,870 and 184,647,313 bytes, in decimal MB as `docs/faq.md` says them): what the
 app reads with no pack or is small and belongs to no input method's data: `engine/emoji.data` (the emoji panel), `chaizi.data`,
 `charinfo.data` (a character's card), `opencc-s2tw.data` (traditional output), `learn/` (OpenCC's tables), the host's
 `pkgdata` (punctuation, quick phrases, `charselectdata` for Unicode input). Moving them would gain under 7 MB and make the
@@ -204,9 +215,11 @@ they stay: a pack carries no code.
   `current` pointer swapped atomically (rename; the pack's directory fsynced after each rename, so a power cut keeps them). A pack already there at that version (the same
   manifest) is not copied again if its files in use, read through then (the import's progress
   telling the read), still are it; else (one changed, gone, or not readable now) it is copied anew. An older version over a newer one is asked first (060-pending-decisions): `PackStore.import` reads the manifest's head and calls
-  `replaceNewer` before copying; yes imports it (a pack gone wrong taken back; it must still meet the app's `minVersion`), the result saying
+  `replaceNewer` before copying; yes imports it (a pack gone wrong taken back), the result saying
   已用 vX 替换了更新的 vN; no (or Back) imports nothing, `ImportResult.KeptNewer`, saying 保留了更新的 vN，没有导入 vX; the question
-  stays pending while the page is closed or turned. The debug `PackImportProvider` does not ask: it replaces. The generation replaced is deleted only once the host is up
+  stays pending while the page is closed or turned. One this app cannot use (`PackShelf.usable`: another format, or below
+  `minVersion`) is not asked about: refused as `Refusal.Incompatible` at once, as the import would after a yes (UAT 0.6.1).
+  The debug `PackImportProvider` does not ask: it replaces. The generation replaced is deleted only once the host is up
   on the new one (`HostDaemon.restartIfRunning` waits for it, and for a host still starting before
   restarting it: that one may have read the old files), then `PackShelf.sweep`; a host still starting
   after 10 s (before or after the restart) is not known to have left them: not deleted then, left
@@ -247,6 +260,28 @@ they stay: a pack carries no code.
   `content call import`, as `uat/tools/uat.py packs` and CI's emulator job do; a release UAT imports
   through the picker.
 
+## What an import takes
+
+Every import is held to limits, so a crafted or mistaken file cannot fill the disk, the memory, or make
+each later use slow. Where each number is and why:
+
+| Import | Bytes | Entries | Where | Why that number |
+|---|---|---|---|---|
+| Theme 4.0 pack (`.theme`) | 32 MB a file, 64 MB in all, `theme.xml` 1 MB, icons 64 KB, effects 128 KB, previews 512 KB, key images 2 MB | 300 entries, 16 layouts, 100 packs | `ThemeAssetLimits` | the app's own format: generous for real themes, small enough to unpack on a phone |
+| Theme 3.0 zip | as the pack's | overrides `Keys.MAX_OVERRIDES` | `ThemeAssetLimits` | the same unpacking path (`ThemeFilesManager.openTheme`) |
+| Another input method's skin | archive 64 MB, 32 MB a file, 128 MB in all, ratio 200 | 5000 entries | `SkinLimits` (keyboard-scene) | others' formats carry many small images; the converted pack then passes the pack's limits |
+| Custom layout (`.layout`, 外观 → 布局) | 64 KB, read in no further; strict UTF-8 | 100 layouts, a restore included (the phone's kept first); a restore's each held to the same, its file name its id, the non-strict check (reads, `min-app`, its base's must-haves), a family the list shows, no app id or key-name prefix | `CustomLayoutFiles` (ime-core `input/layout/`) | one XML file, read whole into `LayoutCheck` (no DOCTYPE: `LayoutReader`); the name on the phone comes only from the id (`[a-z0-9-]`), never the picker's, so no path from the file. The theme pack's per-layout and pack count limits |
+| Resource pack | each file the signed manifest's size; free space checked first | the manifest's files | `PackShelf` | signed: the manifest is the limit |
+| Whole backup zip | not past the free space, the zip's own copy counted | 100,000 entries (files and folders), by the central directory before anything is unpacked, and again entry by entry as they are | `UserDataManager.extractWithinRoom`, `MAX_BACKUP_ENTRIES` | the user's own file; a phone's backup is a few thousand files, and a zip of millions of empty folders fills no disk but takes minutes and inodes. The stream is copied first (a picker's stream cannot seek), only if its first four bytes are a zip's (`PK\3\4`, or an empty zip's `PK\5\6`), at most 2 GB (`MAX_BACKUP_BYTES`) and half the free space (what it unpacks to takes as much again); the count is read off the end record (`ZipEnd`, zip64's past 65,535 entries, never the central directory itself, which `ZipFile` loaded whole: a malicious one ran out of memory), and a file with no end record that holds together is no backup; the entry-by-entry count stays, as an end record may say fewer than the zip has. A copy left by a restore killed midway (`*.restore.zip`, an hour old) goes at the next |
+| Learning backup (`.fxlb`) | 64 MB | — | `LearningRestore.MAX_BACKUP` | |
+| Dictionary to the base lexicon | `.scel` 32 MB, `.dict` 64 MB, text 512 MB, refused as it is copied into the cache | 4 million words, 4096 a line | `PinyinDictManager.maxImported`, `DictionaryCompiler.MAX_WORDS` | the size of the largest real word lists; a `.scel` and a `.dict` are read whole into memory, text is streamed and capped for the cache alone |
+| Dictionary to the user's words | `.txt` 8 MB, `.scel` 32 MB | 100,000 words | `ImportFiles.kt`, `PinyinDictionaryFragment` | |
+| Quick phrases (`.mb`) | 8 MB | an import fills the list to 5000 (`QuickPhraseManager.MAX_ENTRIES`; adding by hand is not limited); a line 5000 characters, a key 30 | `readImported`, `QuickPhraseBook` | each use and each change rewrites the whole list |
+| Custom phrases | 8 MB | an import fills the list to 5000 (`PinyinCustomPhraseFragment.MAX_PHRASES`; adding by hand is not limited) | `readImported` | the list is written whole at each save, read at each start |
+| Common words | 8 MB | 2000 | `CommonWords.MAX_WORDS` | |
+
+What an import leaves out past a count limit is said in its toast (`import_over_limit`).
+
 ## Native code
 
 The app has no native code of its own; the fcitx host is Kotlin ([host.md](host.md)).
@@ -270,16 +305,19 @@ trap in [pitfalls.md](pitfalls.md#kotlin-ic-and-interface-delegation) before bui
   `Versions.baseVersionName` (`versionCodeOf`: 12 at 0.1.0, 1 more a patch, 100 a minor, 10,000 a
   major; minor and patch below 100). Raise `baseVersionName` for each release.
 - A release: bump versions (and a pack's `version` in `app/packs.properties` if its content
-  changed) → commit → `git tag -a vX.Y.Z` → `./gradlew :app:releaseBundles -PbuildABI=arm64-v8a`
+  changed) → commit → `git tag -a vX.Y.Z` → `./gradlew :app:releaseBundles` (arm64-v8a, the default)
   with the APK signed with the release key (kept outside the repo; `signKeyFile`/`signKeyAlias`/`signKeyPwd` in
   `~/.gradle/gradle.properties` or `SIGN_KEY_*` env; unsigned if absent) and the packs with the pack
   key (`youmo.packKey`, below) → install over the last
-  release and type on it, on Android 10 too (the AVD `youmo29`, testing.md: a misreading's hint, the 快速输入 page with an entry) → GitHub release with the APK, the packs (`release-packs.json` says
+  release and type on it, on Android 10 too (the AVD `youmo29`, testing.md: a misreading's hint, the 快速输入 page with an entry) → import the voice pack on a device and run the two voice device tests, `VoiceEngineTest` and `VoicePolisherTest` (`input.voice`, androidTest; also after the voice models change: no CI job has the pack) → GitHub release with the APK, the packs (`release-packs.json` says
   which changed: an unchanged one need not be uploaded again), the two bundles (文字版, 语音版) and `SHA256SUMS.txt`, notes in Chinese
   and English saying which packs are new → copy `app/build/release-bundles/release-packs.json` to
   `app/packs-released.json` and commit it: the next release compares with it. `releaseBundles`
   fails with no such listing (`app/packs-released.json`, or `-PpreviousPacks=<file>`), unless
   given `-PfirstPackRelease` (the first release with packs, 0.6.0), which fails if there is one.
+  It also writes nothing for an APK that is unsigned (`*-unsigned.apk`: no release key), profileable
+  (`-PbuildProfileable`), or not built at a release's or pre-release's tag (`0.6.0-5-gabc1234`, `-untagged`),
+  nor for a pack whose version goes back from the listing's (`AssetPacksPlugin.writeBundles`).
   A pack's content is its format and its files (`contentSha256`, the app's `PackManifest` and the
   plugin alike): either changed under the same `version` fails the task.
 - Test builds between releases go up as **draft** releases (the repository is public) and are
@@ -290,7 +328,7 @@ trap in [pitfalls.md](pitfalls.md#kotlin-ic-and-interface-delegation) before bui
 
 | Workflow | When | Runs |
 |---|---|---|
-| `unit_test.yml` | push, PR | three jobs side by side (setup in `.github/actions/setup-build`): `core` (`:lib:ime-core:check`, `:lib:keyboard-scene:check`, dict-tool and eval tests, eval's UAT tests compiled, build-logic tests, the uat/parity/gate tool tests, the theme maker's node tests), `app` (`:app:testDebugUnitTest`) and `app_29` (the same at SDK 29) (each `-PskipExhaustive`, two test JVMs at once), sherpa-onnx's host tests, Python tool tests (`lexicon/tools`, `lib/ime-eval/tools`), detekt, Kover reports, test failures annotated |
+| `unit_test.yml` | push, PR | three jobs side by side (setup in `.github/actions/setup-build`): `core` (`:lib:ime-core:check`, `:lib:keyboard-scene:check`, dict-tool and eval tests, eval's UAT tests compiled, build-logic tests, the uat/gates tool tests, the theme maker's node tests), `app` (`:app:testDebugUnitTest`) and `app_29` (the same at SDK 29) (each `-PskipExhaustive`, two test JVMs at once), sherpa-onnx's host tests, Python tool tests (`lexicon/tools`, `lib/ime-eval/tools`), detekt, Kover reports, test failures annotated |
 | `key_marks.yml` | push, PR changing the keys' marks or drawing (its `paths`, lib/keyboard-scene's commonMain among them: yield rules, scene layout); Tue 03:37; on demand | `KeyMarksEverywhereUatTest` alone at SDK 35 and 29, which the app jobs above leave out (half their time) |
 | `pull_request.yml` | PR | `assembleRelease` and `packTextPack` on Ubuntu (the APK unsigned, the packs with the test key) |
 | `engine_downloads.yml` | push to main changing `EngineDataPlugin.kt`, `HandwritingDataPlugin.kt`, `lib/handwriting/build.gradle.kts` or the workflow; Mon/Thu 04:41; on demand | the engine data's download tasks alone (the handwriting models and onnxruntime too, a cache of their own), saving the `engine-downloads-*` cache a new pull request's build reads |

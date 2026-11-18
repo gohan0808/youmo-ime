@@ -13,11 +13,13 @@ import org.fcitx.fcitx5.android.scene.engine.PopupBuilder
 import org.fcitx.fcitx5.android.scene.engine.Popups
 import org.fcitx.fcitx5.android.scene.engine.SceneBuilder
 import org.fcitx.fcitx5.android.scene.engine.TextMeasurer
+import org.fcitx.fcitx5.android.scene.engine.clusterEnds
 import org.fcitx.fcitx5.android.scene.theme.Argb
 import org.fcitx.fcitx5.android.scene.theme.Cascade
 import org.fcitx.fcitx5.android.scene.theme.ThemeReader
 import kotlin.math.ceil
 import kotlin.math.floor
+import kotlin.math.roundToInt
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -242,9 +244,71 @@ class PopupsTest {
         // no room known: as wide as they want
         assertEquals(keys.width, b.popupKeys(labels, 3, null).ok().width)
         // too wide for the room: narrower, the text smaller alike
-        val narrow = b.popupKeys(labels, 3, 3 * 50.0).ok()
-        assertEquals(50.0, narrow.width)
-        assertEquals(size * 50 / keys.width, narrow.size, 1e-9)
+        val narrow = b.popupKeys(labels, 3, 3 * 100.0).ok()
+        assertEquals(100.0, narrow.width)
+        assertEquals(size * 100 / keys.width, narrow.size, 1e-9)
+        // never below the least size (what is wider still is cut as drawn)
+        assertEquals(px(Popups.MIN_WORDS_DP), b.popupKeys(labels, 3, 3 * 50.0).ok().size)
+    }
+
+    // 061-text-variables §2.3: a value filled in, 64 characters at most, shrunk to the least size, then cut, said whole
+    @Test
+    fun aLabelTooWideIsShrunkThenCutAndSaidWhole() {
+        val b = builder()
+        val long = "2026年11月14日 星期六 下午 03:05 " + "x".repeat(30)
+        val keys = b.popupKeys(listOf("a", long), 2, 2 * 60.0).ok()
+        assertEquals(60.0, keys.width)
+        assertEquals(px(Popups.MIN_WORDS_DP), keys.size)
+        val s = b.popup(listOf("a", long), listOf(listOf(0, 1)), keys, selected = -1).ok()
+        val cut = s.keys.single { it.label == long }
+        assertEquals(long, cut.a11y)
+        val text = cut.ops(false).filterIsInstance<Op.Text>().single()
+        assertTrue(text.text.endsWith("…"), text.text)
+        assertTrue(long.startsWith(text.text.removeSuffix("…")))
+        assertTrue(text.text.length < long.length)
+        // one that fits: whole
+        assertEquals("a", s.keys.single { it.label == "a" }.ops(false).filterIsInstance<Op.Text>().single().text)
+    }
+
+    // a long label is cut by halving, not a start at a time from the longest (R26 F8295): a label of 64 x's measured a
+    // handful of times, not some fifty; the start kept still the longest that fits
+    @Test
+    fun aLongLabelIsCutInAFewMeasures() {
+        val long = "x".repeat(64)
+        val measured = ArrayList<String>()
+        val counting = TextMeasurer { text, font, weight, size -> FakeMeasurer.measure(text, font, weight, size).also { if ('x' in text) measured += text } }
+        val b = builder(measurer = counting)
+        // a key wide enough for a few x's and the 「…」 (60 is not one x's at the least size)
+        val keys = b.popupKeys(listOf(long), 1, 300.0).ok()
+        measured.clear()
+        val text = b.popup(listOf(long), listOf(listOf(0)), keys, selected = -1).ok().keys.single().ops(false).filterIsInstance<Op.Text>().single().text
+        val kept = text.removeSuffix("…")
+        assertTrue(text.endsWith("…") && kept.isNotEmpty() && long.startsWith(kept), text)
+        assertTrue(measured.size <= 10, "${measured.size} measures: $measured")
+        // one x more was measured, and is not what is drawn: it did not fit
+        assertTrue("x".repeat(kept.length + 1) + "…" in measured, "$measured")
+    }
+
+    // cut between characters as seen, never inside a flag, a family, an accent or a keycap
+    @Test
+    fun aLabelIsCutBetweenCharactersAsSeen() {
+        val family = "\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67"
+        val flag = "\uD83C\uDDE8\uD83C\uDDF3"
+        assertEquals(listOf(family.length, 2 * family.length), clusterEnds(family + family))
+        assertEquals(listOf(4, 8), clusterEnds(flag + flag))
+        assertEquals(listOf(2, 3), clusterEnds("e\u0301x"))
+        assertEquals(listOf(3, 5), clusterEnds("1\uFE0F\u20E3\uD83D\uDC4D"))
+        assertEquals(listOf(4, 5), clusterEnds("\uD83D\uDC4D\uD83C\uDFFDa"))
+        assertEquals(listOf(2, 3), clusterEnds("\r\na"))
+        assertEquals(emptyList(), clusterEnds(""))
+        val b = builder()
+        val long = family.repeat(40)
+        val keys = b.popupKeys(listOf("a", long), 2, 2 * 1000.0).ok()
+        val text = b.popup(listOf("a", long), listOf(listOf(0, 1)), keys, selected = -1).ok()
+            .keys.single { it.label == long }.ops(false).filterIsInstance<Op.Text>().single().text
+        val kept = text.removeSuffix("…")
+        assertTrue(kept.isNotEmpty() && kept.length < long.length, text)
+        assertEquals(0, kept.length % family.length, text)
     }
 
     @Test
@@ -274,7 +338,8 @@ class PopupsTest {
     }
 
     @Test
-    fun aMenusCellInFocusIsLargerAndTintedOneDisabledFaded() {
+    @Uat("KB-105")
+    fun aMenusCellInFocusIsLargerAndReturnsColourOneDisabledFaded() {
         val cells = listOf(MenuCell("全选", "select-all"), MenuCell("剪切", "cut"), MenuCell("复制", "copy"))
         val s = builder().menu(cells, listOf(0, 1, 2), selected = 1, disabled = setOf(2)).ok()
         val cell = px(Popups.MENU_CELL_DP)
@@ -287,18 +352,38 @@ class PopupsTest {
         // round: the theme's 50%
         val face = assertIs<Shape.Rect>(all.shape)
         assertEquals(face.box.width / 2, face.radii[0], 1e-9)
-        assertEquals(listOf(color("accentKey"), color("keyPressHighlight")), cut.ops(false).filterIsInstance<Op.Fill>().map { it.color })
-        assertEquals(1, all.ops(false).filterIsInstance<Op.Fill>().size)
+        // the others the long press's colours, the one in focus Return's (0.6.1)
+        assertEquals(listOf(color("accentKey")), cut.ops(false).filterIsInstance<Op.Fill>().map { it.color })
+        assertEquals(color("accentKeyText"), cut.ops(false).filterIsInstance<Op.Icon>().single().tint)
+        assertEquals(listOf(color("popupBackground")), all.ops(false).filterIsInstance<Op.Fill>().map { it.color })
         // an icon at its own size in the middle, the theme's colour
         val icon = all.ops(false).filterIsInstance<Op.Icon>().single()
         assertEquals("select-all", icon.name)
         assertEquals(Box(cell / 2 - 12 * d, cell / 2 - 12 * d, cell / 2 + 12 * d, cell / 2 + 12 * d), icon.box)
-        assertEquals(color("accentKeyText"), icon.tint)
+        assertEquals(color("popupText"), icon.tint)
         // disabled: 30% of itself
         assertEquals(setOf(KeyState.Disabled), copy.states)
         val faded = copy.ops(false).filterIsInstance<Op.Fill>().single().color
-        assertEquals(Argb(color("accentKey").value and 0xFFFFFF or (77 shl 24)), faded)
+        assertEquals(Argb(color("popupBackground").value and 0xFFFFFF or (77 shl 24)), faded)
         assertEquals("全选", all.a11y)
+    }
+
+    // the cell in focus disabled (复制 in a password field, the finger on it): still Return's colour and larger, faded,
+    // so the pick shows though it does nothing; a disabled one beside it the long press's colour faded
+    @Test
+    @Uat("KB-105")
+    fun aMenusCellInFocusThatIsDisabledKeepsReturnsColourFaded() {
+        val cells = listOf(MenuCell("全选", "select-all"), MenuCell("剪切", "cut"), MenuCell("复制", "copy"))
+        val s = builder().menu(cells, listOf(0, 1, 2), selected = 2, disabled = setOf(1, 2)).ok()
+        val (_, cut, copy) = s.keys
+        fun faded(c: Argb) = Argb((c.value and 0xFFFFFF) or ((c.alpha * Popups.DISABLED_ALPHA).roundToInt() shl 24))
+        assertEquals(setOf(KeyState.Selected, KeyState.Disabled), copy.states)
+        assertEquals(px(Popups.MENU_SELECTED_DP), copy.shape.bounds.width, 1.0)
+        assertEquals(listOf(faded(color("accentKey"))), copy.ops(false).filterIsInstance<Op.Fill>().map { it.color })
+        assertEquals(faded(color("accentKeyText")), copy.ops(false).filterIsInstance<Op.Icon>().single().tint)
+        assertEquals(px(Popups.MENU_FACE_DP), cut.shape.bounds.width, 1.0)
+        assertEquals(listOf(faded(color("popupBackground"))), cut.ops(false).filterIsInstance<Op.Fill>().map { it.color })
+        assertEquals(faded(color("popupText")), cut.ops(false).filterIsInstance<Op.Icon>().single().tint)
     }
 
     // a faded cell's picture and image as they are, the colour over the one and under the other faded

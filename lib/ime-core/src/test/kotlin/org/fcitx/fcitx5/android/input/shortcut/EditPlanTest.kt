@@ -101,7 +101,7 @@ class EditPlanTest {
     }
 
     private fun FakeEditor.restore(kept: ClearedText, typing: Boolean = false): Boolean =
-        kept.take(f, field(), typing)?.also { run(it.restore) } != null
+        kept.take(f, field(), typing)?.also { run(it.restoreAt(minOf(selectionStart, selectionEnd))) } != null
 
     @Test
     fun aClearTakesTheSelectionThenWhatIsBeforeTheCursorThenWhatIsAfter() {
@@ -158,6 +158,111 @@ class EditPlanTest {
         assertTrue(editor.restore(kept))
         assertEquals("hello", editor.text)
         assertEquals(0, editor.selectionStart)
+    }
+
+    // import-edit-5: an app that reads nothing before the cursor, the cursor reported past the start
+    @Uat("KB-62")
+    @Test
+    fun nothingReadBeforeAReportedCursorPutsWhatIsAfterBackAtThatCursor() {
+        val kept = ClearedText()
+        val editor = FakeEditor("abc def", cursor = 3)
+        val clearing = EditPlan.clear(EditPlan.Field("", "", " def"), 3, 3, 1000, password = false)
+        assertEquals(listOf(EditPlan.Step.Delete(0, 4)), clearing.steps)
+        editor.run(clearing.steps)
+        assertEquals("abc", editor.text)
+        assertFalse("what is before the cursor never read", clearing.cleared!!.whole)
+        kept.remember(f, clearing.cleared)
+        assertTrue(editor.restore(kept))
+        assertEquals("abc def", editor.text)
+        assertEquals(3, editor.selectionStart)
+        assertEquals(3, editor.selectionEnd)
+    }
+
+    // KB-88 review: nothing before the cursor given and the read after it cut short at the limit. A select-all
+    // would take what is before the cursor too, never read and not kept; only what was read after it goes.
+    // The same where "" was read before a cursor reported past the start
+    @Uat("KB-88")
+    @Test
+    fun aLongFieldAfterACursorWithTextBeforeItNotReadKeepsThatText() = assertRows(
+        listOf(
+            Triple("before not given, the cursor reported past the start", false, 3),
+            Triple("before not given, the cursor reported at the start", false, 0),
+            Triple("before read empty, the cursor reported past the start", true, 3),
+        ),
+        { it.first },
+    ) { (_, given, reported) ->
+        val editor = FakeEditor("abc" + "x".repeat(12), cursor = 3)
+        val clearing = EditPlan.clear(EditPlan.Field("", "", editor.textAfterCursor(10).toString()), reported, reported, 10, password = false, beforeGiven = given)
+        assertNull("cut short: not kept", clearing.cleared)
+        editor.run(clearing.steps)
+        assertEquals("abcxx", editor.text)
+    }
+
+    // a field read whole from its start is still taken whole
+    @Test
+    fun aLongFieldAfterACursorReadAtTheStartIsTakenWhole() {
+        val editor = FakeEditor("x".repeat(12), cursor = 0)
+        val clearing = EditPlan.clear(EditPlan.Field("", "", "x".repeat(10)), 0, 0, 10, password = false)
+        assertNull(clearing.cleared)
+        editor.run(clearing.steps)
+        assertEquals("", editor.text)
+    }
+
+    // KB-88 review: a clear in a field one side of which the app does not give cannot tell text typed on that
+    // side since, so it is not put back once anything was typed (as a short read's is not), whatever the cursor
+    // reported: at the start (the after side's clear), with a selection, or the other side's
+    @Uat("KB-88")
+    @Test
+    fun aClearWithASideNotGivenIsNotPutBackOnceSomethingIsTyped() = assertRows(
+        listOf(
+            "what is after a cursor reported at the start" to { EditPlan.clear(EditPlan.Field("", "", "def"), 0, 0, 1000, password = false, beforeGiven = false) },
+            "a selection" to { EditPlan.clear(EditPlan.Field("", "bc", "def"), 1, 3, 1000, password = false, beforeGiven = false) },
+            "what is before the cursor, after it not given" to { EditPlan.clear(EditPlan.Field("abc", "", ""), 3, 3, 1000, password = false, afterGiven = false) },
+        ),
+        { it.first },
+    ) { (_, clear) ->
+        val cleared = clear().cleared!!
+        assertFalse(cleared.whole)
+        val kept = ClearedText()
+        kept.remember(f, cleared)
+        kept.edited()
+        assertNull(kept.take(f, cleared.left, typing = false))
+    }
+
+    // R25 F7834: the cursor just put at the field's start, the report still where it was as 清除 is pressed.
+    // The field reads as the app above's does (nothing before a reported cursor past the start), so the
+    // clear cannot tell them apart; the report as the clear is taken back does: settled by then, at the
+    // start here and where it was there
+    @Test
+    fun whatIsAfterACursorWhoseReportLaggedIsPutBackWithTheCursorWhereTheEditorHasIt() = assertRows(
+        listOf(
+            Triple("the report lagged: the editor's cursor at the start", FakeEditor("abc def", cursor = 0), 0),
+            Triple("the app gives nothing before its cursor", FakeEditor("abc def", cursor = 3), 3),
+        ),
+        { it.first },
+    ) { (_, editor, cursor) ->
+        val after = editor.textAfterCursor(1000).toString()
+        val clearing = EditPlan.clear(EditPlan.Field("", "", after), 3, 3, 1000, password = false)
+        editor.run(clearing.steps)
+        assertEquals(cursor, editor.selectionStart)
+        // the editor's report, settled, as the app has it when the clear is taken back
+        editor.run(clearing.cleared!!.restoreAt(editor.selectionStart))
+        assertEquals("abc def", editor.text)
+        assertEquals(cursor, editor.selectionStart)
+        assertEquals(cursor, editor.selectionEnd)
+    }
+
+    // only a cursor left before the text put back goes by the later report: a selection's ends, and a
+    // report not known, stay as planned
+    @Test
+    fun theReportAsAClearIsTakenBackMovesOnlyACursorLeftBeforeTheText() {
+        val after = EditPlan.clear(EditPlan.Field("", "", "def"), 3, 3, 1000, password = false).cleared!!
+        assertEquals(after.restore, after.restoreAt(-1))
+        assertEquals(listOf(EditPlan.Step.Replace("def"), EditPlan.Step.Select(0, 0)), after.restoreAt(0))
+        val selection = EditPlan.clear(EditPlan.Field("ab", "cd", "ef"), 2, 4, 1000, password = false).cleared!!
+        assertEquals(selection.restore, selection.restoreAt(0))
+        val before = EditPlan.clear(EditPlan.Field("ab", "", "ef"), 2, 2, 1000, password = false).cleared!!
+        assertEquals(before.restore, before.restoreAt(0))
     }
 
     @Test

@@ -10,6 +10,7 @@ import org.fcitx.fcitx5.android.input.KeyboardHarness
 import org.fcitx.fcitx5.android.utils.appContext
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -23,6 +24,11 @@ import org.robolectric.shadows.ShadowToast
 class EngineNoticesTest {
 
     private val said = mutableListOf<String>()
+
+    // what another class left in the object of the same process (KotlinHost tells nine keys merged till seen): not
+    // this case's, said with its own failures
+    @Before
+    fun nothingTold() = EngineNotices.forgetToldOnce()
 
     @After
     fun noKeyboard() {
@@ -105,6 +111,44 @@ class EngineNoticesTest {
         EngineNotices.keyboardShown()
         idle()
         assertEquals(listOf("$ok\n$cancel steady=true"), said)
+    }
+
+    // news of several lines (the theme packs' boards chosen, L7) asks its own time: said with it, on the keyboard at
+    // once and when it waits for one; joined with others, the longest asked; the rest their kind's (null)
+    @Test
+    fun newsUntilSeenSaysTheTimeItAsks() {
+        val ok = appContext.getString(android.R.string.ok)
+        val cancel = appContext.getString(android.R.string.cancel)
+        var shown = true
+        EngineNotices.sayer = object : EngineNotices.Sayer {
+            override fun say(message: String, steady: Boolean) = say(message, steady, null)
+            override fun say(message: String, steady: Boolean, ms: Long?): Boolean {
+                said += "$message ms=$ms"
+                return shown
+            }
+        }
+        EngineNotices.toldUntilSeen(android.R.string.ok, ms = 4000L)
+        EngineNotices.tip("全角")
+        idle()
+        assertEquals(listOf("$ok ms=4000", "全角 ms=null"), said)
+        said.clear()
+        shown = false
+        EngineNotices.toldUntilSeen(android.R.string.ok, ms = 4000L)
+        EngineNotices.toldUntilSeen(android.R.string.cancel)
+        idle()
+        shown = true
+        EngineNotices.keyboardShown()
+        idle()
+        assertEquals(listOf("$ok ms=4000", "$cancel ms=null", "$ok\n$cancel ms=4000"), said)
+    }
+
+    // a sayer that times none (a lambda, the tests') says one asking a time as any
+    @Test
+    fun aSayerThatTimesNoneSaysItAsAny() {
+        EngineNotices.sayer = EngineNotices.Sayer { message, steady -> said += "$message steady=$steady"; true }
+        EngineNotices.toldUntilSeen(android.R.string.ok, ms = 4000L)
+        idle()
+        assertEquals(listOf("${appContext.getString(android.R.string.ok)} steady=false"), said)
     }
 
     // F3521: no keyboard running, said all the same

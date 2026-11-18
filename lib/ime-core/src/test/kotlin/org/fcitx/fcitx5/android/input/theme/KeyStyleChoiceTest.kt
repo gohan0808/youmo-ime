@@ -11,6 +11,7 @@ import org.fcitx.fcitx5.android.scene.look.Gap
 import org.fcitx.fcitx5.android.scene.look.LookDefaults
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class KeyStyleChoiceTest {
@@ -68,7 +69,7 @@ class KeyStyleChoiceTest {
     fun theLevelsAreInTheThemesRanges() {
         // made into a theme's keys: out of range would throw
         val hs = listOf(KeyStyleChoice.H_COMPACT, KeyStyleChoice.H_STANDARD, KeyStyleChoice.H_LOOSE)
-        val vs = listOf(KeyStyleChoice.V_COMPACT, KeyStyleChoice.V_STANDARD, KeyStyleChoice.V_LOOSE)
+        val vs = listOf(KeyStyleChoice.V_VERY_COMPACT, KeyStyleChoice.V_COMPACT, KeyStyleChoice.V_STANDARD, KeyStyleChoice.V_LOOSE)
         for (h in hs) for (v in vs) {
             listOf(KeyStyleChoice.RADIUS_SQUARE, KeyStyleChoice.RADIUS_ROUNDED, KeyStyleChoice.RADIUS_ROUND).forEach { r ->
                 KeyStyleChoice(true, h, v, r).applyTo(look).let {
@@ -77,6 +78,21 @@ class KeyStyleChoiceTest {
                 }
             }
         }
+    }
+
+    // 纵向 很紧凑: 横向 紧凑's 2 dp, upright and on its side, so the gaps are alike both ways; at the keyboard
+    // height 紧凑 shrunk as any level is, to 1 dp (40% of 2, a gap kept); over a pack the same level
+    @Test
+    fun upAndDownVeryCompactIsAsTightAsAcrossCompact() {
+        val v = KeyStyleChoice.V_VERY_COMPACT
+        // its documented 2 dp both ways, tighter than 紧凑 (R26 F8396: was H_COMPACT == v, the two axes' constants
+        // pinned to each other rather than to what they are)
+        assertEquals(KeyStyleChoice.Spacing(2, 2), v)
+        assertTrue(v.portrait < KeyStyleChoice.V_COMPACT.portrait && v.landscape < KeyStyleChoice.V_COMPACT.landscape)
+        val gap = KeyStyleChoice(null, KeyStyleChoice.H_COMPACT, v, null).applyTo(look).keys.gap
+        assertEquals(Gap(2, 2, 2, 2), gap)
+        assertEquals(1 to 1, gap.vCompact to gap.vLandCompact)
+        assertEquals(KeyStyleOver(upDown = KeyStyleOver.Level(2, 2)), KeyStyleChoice(null, null, v, null).overPack)
     }
 
     // over a 4.0 pack: what is set, each key after the pack's cascade (Env.keyStyle); none when all follow it

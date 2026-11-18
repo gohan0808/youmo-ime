@@ -31,6 +31,7 @@ import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneBoard
 import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneEnvs
 import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneIcons
 import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneLayout
+import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneLayouts
 import org.fcitx.fcitx5.android.input.keys.KeyResolver
 import org.fcitx.fcitx5.android.input.keys.KeyState as KeysState
 import org.fcitx.fcitx5.android.input.picker.PickerWindow
@@ -53,7 +54,9 @@ import org.fcitx.fcitx5.android.scene.look.ThemeLook
 class TextKeyboard(
     context: Context,
     theme: Theme,
-) : BaseKeyboard(context, theme, Layout, KeyNames.QWERTY), AutoCapsKeys {
+    /** A layout of the user's drawn in place of the app's ([customLayout]: `id@stamp`); null for the app's. */
+    private val custom: String? = null,
+) : BaseKeyboard(context, theme, Layout, KeyNames.QWERTY), AutoCapsKeys, TypingKeys {
 
     // the halves (the scene splits the rows, SplitKeyboard): 双拼's ing is L's long press there (LS-29),
     // a table's code key has a key of its own
@@ -67,7 +70,15 @@ class TextKeyboard(
         // the layout its keys are drawn from (lib/keyboard-scene's qwerty.xml)
         private const val LAYOUT = "qwerty"
 
-        /** Whether the letters are split here: as the setting is, the screen as wide as it is now; floating, never. */
+        // qwerty.xml's 分词 in Shift's place while pinyin is typed
+        private const val SEPARATOR_KEY = "apostrophe"
+
+        // the letter the key of [node] types: its send=, one of a–z as the layouts write a letter's (lower case); null for any other key.
+        // Not `code:U+0071` (R25r4 F7998): that is a code typed as it is (SceneKeyDef.action, a SymAction), not a letter Shift
+        // cases (onAction's HostKeyAction), so no letter key to a glide, a stroke, writing on the keys or the bubble either
+        private fun letterSent(node: KeyNode): Char? = node.actions["send"]?.singleOrNull()?.takeIf { it in 'a'..'z' }
+
+        /** Whether the letters are split here: the 键盘样式 of the shape the screen is now ([KeyboardStyles]). */
         fun splits(context: Context): Boolean = KeyboardArea.splits(KeyboardArea.screen(context))
 
         /** The keyboard's width, dp: the screen's less its side padding (InputView's), or floating its own. */
@@ -166,6 +177,7 @@ class TextKeyboard(
     private var imeName = ""
 
     override val keysIm: String get() = imeName
+    override val strokesDrawn get() = true
 
     // a table's roots in a letter's long press where the keys show them all (rootsOf), its letter in its corner where they show any
     override fun keyState(): KeysState = super.keyState().copy(
@@ -199,6 +211,12 @@ class TextKeyboard(
 
     private var scope: CoroutineScope? = null
 
+    // pinyin or 双拼 typed (ShiftSeparator, from EngineState.syllables as the nine keys' 1): Shift is 分词 meanwhile
+    private var separating = false
+
+    // what 分词 sends, told from any other `'` by identity ([pressed])
+    private val separatorTyped = KeyAction.HostKeyAction(ShiftSeparator.TYPED)
+
     // what the keys show now, as the scene engine's environment: the screen's and the settings' as every
     // keyboard's (SceneEnvs), this one's state, Shift, texts and marks its own
     override fun sceneEnv(look: ThemeLook, layout: SceneLayout, width: Int, height: Int): Env {
@@ -213,6 +231,7 @@ class TextKeyboard(
             langKey = showLangSwitchKey.getValue(),
             holdVoice = holdsToTalk,
             roots = table?.labelled == true,
+            separating = separating,
         )
         val texts = Texts(
             imeName = shownImeName.orEmpty(),
@@ -242,10 +261,6 @@ class TextKeyboard(
         )
     }
 
-    /** The scenes the engine made for this keyboard: a test's count of what was not kept. */
-    @VisibleForTesting
-    val scenesMade: Int get() = sceneBoard?.scenesMade ?: 0
-
     /** The scenes kept let go, the next asked made anew as things are: a measure of what making one costs (KeyboardPerfBaselineTest). */
     @VisibleForTesting
     fun forgetScene() {
@@ -266,6 +281,7 @@ class TextKeyboard(
         super.onAttachedToWindow()
         scope = CoroutineScope(Dispatchers.Main.immediate + Job()).also { s ->
             s.launch { EngineState.tableKeyboard.collect(::showTable) }
+            s.launch { EngineState.syllables.collect { showSeparator(ShiftSeparator.on(imeName, it.im, it.composing)) } }
         }
     }
 
@@ -325,11 +341,28 @@ class TextKeyboard(
     // glide typing (滑行输入) where the input method reads one; a stroke (笔画筛选) in pinyin's and 双拼's
     // the letters where the scene places them: each letter node of the scene by
     // its (id, copy), a split row's second G its copy 1
-    private fun sceneLetters(): List<Pair<Char, KeyPlace>> = canvas?.shownKeys.orEmpty()
-        .filter { it.id.length == 1 && it.id[0] in 'a'..'z' }
-        .map { it.id[0] to scenePlace(it.id, it.copy == 1) }
+    // R25r3 F7963: a letter's key is the one that sends it (send="q"), whatever its id: a theme pack's layout has a key
+    // of each id a–z (LayoutReader) but need not have it send that letter (PackLayouts.judge asks for none), and by
+    // the id a glide, a stroke and writing on the keys read another letter than the key types. Two keys sending one
+    // letter: the first in the layout's order is the letter's (both its copies, split), the other none's
+    private fun sceneLetters(): List<Pair<Char, ScenePlace>> {
+        val keyOf = HashMap<Char, String>()
+        return canvas?.shownKeys.orEmpty().mapNotNull { node ->
+            val letter = letterSent(node) ?: return@mapNotNull null
+            if (keyOf.getOrPut(letter) { node.id } != node.id) null else letter to scenePlace(node.id, node.copy == 1)
+        }
+    }
 
-    override val glide = glideInput(letters = { sceneLetters() }, enabled = { glides }, filters = { InputMethodCatalog.filtersByStrokes(imeName) }, writes = { InputMethodCatalog.writesOnKeys(imeName) }) { path, layout ->
+    // every key typing a letter, both copies of a split row's (061-neighbour-correction), and 微软 双拼's `;`, a key of its scheme
+    override fun typingKeys(): List<Pair<Char, KeyRef>> {
+        val semicolon = semicolonKey(imeName, EngineState.shuangpinScheme)
+        return canvas?.shownKeys.orEmpty().mapNotNull { node ->
+            val typed = letterSent(node) ?: node.actions["send"]?.singleOrNull()?.takeIf { semicolon && it == ';' }
+            typed?.let { it to KeyRef(node.id, node.copy == 1) }
+        }
+    }
+
+    override val glide = glideInput(letters = { sceneLetters() }, enabled = { glides }) { path, layout ->
         onAction(KeyAction.GlideAction(Glide(path, layout, shift = capsState == CapsState.Once, capsLock = capsState == CapsState.Lock)))
         // as a letter typed: Shift-once used up in any input method, as a tap uses it up (only English reads it)
         if (capsState == CapsState.Once) switchCapsState()
@@ -355,9 +388,41 @@ class TextKeyboard(
         canvas?.invalidateScene()
     }
 
+    // Shift's place 分词 or Shift again (its state as left): a scene only when that flips, kept ones reused (SceneBoard)
+    private fun showSeparator(on: Boolean) {
+        if (on == separating) return
+        separating = on
+        canvas?.invalidateScene()
+    }
+
     private fun transformPunctuation(p: String) = keysPunctuation.getOrDefault(p, p)
 
+    /**
+     * A tap's action: 分词's ([separatorTyped], whenever it lands), and Shift's tapped as typing began (down while
+     * Shift was drawn, up once 分词 is: the key a finger is on stays the one it went down on, SceneTouch.Pointer) the
+     * same. Only where the scene shows 分词 and no longer the key pressed: a theme's or user's qwerty with none keeps its
+     * Shift Shift, and one that keeps its Shift beside an `apostrophe` key too (R26 F8178).
+     */
+    override fun pressed(key: KeyRef, clickAt: Float, clickDown: Float, action: KeyAction): KeyAction = when {
+        // 分词's alone: a theme's plain `'` key types as any other key (Shift once used up on it, as in 0.6.0)
+        key.id == SEPARATOR_KEY && action is KeyAction.HostKeyAction && action.act == ShiftSeparator.TYPED -> separatorTyped
+        action is KeyAction.CapsAction && separating && separatorTookShift(key) -> separatorTyped
+        else -> action
+    }
+
+    // 分词 drawn, and [key] (a Shift pressed as it was drawn) no longer: 分词 is in its place
+    private fun separatorTookShift(key: KeyRef): Boolean {
+        val shown = canvas?.shownKeys ?: return false
+        return shown.any { it.id == SEPARATOR_KEY } && shown.none { it.id == key.id }
+    }
+
     override fun onAction(action: KeyAction, source: KeyActionListener.Source) {
+        // the separator as the 14 keys send it, Shift's state neither used up nor changed (nor Shift held with it),
+        // a press that lands once typing has ended too
+        if (action === separatorTyped) {
+            super.onAction(action, source)
+            return
+        }
         var transformed = action
         when (action) {
             is KeyAction.HostKeyAction -> when (source) {
@@ -411,6 +476,8 @@ class TextKeyboard(
     override fun onInputMethodUpdate(ime: InputMethodEntry) {
         showInputMethodName(ime)
         imeName = ime.uniqueName
+        // what the engine said last, if of this one (another's typing is none of this one's)
+        EngineState.syllables.value.let { separating = ShiftSeparator.on(imeName, it.im, it.composing) }
         canvas?.invalidateScene()
         // what the engine said last, if of this one: a table's state comes with its first answer
         showTable(EngineState.tableKeyboard.value)
@@ -428,7 +495,7 @@ class TextKeyboard(
     override val sceneTable: SceneKeyDef.Table get() = LetterBubbles
 
     private object LetterBubbles : SceneKeyDef.Table {
-        override fun bubble(node: KeyNode) = node.id.takeIf { it.length == 1 && it[0] in 'a'..'z' }
+        override fun bubble(node: KeyNode) = letterSent(node)?.toString()
     }
 
     // public for its test, which has no theme's key of no name to hold
@@ -497,7 +564,7 @@ class TextKeyboard(
         showSemicolonKey()
         showLangSwitchKey.registerOnChangeListener(showLangSwitchKeyListener)
         // the keys drawn by the scene engine, each wired as qwerty.xml's node says (U4 B)
-        drawKeysWithScene(LAYOUT)
+        drawKeysWithScene(custom?.let { customLayout(context, it) } ?: SceneLayouts.of(context, LAYOUT))
     }
 }
 

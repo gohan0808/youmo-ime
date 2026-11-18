@@ -5,6 +5,7 @@
 package org.fcitx.fcitx5.android.engine.runtime
 
 import org.fcitx.fcitx5.android.engine.handwriting.HandwritingSession.Companion.NO_PIECE
+import org.fcitx.fcitx5.android.engine.handwriting.InkOver
 import org.fcitx.fcitx5.android.engine.pinyin.NineKeyLetters
 import org.fcitx.fcitx5.android.engine.pinyin.ZhuyinKeys
 import org.fcitx.fcitx5.android.engine.session.Action
@@ -26,8 +27,15 @@ object EngineEvent {
     /** A candidate tapped; the argument is its index among all of them. */
     const val PICK = 6
 
-    /** The app moved the cursor, or the input method was left. */
+    /**
+     * The app moved the cursor, or the input method was left: the input ended ([InkOver.endInput], what
+     * handwriting wrote put in); with the argument [RESET_DROP], what is shown dropped, nothing put in (清除,
+     * the backspace swipe).
+     */
     const val RESET = 7
+
+    /** [RESET]'s argument: drop what is shown, handwriting's too ([Action.Reset]). */
+    const val RESET_DROP = 1
 
     /** Any other key: an arrow, Home, Tab, Delete; the argument is its fcitx keysym. */
     const val OTHER = 8
@@ -73,6 +81,12 @@ object EngineEvent {
      * typing (review S1). Any session takes it as [CHAR].
      */
     const val HARD_CHAR = 17
+
+    /**
+     * The candidate bar's ×: 联想 put away ([Action.DropPredictions]), what was committed still the
+     * context; not handled where none is on show. Escape would reset the session (review 061-small M1).
+     */
+    const val DROP_PREDICTIONS = 18
 }
 
 /**
@@ -122,9 +136,10 @@ class Keyboard(private val session: Session, private val nineKeys: Boolean) {
             EngineEvent.ESCAPE -> if (composing || shown.predicting) session.apply(Action.Reset) else if (nineKeys) IDLE.copy(handled = true) else passOn()
             EngineEvent.PICK -> session.apply(Action.Pick(arg))
             EngineEvent.FORGET, EngineEvent.PIN, EngineEvent.UNPIN, EngineEvent.BLOCK -> session.apply(pressed(event, arg))
-            EngineEvent.RESET -> session.apply(Action.Reset).copy(handled = false)
+            EngineEvent.RESET -> reset(arg).copy(handled = false)
             EngineEvent.REFINE -> refine()
             EngineEvent.TYPED -> typed(arg)
+            EngineEvent.DROP_PREDICTIONS -> if (shown.predicting) session.apply(Action.DropPredictions) else again(handled = false)
             else -> passOn()
         }
         return shown
@@ -189,14 +204,16 @@ class Keyboard(private val session: Session, private val nineKeys: Boolean) {
     private fun char(codePoint: Int, payload: Action? = null): Snapshot {
         hostChar(codePoint, payload)?.let { return it }
         // whatever the session: one sent the wrong way reads as its code would, never as U+FFFD ending the input
-        if (codePoint in TAPS || codePoint in PLACES) {
+        // where the key was tapped and the keys around it, as the host's key carries it (061-neighbour-correction)
+        val touch = (payload as? Action.Key)?.touch
+        if (isTap(codePoint)) {
             val (code, at) = untapped(codePoint)
-            return session.apply(Action.Key(code, at = at))
+            return session.apply(Action.Key(code, at = at, touch = touch))
         }
         keyedChar(codePoint)?.let { return keyed(codePoint, it, payload) }
         if (codePoint in NINE_DIGITS) {
             val n = codePoint - NINE_DIGITS.first
-            return session.apply(Action.NineKey('0' + n % DIGITS, upper = n >= DIGITS))
+            return session.apply(Action.NineKey('0' + n % DIGITS, upper = n >= DIGITS, touch = touch))
         }
         if (codePoint in NINE_LETTERS) {
             val n = codePoint - NINE_LETTERS.first
@@ -213,7 +230,7 @@ class Keyboard(private val session: Session, private val nineKeys: Boolean) {
             // a pick of the bar as it was shown: sent again its list's id is gone, so never a key to type again
             return session.apply(Action.Syllable(n % Action.Syllable.MAX, n / Action.Syllable.MAX)).copy(picked = true)
         }
-        if (session.reads(c) || english) return session.apply(Action.Key(c))
+        if (session.reads(c) || english) return session.apply(Action.Key(c, touch = touch))
         // on the nine keys a digit is a key: one not read (0) ends the input, as punctuation does
         val digit = c.digitToIntOrNull()?.takeUnless { nineKeys }
         return when {
@@ -223,6 +240,9 @@ class Keyboard(private val session: Session, private val nineKeys: Boolean) {
             else -> ended(c)
         }
     }
+
+    // the input ended keeps what is written on the keys (InkOver, outermost of the session); a drop does not
+    private fun reset(arg: Int) = (session as? InkOver)?.takeIf { arg != EngineEvent.RESET_DROP }?.endInput() ?: session.apply(Action.Reset)
 
     // a key's pick: told as one ([Snapshot.picked]), never a key to type again (KeyRouter's log)
     private fun select(index: Int) = session.apply(Action.Select(index)).copy(picked = true)
@@ -439,7 +459,8 @@ class Keyboard(private val session: Session, private val nineKeys: Boolean) {
 
         /**
          * Characters pinyin's 18 keys send ([NineKeyLetters.G18]'s groups, apart from 双拼's codes
-         * of the same keys): [pinyin18Key]. Read as G18's codes by the session ([keyedChar]).
+         * of the same keys): [pinyin18Key], a tap with where it fell [pinyin18Tap] ([TAPS_18]). Read
+         * as G18's codes by the session ([keyedChar]).
          */
         val PINYIN_18 = 0xF0410 until 0xF0410 + ALPHABET
 
@@ -522,11 +543,26 @@ class Keyboard(private val session: Session, private val nineKeys: Boolean) {
         /**
          * Characters of the supplementary private use area a grouped keyboard sends for a tap on a
          * key of two letters, a code and where across the key it fell: [tapKey]. After [AGAIN],
-         * in the codes' alphabetical order: the 14 keys' alone (26 × [TAP_STEPS]); G18's would take
-         * 26 to 51, not in this range yet. Only on a key's way to the engine: never
-         * learned, kept or backed up, so its numbering may change.
+         * in the codes' alphabetical order: the 14 keys' alone (26 × [TAP_STEPS]); pinyin's 18 keys'
+         * are [TAPS_18]. Only on a key's way to the engine: never learned, kept or backed up, so its
+         * numbering may change.
          */
         val TAPS = 0xF0200 until 0xF0200 + ALPHABET * TAP_STEPS
+
+        /**
+         * As [TAPS], pinyin's 18 keys' ([NineKeyLetters.G18]'s codes, [pinyin18Tap]): a block of their
+         * own, as [PINYIN_18] is, so 双拼's 18 keys, the same codes, never send one (061-neighbour-18key).
+         */
+        val TAPS_18 = 0xF0500 until 0xF0500 + ALPHABET * TAP_STEPS
+
+        /** The character for a tap at [at] across pinyin's 18 keys' key of G18 code [code], as [tapKey]'s ([TAPS_18]). */
+        fun pinyin18Tap(code: Char, at: Float): Int {
+            require(!at.isNaN()) { "tap $code at $at" }
+            return TAPS_18.first + groupIndex(NineKeyLetters.G18_BLOCK, code) * TAP_STEPS + (at.coerceIn(0f, 1f) * (TAP_STEPS - 1)).roundToInt()
+        }
+
+        /** Whether [codePoint] is a tap's character, a code with its place ([TAPS], [TAPS_18], [PLACES]). */
+        fun isTap(codePoint: Int): Boolean = codePoint in TAPS || codePoint in TAPS_18 || codePoint in PLACES
 
         /** How many places down a key [tapKey] with a y tells apart: the middle one, 4, is the key's centre. */
         const val TAP_ROWS = NineKeyLetters.PLACE_ROWS
@@ -560,8 +596,8 @@ class Keyboard(private val session: Session, private val nineKeys: Boolean) {
             return PLACES.first + ((code - FIRST_CUSTOM) * TAP_STEPS + across) * TAP_ROWS + down
         }
 
-        /** The code a tap's character ([TAPS], [PLACES]) is of, its place dropped; null for any other. */
-        fun tappedCode(codePoint: Int): Char? = if (codePoint in TAPS || codePoint in PLACES) untapped(codePoint).first else null
+        /** The code a tap's character ([TAPS], [TAPS_18], [PLACES]) is of, its place dropped; null for any other. */
+        fun tappedCode(codePoint: Int): Char? = if (isTap(codePoint)) untapped(codePoint).first else null
 
         /**
          * The character for a tap at [at] across the key of [code] (0 its left edge, 1 its right),
@@ -575,8 +611,12 @@ class Keyboard(private val session: Session, private val nineKeys: Boolean) {
             return TAPS.first + (code - FIRST_CODE) * TAP_STEPS + (at.coerceIn(0f, 1f) * (TAP_STEPS - 1)).roundToInt()
         }
 
-        // a [tapKey]'s code and place back: across alone (TAPS), or across and down as one (NineKeyLetters.place)
+        // a [tapKey]'s code and place back: across alone (TAPS, TAPS_18), or across and down as one (NineKeyLetters.place)
         internal fun untapped(codePoint: Int): Pair<Char, Float> {
+            if (codePoint in TAPS_18) {
+                val n = codePoint - TAPS_18.first
+                return (NineKeyLetters.G18_BLOCK.first + n / TAP_STEPS).toChar() to (n % TAP_STEPS).toFloat() / (TAP_STEPS - 1)
+            }
             if (codePoint in PLACES) {
                 val n = codePoint - PLACES.first
                 val across = (n / TAP_ROWS) % TAP_STEPS
@@ -589,7 +629,7 @@ class Keyboard(private val session: Session, private val nineKeys: Boolean) {
 
         /**
          * The letter [codePoint] stands for typed as it is, for a temporary mode (quick phrase,
-         * Unicode) that reads letters and none of a keyboard's codes: a [tapKey] its half's letter
+         * Unicode) that reads letters and none of a keyboard's codes: a [tapKey] or [pinyin18Tap] its half's letter
          * (the first at the centre), a grouped keyboard's code (the 14 keys', the 18 keys', the nine
          * keys' 双拼's: [NineKeyLetters.ofCode]; those past the BMP, [keyedChar]) its key's first
          * letter ([NineKeyLetters.asTyped]), pinyin's nine keys' its digit, as 九键拼音 sent it;
@@ -606,12 +646,14 @@ class Keyboard(private val session: Session, private val nineKeys: Boolean) {
                 // the letter the tap went least against, the first of those alike
                 return group[group.indices.minBy { letters.against(code, it, place) }]
             }
-            if (internal !in TAPS) return NineKeyLetters.ofCode(internal)?.letters(internal.toChar())?.first()
+            if (internal !in TAPS && internal !in TAPS_18) return NineKeyLetters.ofCode(internal)?.letters(internal.toChar())?.first()
             val (code, at) = untapped(codePoint)
-            // the taps are the 14 keys' alone yet: G18's go at indices 26 to 51 (design §1.4)
-            val group = NineKeyLetters.G14.letters(code).ifEmpty { return null }
-            // past the middle goes against the first letter
-            return if (group.length > 1 && NineKeyLetters.G14.against(0, at) > 0f) group[1] else group[0]
+            val letters = if (internal in TAPS_18) NineKeyLetters.G18 else NineKeyLetters.G14
+            val group = letters.letters(code).ifEmpty { return null }
+            // the place is along the group's letters as the keyboard sent it, wherever the layout put them: a
+            // key stacking them sends where down it fell (GroupedKeyboard.tapped, review L4), so these halves
+            // are its letters' own. Past the middle goes against the first letter
+            return if (letters.weighs(code) && letters.against(0, at) > 0f) group[1] else group[0]
         }
 
         private val IDLE = Snapshot(

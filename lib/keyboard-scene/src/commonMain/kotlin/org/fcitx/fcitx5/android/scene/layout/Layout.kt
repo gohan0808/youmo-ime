@@ -19,7 +19,26 @@ class Layout(
     /** Its keys pop up a preview as they are pressed, and their long press's keyboard or menu (the number pad's do not: rules C §7). */
     val preview: Boolean = true,
     val popups: Boolean = true,
-)
+    /**
+     * `based-on=` (0.6.1, a custom layout's: 061-custom-layout §2.2): the app's board it was made from, what its
+     * required keys are held to and what is drawn in its place once it is gone; null where not written.
+     */
+    val basedOn: String? = null,
+    /** `<meta>` (0.6.1): who made it and the oldest app it is for; null where there is none. */
+    val meta: LayoutMeta? = null,
+    /** `pads=` (0.6.1, a number board's, §7): the number pads it is for, as written; null where not written (only `full`). */
+    val pads: List<String>? = null,
+) {
+    /**
+     * This keyboard with [defaults], [parts] and [popups] in place of its own, everything else of it kept: the one place
+     * a layout is made again of another (KeyData), so a member added here is carried over by adding it here alone.
+     */
+    fun with(defaults: KeyAttrs, parts: List<Part>, popups: Boolean): Layout =
+        Layout(id, name, family, columns, onSplit, defaults, parts, preview, popups, basedOn, meta, pads)
+}
+
+/** A layout's `<meta>` (061-custom-layout §2.2): as a theme's, with what it is ([description]) in place of a preview picture. */
+data class LayoutMeta(val author: String?, val version: String?, val license: String?, val minApp: String?, val description: String?)
 
 /** A row of a keyboard, or the rows of a fragment it includes. */
 sealed interface Part
@@ -83,6 +102,12 @@ class Key(
     val letters: Letters? = null,
     /** `lean=` as written: `off`, its tap sends the group's code alone, not where it fell (null: not written). */
     val lean: Boolean? = null,
+    /**
+     * Which of the app's groups' corners a group key takes (KeyDefaults.corner): set by [KeyData] on a theme's or a
+     * user's layout, the app's key of its name's place (-1: none), so a key merged or moved before it shifts no
+     * corner (061-custom-layout §9); null, its place among this layout's group keys (the app's own layouts).
+     */
+    val place: Int? = null,
 ) : Cell {
     /**
      * Whether a tap on it leans to the letter it fell nearest (060-render-v2 §15, 按落点加权): a group
@@ -91,7 +116,7 @@ class Key(
     val leans: Boolean get() = letters != null && letters.group.length >= 2 && lean != false
 
     /** This key as it is, of `shortcut=` [shortcut] (LayoutReader naming a pack's unnamed nine key): every field kept. */
-    fun named(shortcut: String): Key = Key(id, condition, attrs.copy(shortcut = shortcut), popup, menu, line, variants, letters, lean)
+    fun named(shortcut: String): Key = Key(id, condition, attrs.copy(shortcut = shortcut), popup, menu, line, variants, letters, lean, place)
 }
 
 /**
@@ -112,14 +137,12 @@ data class Letters(val rows: List<String>) {
 }
 
 /**
- * Room taking no touch (the old GapKey); with a [look], a key's face of that kind drawn there all the
- * same, a key that does nothing (the number pad's blank places: rules C §7, the old BlankKey).
+ * Room taking no touch and drawn nothing, the keyboard's fill showing (the old GapKey; the number pads'
+ * places without a key, rules C §7: 0.6.0 drew a faded key's face there, 0.6.1 nothing, user 2026-11-13).
  */
 class Gap(
     override val id: String?,
     val width: Width,
-    val look: String?,
-    val classes: List<String>,
     override val condition: Condition?,
     override val line: Int,
 ) : Cell

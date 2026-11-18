@@ -17,15 +17,20 @@ import org.fcitx.fcitx5.android.data.prefs.ManagedPreferenceUi.Levels.Level
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog
 import org.fcitx.fcitx5.android.engine.pinyin.NineKeyLetters
 import org.fcitx.fcitx5.android.input.address.AddressLists
+import org.fcitx.fcitx5.android.input.bar.ToolbarConfig
 import org.fcitx.fcitx5.android.input.candidates.expanded.ExpandedCandidateStyle
 import org.fcitx.fcitx5.android.input.candidates.floating.FloatingCandidatesMode
 import org.fcitx.fcitx5.android.input.candidates.floating.FloatingCandidatesOrientation
 import org.fcitx.fcitx5.android.input.candidates.horizontal.HorizontalCandidateMode
 import org.fcitx.fcitx5.android.input.floating.FloatingKeyboard
 import org.fcitx.fcitx5.android.input.handwriting.HandwritingPause
+import org.fcitx.fcitx5.android.data.layout.CustomKeyboards
+import org.fcitx.fcitx5.android.input.keyboard.CustomChoice
 import org.fcitx.fcitx5.android.input.keyboard.ImKeyboard
 import org.fcitx.fcitx5.android.input.keyboard.ImKeyboards
+import org.fcitx.fcitx5.android.input.keyboard.PanelLayouts
 import org.fcitx.fcitx5.android.input.keyboard.KeyDrawing
+import org.fcitx.fcitx5.android.input.keyboard.StrokeLift
 import org.fcitx.fcitx5.android.input.keyboard.KeyMarkPosition
 import org.fcitx.fcitx5.android.scene.rules.KeyMarks
 import org.fcitx.fcitx5.android.input.keyboard.KeyboardHeightPercentBase
@@ -56,8 +61,8 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
         val lastPickerType = string("last_picker_type", PickerWindow.Key.Emoji.name)
         val symbolPanelLocked = bool("symbol_panel_locked", false)
 
-        /** The 候选词注音 style last used but off (ReadingStyle's key; empty, none yet): what the handwriting pad's 注 turns on. */
-        val lastCandidateReading = string("last_candidate_reading", "")
+        /** The symbol panel's category picked last, by its [org.fcitx.fcitx5.android.input.picker.PickerData.Category.id] (`arrows`); empty, none yet (PAN-29). */
+        val symbolPanelCategory = string("symbol_panel_category", "")
 
         /**
          * U-93 「用我的输入习惯」, from the ⋯ menu or the lexicon page: off, the engine as installed but
@@ -93,8 +98,41 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
          */
         val toolbarButtons = string("toolbar_buttons", "")
 
+        /** Whether [offerHandwriting] ran: its first look at [toolbarButtons], once. */
+        val toolbarHandwritingLooked = bool("toolbar_handwriting_looked", false)
+
         /** Whether [resetHiddenSettings] ran: on the first start of a version with it, and so once. */
         val hiddenSettingsReset = bool("hidden_settings_reset", false)
+
+        /** Whether the punctuation table the user edited before 0.6.1 was deleted (HostConfigDir.resetPunctuationOnce). */
+        val punctuationReset061 = bool("punctuation_reset_061", false)
+
+        /**
+         * Whether the toolbar's 手写 is on (061-handwriting-toolbar §3.4, the user's Q1): the letters written on
+         * in every input method that writes (HandwritingMode), till the button is tapped again; kept across
+         * keyboards, input methods and restarts. On for a user whose first input method was 0.6.0's 手写
+         * (KotlinHost.retireHandwriting).
+         */
+        val handwritingOpen = bool("handwriting_open", false)
+
+        /**
+         * Whether 0.6.0's 手写 input method was moved onto the toolbar (KotlinHost.retireHandwriting): the toolbar's
+         * 手写 pinned and turned on once, though the profile could not be written back. Not a 0.6.0 backup's, so one
+         * restored is moved again.
+         */
+        val handwritingRetired = bool("handwriting_retired", false)
+
+        /**
+         * The notice of that still to be seen ([handwritingRetired]): what it says besides, KotlinHost's markers
+         * comma-separated, empty for none; kept till it is said on the keyboard.
+         */
+        val handwritingRetiredUnseen = string("handwriting_retired_unseen", "")
+
+        /** How often 展开候选 said its strokes are drawn there and its pages turned by ↑↓ (PageStrokeTouch.Hint). */
+        val strokePageHintShown = int("stroke_page_hint_shown", 0)
+
+        /** Whether 0.6.0's 键盘手写 (在键上划, now 关) is still to be told it is the toolbar's 手写 ([migrateKeyHandwriting]). */
+        val keyHandwritingUnseen = bool("key_handwriting_unseen", false)
 
         /** Whether a zhuyin keyboard has said once that 繁体 is in ⋯ (KeyboardWindow). */
         val zhuyinTraditionalTold = bool("zhuyin_traditional_told", false)
@@ -111,6 +149,12 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
          * it is said on the keyboard, so a process ended before any keyboard showed says it at the next start.
          */
         val nineKeysUnseen = bool("nine_keys_merged_unseen", false)
+
+        /**
+         * What the theme packs' boards made layouts of the user's at an upgrade or a restore tell (ThemeLayoutsToList,
+         * 061-custom-layout §11: which are chosen now), as said; empty, nothing to say. Kept till it is said on the keyboard.
+         */
+        val themeLayoutsUnseen = string("theme_layouts_unseen", "")
 
         /**
          * Whether the user saw that the 双拼 scheme they had is one 0.5 dropped, now 小鹤 (KotlinHost):
@@ -133,12 +177,37 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
          */
         val keyboardButtonX = float("keyboard_button_x", -1f)
         val keyboardButtonY = float("keyboard_button_y", -1f)
-        // where the floating keyboard was dragged to: FloatingKeyboard.Spot, its middle at the bottom first
+        // where the floating keyboard was dragged to before 0.6.1, one place for 竖屏 and 横屏: FloatingKeyboard.Spot, its
+        // middle at the bottom first. Read, never written: each shape's own falls back to it (FloatingStore)
         val floatingKeyboardX = float("floating_keyboard_x", FloatingKeyboard.DEFAULT.x)
         val floatingKeyboardY = float("floating_keyboard_y", FloatingKeyboard.DEFAULT.y)
 
+        /**
+         * The floating keyboard's place and width (dp) the user dragged and resized it to, 竖屏 and 横屏 each its own
+         * (061-floating-resize §2.6; FloatingStore). Negative: never kept, the old place and the default width then.
+         */
+        val floatingPortraitX = float("floating_portrait_x", -1f)
+        val floatingPortraitY = float("floating_portrait_y", -1f)
+        val floatingLandscapeX = float("floating_landscape_x", -1f)
+        val floatingLandscapeY = float("floating_landscape_y", -1f)
+        val floatingPortraitWidthDp = float("floating_portrait_width_dp", -1f)
+        val floatingLandscapeWidthDp = float("floating_landscape_width_dp", -1f)
+
         /** U-106's switch, at the lexicon page's top beside 用我的输入习惯 (UserWordsFragment): a backup of the learning every few typing days. */
         val learningAutoBackup = bool("learning.auto_backup", true)
+
+        /**
+         * 语音先问再记's switch, the lexicon page's third (061-voice-learn-from-edits.md, Q4): a word of
+         * voice's deleted and typed again, read the same, asked about (「让语音记住『徐婧』？」).
+         */
+        val voiceAskRemember = bool("learning.voice_ask_remember", true)
+
+        /** How often it was asked, and the word remembered (an undo taking one back): the developer page's line. */
+        val voiceAskShown = int("learning.voice_ask_shown", 0)
+        val voiceAskTaken = int("learning.voice_ask_taken", 0)
+
+        /** 「把整个词删掉重打，语音才能记住」 said, once (Q3). */
+        val voiceAskHintShown = bool("learning.voice_ask_hint_shown", false)
 
         /**
          * What the address suggestions learned ([org.fcitx.fcitx5.android.input.address.AddressBook]'s two
@@ -250,14 +319,10 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
             ManagedPreference.PStringLike(sharedPreferences, key, defaultValue, codec).apply { register() }
 
         /** Shown in the 九键 section of pinyin's and English's pages (InputMethodSettings), while the nine keys are their keyboard. */
-        val t9MultiTap = stringLike(T9_MULTI_TAP, object : ManagedPreference.StringLikeCodec<T9MultiTap> {
-            override fun decode(raw: String) = T9MultiTap.entries.firstOrNull { it.name == raw }
-        }, T9MultiTap.Off)
+        val t9MultiTap = stringLike(T9_MULTI_TAP, ManagedPreference.enumCodec<T9MultiTap>(), T9MultiTap.Off)
 
         /** Shown in the 九键 section of English's page: how the nine keys type English. */
-        val t9EnglishTyping = stringLike(T9_ENGLISH_TYPING, object : ManagedPreference.StringLikeCodec<T9EnglishTyping> {
-            override fun decode(raw: String) = T9EnglishTyping.entries.firstOrNull { it.name == raw }
-        }, T9EnglishTyping.Predictive)
+        val t9EnglishTyping = stringLike(T9_ENGLISH_TYPING, ManagedPreference.enumCodec<T9EnglishTyping>(), T9EnglishTyping.Predictive)
 
         /**
          * What each of 九键's digit keys types ([NineKeyLetters.serialize], empty as on a phone):
@@ -269,33 +334,85 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
          * Shown on the pinyin page and in ⋯'s 键盘: the on-screen keyboard pinyin is typed on, the
          * nine keys 0.4's 九键拼音 (NineKeysMerge). A hardware keyboard types 全拼 still.
          */
-        val pinyinKeyboard = stringLike(PINYIN_KEYBOARD, object : ManagedPreference.StringLikeCodec<PinyinKeyboard> {
-            override fun decode(raw: String) = PinyinKeyboard.entries.firstOrNull { it.name == raw }
-        }, PinyinKeyboard.Full)
+        val pinyinKeyboard = stringLike(PINYIN_KEYBOARD, ManagedPreference.enumCodec<PinyinKeyboard>(), PinyinKeyboard.Full)
 
         /**
          * Shown on the 双拼 page and in ⋯'s 键盘: the on-screen keyboard 双拼 is typed on; the 14 keys
          * not under 微软 (ImKeyboards.choices): chosen before 微软 is, they give way to the 18 keys,
          * which are then stored (EngineBridge.configure). A hardware keyboard types the full one still.
          */
-        val shuangpinKeyboard = stringLike(SHUANGPIN_KEYBOARD, object : ManagedPreference.StringLikeCodec<ShuangpinKeyboard> {
-            override fun decode(raw: String) = ShuangpinKeyboard.entries.firstOrNull { it.name == raw }
-        }, ShuangpinKeyboard.Full)
+        val shuangpinKeyboard = stringLike(SHUANGPIN_KEYBOARD, ManagedPreference.enumCodec<ShuangpinKeyboard>(), ShuangpinKeyboard.Full)
 
         /** Shown on the English page and in ⋯'s 键盘: the 26 keys for everyone, upgrades too (I1 Q3), or the nine keys. */
-        val englishKeyboard = stringLike(ENGLISH_KEYBOARD, object : ManagedPreference.StringLikeCodec<EnglishKeyboard> {
-            override fun decode(raw: String) = EnglishKeyboard.entries.firstOrNull { it.name == raw }
-        }, EnglishKeyboard.Full)
+        val englishKeyboard = stringLike(ENGLISH_KEYBOARD, ManagedPreference.enumCodec<EnglishKeyboard>(), EnglishKeyboard.Full)
 
-        /** Each input method's keyboard as set, for ImKeyboards to decide the layout from. */
-        fun imKeyboards() = ImKeyboards.Chosen(pinyinKeyboard.getValue().keyboard, shuangpinKeyboard.getValue().keyboard, englishKeyboard.getValue().keyboard)
+        /**
+         * The layout of the user's each input method chose where its keyboard is [ImKeyboard.CUSTOM], by its id
+         * (061-custom-layout §5.2): pinyin's, 双拼's, English's; and the tables' one ("": the full keyboard, Q6). Left
+         * as they are where the file stops reading (§4.4: its base drawn meanwhile); set anew as it is deleted.
+         */
+        val pinyinKeyboardLayout = string(PINYIN_KEYBOARD_LAYOUT, "")
+        val shuangpinKeyboardLayout = string(SHUANGPIN_KEYBOARD_LAYOUT, "")
+        val englishKeyboardLayout = string(ENGLISH_KEYBOARD_LAYOUT, "")
+        val tableKeyboardLayout = string(TABLE_KEYBOARD_LAYOUT, "")
 
-        /** [im]'s keyboard set to [keyboard], one it offers (ImKeyboards.choices). */
-        fun setImKeyboard(im: String, keyboard: ImKeyboard) {
-            when (im) {
-                InputMethodCatalog.PINYIN -> pinyinKeyboard.setValue(PinyinKeyboard.of(keyboard))
-                InputMethodCatalog.SHUANGPIN -> shuangpinKeyboard.setValue(ShuangpinKeyboard.of(keyboard))
-                InputMethodCatalog.ENGLISH -> englishKeyboard.setValue(EnglishKeyboard.of(keyboard))
+        /**
+         * The number keyboard's and the symbol panel's layout of the user's, by its id ("": the app's), one for every input
+         * method (061-custom-layout §7, §8, L5: 外观 → 布局). Left as they are where the file stops reading (the app's drawn
+         * meanwhile); set back to the app's as it is deleted.
+         */
+        val numberKeyboardLayout = string(NUMBER_KEYBOARD_LAYOUT, "")
+        val symbolsPanelLayout = string(SYMBOLS_PANEL_LAYOUT, "")
+
+        /** [panel]'s layout of the user's ([numberKeyboardLayout], [symbolsPanelLayout]). */
+        fun panelLayout(panel: PanelLayouts.Panel) = when (panel) {
+            PanelLayouts.Panel.NUMBER -> numberKeyboardLayout
+            PanelLayouts.Panel.SYMBOLS -> symbolsPanelLayout
+        }
+
+        /** Each panel's id as set ("": the app's). */
+        fun panelLayouts(): Map<PanelLayouts.Panel, String> = PanelLayouts.Panel.entries.associateWith { panelLayout(it).getValue() }
+
+        /** The layout of the user's [panel] draws as its file reads now (read by [custom]); null where the app's is drawn. */
+        fun drawnPanelLayout(panel: PanelLayouts.Panel, custom: (String) -> CustomChoice? = CustomKeyboards::choice): CustomChoice? =
+            panelLayout(panel).getValue().takeIf { it.isNotEmpty() }?.let { id -> PanelLayouts.drawn(panel, runCatching { custom(id) }.getOrNull()) }
+
+        // [slot]'s ([ImKeyboards.slot]) layout of the user's
+        private fun layoutPref(slot: String) = when (slot) {
+            InputMethodCatalog.PINYIN -> pinyinKeyboardLayout
+            InputMethodCatalog.SHUANGPIN -> shuangpinKeyboardLayout
+            InputMethodCatalog.ENGLISH -> englishKeyboardLayout
+            else -> tableKeyboardLayout
+        }
+
+        /**
+         * Each input method's keyboard as set, for ImKeyboards to decide the layout from; the layouts of the user's chosen
+         * read by [custom] (null: one that does not read), the app's own by default (CustomKeyboards: a file stat each,
+         * read again where it changed).
+         */
+        fun imKeyboards(custom: (String) -> CustomChoice? = CustomKeyboards::choice): ImKeyboards.Chosen {
+            val layouts = ImKeyboards.SLOTS.associateWith { layoutPref(it).getValue() }.filterValues { it.isNotEmpty() }
+            val chosen = ImKeyboards.Chosen(
+                pinyinKeyboard.getValue().keyboard,
+                shuangpinKeyboard.getValue().keyboard,
+                englishKeyboard.getValue().keyboard,
+                if (ImKeyboards.TABLE in layouts) ImKeyboard.CUSTOM else ImKeyboard.FULL,
+                layouts,
+            )
+            val used = ImKeyboards.SLOTS.mapNotNull { slot -> layouts[slot]?.takeIf { slot == ImKeyboards.TABLE || chosen.of(slot) == ImKeyboard.CUSTOM } }.toSet()
+            // one that throws as it is read is one that does not read: its base drawn, never the keyboard (and the IME) gone
+            return chosen.copy(customs = used.mapNotNull { id -> runCatching { custom(id) }.getOrNull()?.let { id to it } }.toMap())
+        }
+
+        /** [im]'s keyboard set to [keyboard], one it offers (ImKeyboards.choices); [layout] the id of the user's layout where it is [ImKeyboard.CUSTOM]. */
+        fun setImKeyboard(im: String, keyboard: ImKeyboard, layout: String? = null) {
+            if (keyboard == ImKeyboard.CUSTOM) layoutPref(ImKeyboards.slot(im)).setValue(requireNotNull(layout))
+            when {
+                im == InputMethodCatalog.PINYIN -> pinyinKeyboard.setValue(PinyinKeyboard.of(keyboard))
+                im == InputMethodCatalog.SHUANGPIN -> shuangpinKeyboard.setValue(ShuangpinKeyboard.of(keyboard))
+                im == InputMethodCatalog.ENGLISH -> englishKeyboard.setValue(EnglishKeyboard.of(keyboard))
+                // the tables' one choice: the full keyboard, or the layout of the user's set above
+                InputMethodCatalog.hasTableKeys(im) && keyboard != ImKeyboard.CUSTOM -> tableKeyboardLayout.setValue("")
             }
         }
 
@@ -307,11 +424,13 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
          * for what a finger drawn across the keys does ([KeyDrawing], GlideInput): a word glided across
          * its keys in every input method that glides (InputMethodCatalog.glides), a stroke drawn while
          * pinyin is typed that filters its candidates (笔画筛选, InputMethodCatalog.filtersByStrokes),
-         * or nothing. Off till chosen: a fast tap may glide. 0.5's two switches move over ([dropRetired]).
+         * or nothing. Off till chosen: a fast tap may glide. 0.5's two switches move over ([dropRetired]);
+         * 0.6.0's 键盘手写 is the toolbar's 手写 now ([migrateKeyHandwriting]).
          */
-        val keyDrawing = stringLike(KEY_DRAWING, object : ManagedPreference.StringLikeCodec<KeyDrawing> {
-            override fun decode(raw: String) = KeyDrawing.entries.firstOrNull { it.name == raw }
-        }, KeyDrawing.Off)
+        val keyDrawing = stringLike(KEY_DRAWING, ManagedPreference.enumCodec<KeyDrawing>(), KeyDrawing.Off)
+
+        /** Shown under it while 笔画筛选 is chosen: how far a stroke drawn goes before it is no tap ([StrokeLift]). */
+        val strokeLift = stringLike(STROKE_LIFT, ManagedPreference.enumCodec<StrokeLift>(), StrokeLift.Medium)
 
         /** Shown on the shared page too: every input method types a bracket or a quote. */
         val autoPairs = bool(AUTO_PAIRS, true)
@@ -327,10 +446,8 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
         val urlSuffixes = string("address_url_suffixes", AddressLists.serialize(AddressLists.DEFAULT_URL))
         val rememberAddresses = bool("address_remember", true)
 
-        /** Shown on the handwriting page (InputMethodSettings): how long the pen stays up before a character is done. */
-        val handwritingPause = stringLike(HANDWRITING_PAUSE, object : ManagedPreference.StringLikeCodec<HandwritingPause> {
-            override fun decode(raw: String) = HandwritingPause.entries.firstOrNull { it.name == raw }
-        }, HandwritingPause.Medium)
+        /** Shown on the shared page (InputMethodSettings, under 在键上划): how long the pen stays up before a character written on the keys is done. */
+        val handwritingPause = stringLike(HANDWRITING_PAUSE, ManagedPreference.enumCodec<HandwritingPause>(), HandwritingPause.Medium)
         val showLangSwitchKey =
             switch(R.string.show_lang_switch_key, "show_lang_switch_key", true)
         val langSwitchKeyBehavior = hidden {
@@ -709,6 +826,15 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
     // resetHiddenSettings ran in this process: a category registered after it is reset as it registers
     private var hiddenResetInProcess = false
 
+    /**
+     * Waits for the settings written so far to be on disk: a setting's write (apply) is written later on another thread,
+     * and a commit, even of nothing, is written after them. Not on the main thread. For what copies the settings' files
+     * over (a restore) after a write of another thread (R26 F8423).
+     */
+    fun awaitWritten() {
+        sharedPreferences.edit(commit = true) {}
+    }
+
     fun <T : ManagedPreferenceProvider> registerProvider(
         providerF: (SharedPreferences) -> T
     ): T {
@@ -794,13 +920,16 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
     fun dropRetired() {
         // gone with the old drawing (060-render-p2 S8): 0.6's betas' switch of the redraw, vivo's touch routing to
         // the key views (the scene's keys always take their touches so), and 扩大按键触摸区 (the engine always
-        // gives a key its cell to the edge); and voice_polish, the voice's 整理 switch, gone with it always on;
+        // gives a key its cell to the edge); voice_polish, the voice's 整理 switch, gone with it always on; and
+        // last_candidate_reading, the 注音 style 0.6.0's handwriting pad's 注 key turned back on, gone with the pad;
         // a stored one, of any type, read by nothing
         val stale = RETIRED.filter(sharedPreferences::contains)
         if (stale.isNotEmpty()) sharedPreferences.edit { stale.forEach(::remove) }
         migrateSwipe()
         migrateSwipeSlots()
         migrateKeyDrawing()
+        migrateKeyHandwriting()
+        offerHandwriting()
         settleMarkPositions()
         migrateKeyLists()
     }
@@ -818,7 +947,7 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
      * 0.5's and 0.6's betas' long presses ([POPUP_OVERRIDES], [KEY_POPUPS], [T9_SYMBOLS]) as [Internal.keyLists]
      * (KeyListsMigration, 060-keys-unify §4.3), and beta3's `@1` upgraded to `@2` (060-row-unlock §5, its rows by the
      * user's 按键字母): run while it is neither (never stored, a 0.5, beta or `@1` backup restored), once; the old ones
-     * migrated to `@1` first. A later version's (`@3`) left as it is. The old ones kept as they are, for a downgrade (§4.4).
+     * migrated to `@1` first. A later version's (`@4`) left as it is. The old ones kept as they are, for a downgrade (§4.4).
      */
     private fun migrateKeyLists() {
         val sp = sharedPreferences
@@ -924,6 +1053,45 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
     }
 
     /**
+     * 0.6.0's 在键上划 = 键盘手写 as 关, the toolbar's 手写 pinned for it (061-handwriting-toolbar §6.2): not turned
+     * on, as one that wrote on the keys only now and then would find the letters not typing. The stored name is
+     * read as it is, not through [KeyDrawing], which no longer has it. Told once ([Internal.keyHandwritingUnseen]).
+     */
+    private fun migrateKeyHandwriting() {
+        val stored = runCatching { sharedPreferences.getString(KEY_DRAWING, null) }.getOrNull()
+        if (stored != OLD_KEY_HANDWRITING) return
+        sharedPreferences.edit {
+            putString(KEY_DRAWING, KeyDrawing.Off.name)
+            putBoolean(internal.keyHandwritingUnseen.key, true)
+        }
+        pinHandwriting()
+    }
+
+    /**
+     * The toolbar's 手写 shown first at the bar's right, where the user arranged the bar ([Internal.toolbarButtons]
+     * stored); one never arranged has it so already (ToolbarConfig.DEFAULT).
+     */
+    fun pinHandwriting() {
+        val stored = internal.toolbarButtons.getValue()
+        if (stored.isEmpty()) return
+        internal.toolbarButtons.setValue(ToolbarConfig.parse(stored).withHandwritingPinned().serialize())
+    }
+
+    /**
+     * The toolbar's 手写 shown at the bar's right after 表情 where the user arranged the bar before it was there to
+     * choose (ToolbarConfig.handwritingNeverOffered): at every start, a 0.6.0 backup restored too; one the user took
+     * off since is left so.
+     */
+    private fun offerHandwriting() {
+        val stored = internal.toolbarButtons.getValue()
+        val firstLook = !internal.toolbarHandwritingLooked.getValue()
+        if (ToolbarConfig.handwritingNeverOffered(stored, firstLook)) {
+            internal.toolbarButtons.setValue(ToolbarConfig.parse(stored).withHandwritingOffered().serialize())
+        }
+        if (firstLook) internal.toolbarHandwritingLooked.setValue(true)
+    }
+
+    /**
      * Puts the settings that have no UI back to their defaults ([ManagedPreferenceCategory.hidden]):
      * once, and [again] after an import of the user's data, for what an older version or a backup
      * set there could not be changed back. Every category registered here is reset, ThemePrefs too:
@@ -935,6 +1103,9 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
         sharedPreferences.edit(commit = true) {
             providers.filterIsInstance<ManagedPreferenceCategory>().forEach { it.resetHidden(this@edit) }
             putBoolean(internal.hiddenSettingsReset.key, true)
+            // the punctuation mark an import brings is the backup's, saying nothing of this phone's data: cleared, the
+            // table a restore could not delete is tried again at this start (HostConfigDir.resetPunctuationOnce)
+            if (again) putBoolean(internal.punctuationReset061.key, false)
         }
         hiddenResetInProcess = true
         Timber.i("settings without a UI reset to their defaults%s", if (again) " after an import" else "")
@@ -950,10 +1121,18 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
 
         const val SHUANGPIN_KEYBOARD = "shuangpin_keyboard"
         const val ENGLISH_KEYBOARD = "english_keyboard"
+        const val PINYIN_KEYBOARD_LAYOUT = "pinyin_keyboard_layout"
+        const val SHUANGPIN_KEYBOARD_LAYOUT = "shuangpin_keyboard_layout"
+        const val ENGLISH_KEYBOARD_LAYOUT = "english_keyboard_layout"
+        const val TABLE_KEYBOARD_LAYOUT = "table_keyboard_layout"
+        const val NUMBER_KEYBOARD_LAYOUT = "number_keyboard_layout"
+        const val SYMBOLS_PANEL_LAYOUT = "symbols_panel_layout"
 
         // 0.4's: English on the nine keys while 九键's 中/英 had brought it there, gone with the key (I1)
         private const val ENGLISH_ON_NINE_KEYS = "english_on_nine_keys"
-        private val RETIRED = listOf(ENGLISH_ON_NINE_KEYS, "canvas_keyboard", "vivo_keypress_workaround", "expand_keypress_area", "voice_polish")
+        private val RETIRED = listOf(
+            ENGLISH_ON_NINE_KEYS, "canvas_keyboard", "vivo_keypress_workaround", "expand_keypress_area", "voice_polish", "last_candidate_reading",
+        )
 
         // 0.5's swipe setting, and 0.5.1's that took its place
         private const val SWIPE_SYMBOL_BEHAVIOR = "swipe_symbol_behavior"
@@ -985,6 +1164,10 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
         private const val GLIDE_TYPING = "glide_typing"
         private const val STROKE_FILTER = "stroke_filter"
         const val KEY_DRAWING = "key_drawing"
+        const val STROKE_LIFT = "stroke_lift"
+
+        // 0.6.0's 在键上划 = 键盘手写, now the toolbar's 手写 (migrateKeyHandwriting)
+        private const val OLD_KEY_HANDWRITING = "Handwriting"
 
         const val AUTO_PAIRS = "auto_pairs"
         const val CALCULATION_REPLACES_SUM = "calculation_replaces_sum"
@@ -1022,7 +1205,10 @@ enum class PinyinKeyboard(override val stringRes: Int, val keyboard: ImKeyboard)
     Keys14(R.string.pinyin_keyboard_14, ImKeyboard.KEYS14),
     NineKeys(R.string.keyboard_nine, ImKeyboard.NINE_KEYS),
     ZhuyinNine(R.string.keyboard_zhuyin_nine, ImKeyboard.ZHUYIN_NINE),
-    ZhuyinFull(R.string.keyboard_zhuyin_full, ImKeyboard.ZHUYIN_FULL);
+    ZhuyinFull(R.string.keyboard_zhuyin_full, ImKeyboard.ZHUYIN_FULL),
+
+    // a layout of the user's: which one, pinyinKeyboardLayout (061-custom-layout §5.2)
+    Custom(R.string.keyboard_custom, ImKeyboard.CUSTOM);
 
     companion object {
         fun of(keyboard: ImKeyboard) = entries.first { it.keyboard == keyboard }
@@ -1034,7 +1220,10 @@ enum class ShuangpinKeyboard(override val stringRes: Int, val keyboard: ImKeyboa
     Full(R.string.pinyin_keyboard_full, ImKeyboard.FULL),
     Keys18(R.string.keyboard_18, ImKeyboard.KEYS18),
     Keys14(R.string.pinyin_keyboard_14, ImKeyboard.KEYS14),
-    NineKeys(R.string.keyboard_nine, ImKeyboard.NINE_KEYS);
+    NineKeys(R.string.keyboard_nine, ImKeyboard.NINE_KEYS),
+
+    // a layout of the user's: which one, shuangpinKeyboardLayout
+    Custom(R.string.keyboard_custom, ImKeyboard.CUSTOM);
 
     companion object {
         fun of(keyboard: ImKeyboard) = entries.first { it.keyboard == keyboard }
@@ -1044,7 +1233,10 @@ enum class ShuangpinKeyboard(override val stringRes: Int, val keyboard: ImKeyboa
 /** English's on-screen keyboard ([ImKeyboard]): the 26 keys or the nine keys. Kept by name: never rename one. */
 enum class EnglishKeyboard(override val stringRes: Int, val keyboard: ImKeyboard) : ManagedPreferenceEnum {
     Full(R.string.pinyin_keyboard_full, ImKeyboard.FULL),
-    NineKeys(R.string.keyboard_nine, ImKeyboard.NINE_KEYS);
+    NineKeys(R.string.keyboard_nine, ImKeyboard.NINE_KEYS),
+
+    // a layout of the user's: which one, englishKeyboardLayout
+    Custom(R.string.keyboard_custom, ImKeyboard.CUSTOM);
 
     companion object {
         fun of(keyboard: ImKeyboard) = entries.first { it.keyboard == keyboard }

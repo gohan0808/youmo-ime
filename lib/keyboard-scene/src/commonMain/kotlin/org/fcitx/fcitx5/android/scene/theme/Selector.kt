@@ -58,7 +58,7 @@ data class Selector(
     /** Whether it selects [target], its scenes known to hold. */
     fun selects(target: Target): Boolean =
         widget == target.widget && part == target.part &&
-            (board == null || board == target.board) && (key == null || key == target.key) &&
+            (board == null || board == target.board || board == target.base) && (key == null || key == target.key) &&
             !(target.slot && board != null && key == null) &&
             (starRole == null || starRole == target.role) && target.classes.containsAll(classes) &&
             roles.all { it == target.role } && target.states.containsAll(states)
@@ -74,6 +74,8 @@ data class Selector(
         val part: String? = null,
         /** A slot's face (the handwriting pad's): not one of its board's every key, only by its name or look. */
         val slot: Boolean = false,
+        /** The app's board a layout of the user's is `based-on` ([org.fcitx.fcitx5.android.scene.engine.Env.base]): selected by its name as [board] is. */
+        val base: String? = null,
     )
 
     companion object {
@@ -114,7 +116,7 @@ data class Selector(
 
         /**
          * The scenes of what is typed ([org.fcitx.fcitx5.android.scene.engine.Env.scenes]): `@im=<input
-         * method>` (its kind, `pinyin` `shuangpin` `english` `table` `handwriting`, or a table's name, `wubi`),
+         * method>` (its kind, `pinyin` `shuangpin` `english` `table`, or a table's name, `wubi`),
          * `@field=<kind>` of these, `@keyboard=<board>` (a layout's id, `nine`).
          */
         val FIELDS = setOf("password", "url", "number", "email")
@@ -123,7 +125,7 @@ data class Selector(
          * The words of `@im=` that select (the app's SceneTyping, held to it by its test): the kinds, T9 and
          * zhuyin `pinyin` as their engine is, and the tables' names. Another is read, warned of, selects nothing.
          */
-        val IMS = setOf("pinyin", "shuangpin", "english", "table", "handwriting", "wubi", "cangjie", "ziranma", "erbi", "wubipinyin")
+        val IMS = setOf("pinyin", "shuangpin", "english", "table", "wubi", "cangjie", "ziranma", "erbi", "wubipinyin")
         private val IM = Regex("[a-z0-9]+(-[a-z0-9]+)*")
         private val BOARD = Regex("[a-z0-9]+(-[a-z0-9]+)*")
         private val CLASS = Regex("[a-z][a-z0-9-]*")

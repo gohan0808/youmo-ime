@@ -9,7 +9,6 @@ import org.fcitx.fcitx5.android.core.KeyStates
 import org.fcitx.fcitx5.android.core.KeySym
 import org.fcitx.fcitx5.android.core.ScancodeMapping
 import org.fcitx.fcitx5.android.core.UNICODE
-import org.fcitx.fcitx5.android.engine.reading.ReadingStyle
 import org.fcitx.fcitx5.android.engine.runtime.Keyboard
 import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneIcons
 import org.fcitx.fcitx5.android.input.keys.KeyOutput
@@ -71,6 +70,13 @@ class SceneKeyDef(
 
         /** What a hold of the key of [node] sends as it repeats, its press being [press]: the press again, but where the keyboard tells the two apart (the emoji search's ⌫). */
         fun repeat(press: KeyAction, node: KeyNode): KeyAction = press
+
+        /**
+         * What of [node] this table's answers are made from besides what its layout says it does ([SceneBehavior]: its
+         * actions, its letters, its name), null for nothing: a key made is kept for a node only while this is the same
+         * (SceneKeys). 注音's code is its key's face's, which a `<variant>` or another layout of the same ids changes.
+         */
+        fun reads(node: KeyNode): Any? = null
 
         /** The bubble over the key of [node] as it is pressed, over the face the layout gives it; null: the face's. */
         fun bubble(node: KeyNode): String? = null
@@ -217,7 +223,6 @@ class SceneKeyDef(
             is SceneAction.Keypad -> KeyAction.SymAction(KeySym(FcitxKeyMapping.FcitxKey_KP_0 + a.digit), KeyStates.Virtual)
             is SceneAction.Caps -> KeyAction.CapsAction(a.lock)
             is SceneAction.Shortcut -> KeyCommand.entries.firstOrNull { it.key == a.name }?.let { KeyAction.ShortcutAction(KeyShortcut.Command(it)) }
-            is SceneAction.Reading -> reading(a.style)
             is SceneAction.EmojiSearch -> KeyAction.EmojiSearchAction(a.arg == "on")
             is SceneAction.Command -> COMMANDS[a.name]
             is SceneAction.Placeholder -> placeholder(a.name)
@@ -230,12 +235,6 @@ class SceneKeyDef(
             KeyAction.PickerSwitchAction()
         } else {
             PickerWindow.Key.entries.firstOrNull { it.name == name }?.let { KeyAction.PickerSwitchAction(it) }
-        }
-
-        private fun reading(style: String?): KeyAction? = if (style == null) {
-            KeyAction.ReadingAction()
-        } else {
-            ReadingStyle.entries.firstOrNull { it.key.equals(style, ignoreCase = true) }?.let { KeyAction.ReadingAction(it) }
         }
     }
 }

@@ -30,14 +30,22 @@ sealed class HostEvent {
         val auxDown: FormattedText,
         /** Quick input's panel ([TempPanel.quickPhrase]). */
         val quickPhrase: Boolean = false,
+        /**
+         * [preedit] is the session's code as the code row shows it ([Panel.code]): what 编码行 输入框里
+         * may write into the field. Not a temp mode's nor a punctuation key's marks on offer.
+         */
+        val code: Boolean = false,
     ) : HostEvent() {
         companion object {
             val EMPTY = InputPanel(FormattedText.Empty, FormattedText.Empty, FormattedText.Empty)
         }
     }
 
-    /** The bulk list's first 16 (`updateCandidatesBulk`, `androidfrontend.cpp:94-123`). */
-    data class Candidates(val total: Int, val candidates: List<CandidateEntry>) : HostEvent() {
+    /**
+     * The bulk list's first 16 (`updateCandidatesBulk`, `androidfrontend.cpp:94-123`); [predicting], 联想's words
+     * with nothing typed ([CandidateList.predicting]): the bar shows its × for them.
+     */
+    data class Candidates(val total: Int, val candidates: List<CandidateEntry>, val predicting: Boolean = false) : HostEvent() {
         companion object {
             val EMPTY = Candidates(0, emptyList())
         }

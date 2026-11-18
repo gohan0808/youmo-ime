@@ -25,6 +25,8 @@ import org.fcitx.fcitx5.android.input.keyboard.TextKeyboard
 import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneEnvs
 import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneIcons
 import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneLayout
+import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneLayouts
+import org.fcitx.fcitx5.android.input.keyboard.customLayout
 import org.fcitx.fcitx5.android.input.keyboard.canvas.ScenePanels
 import org.fcitx.fcitx5.android.input.theme.KeyNames
 import org.fcitx.fcitx5.android.scene.KeyState
@@ -48,13 +50,21 @@ import splitties.views.dsl.core.add
 
 /**
  * The picker over a row of keys. The emoji: one list, its tabs on the bar. The symbol [panel]:
- * the categories at the side, the one picked beside them, and a lock in the row of keys.
+ * the categories at the side, the one picked beside them, and a lock in the row of keys; its board the user's [custom]
+ * one where it is chosen (`id@stamp`, 061-custom-layout §8), the app's else.
  */
 @SuppressLint("ViewConstructor")
-class PickerLayout(context: Context, private val theme: Theme, switchKey: KeyDef, density: PickerGridView.Density, private val panel: Boolean, searchKey: KeyDef? = null) :
-    ConstraintLayout(context) {
+class PickerLayout(
+    context: Context,
+    private val theme: Theme,
+    private val switchKey: KeyDef,
+    density: PickerGridView.Density,
+    private val panel: Boolean,
+    searchKey: KeyDef? = null,
+    custom: String? = null,
+) : ConstraintLayout(context) {
 
-    class Keyboard(context: Context, theme: Theme, keys: List<KeyDef>, board: String, sceneLayout: String) :
+    class Keyboard(context: Context, theme: Theme, keys: List<KeyDef>, board: String, sceneLayout: String, custom: String? = null) :
         BaseKeyboard(context, theme, listOf(keys), themeBoard = board) {
 
         class PunctuationKey(val symbol: String) : KeyDef(
@@ -115,7 +125,7 @@ class PickerLayout(context: Context, private val theme: Theme, switchKey: KeyDef
         // last: the scene reads the keyboard's state
         init {
             // the canvas at another size (one-handed, split, another height): the panel's views to the slots of the scene at that size
-            drawKeysWithScene(sceneLayout)
+            drawKeysWithScene(custom?.let { customLayout(context, it) } ?: SceneLayouts.of(context, sceneLayout))
             // only when its size changed: a layout at the same size places the slots where they are
             canvas?.addOnLayoutChangeListener { _, l, t, r, b, oldL, oldT, oldR, oldB ->
                 if (r - l != oldR - oldL || b - t != oldB - oldT) post { (parent as? View)?.requestLayout() }
@@ -127,18 +137,37 @@ class PickerLayout(context: Context, private val theme: Theme, switchKey: KeyDef
         }
     }
 
+    /** The user's symbols board [embeddedKeyboard] draws (`id@stamp`); null, the app's. */
+    var custom: String? = custom.takeIf { panel }
+        private set
+
     // the symbols' board, or the emoji's (the emoticons' too)
-    val embeddedKeyboard = Keyboard(
-        context, theme, if (panel) panelKeys(context, switchKey) else listKeys(switchKey, searchKey),
-        if (panel) KeyNames.SYMBOLS else KeyNames.EMOJI,
-        // the symbol panel's keys, the categories' and the grid's slots; the emoji's row, with its search or not
-        // (the emoticons', S8a)
-        when {
-            panel -> "symbols"
-            searchKey != null -> "emoji"
-            else -> "emoticon"
-        },
-    )
+    var embeddedKeyboard = if (panel) {
+        panelBoard(this.custom)
+    } else {
+        // the emoji's row, with its search or not (the emoticons', S8a)
+        Keyboard(
+            context, theme, listKeys(context.getString(R.string.picker_back), switchKey, searchKey), KeyNames.EMOJI,
+            if (searchKey != null) "emoji" else "emoticon",
+        )
+    }
+        private set
+
+    // the symbol panel's keys, the categories' and the grid's slots: the app's, or the user's [custom]
+    private fun panelBoard(custom: String?) = Keyboard(context, theme, panelKeys(context, switchKey), KeyNames.SYMBOLS, "symbols", custom)
+
+    /**
+     * The symbol panel's board drawn anew as the user's [custom] (null: the app's), where another was chosen or its file
+     * replaced since it was made: under the categories and the grid as before, which go to its slots as it is laid out.
+     * Told before it is shown (PickerWindow.onAttached), which wires its listeners after.
+     */
+    fun drawKeys(custom: String?) {
+        if (!panel || custom == this.custom) return
+        this.custom = custom
+        removeView(embeddedKeyboard)
+        embeddedKeyboard = panelBoard(custom)
+        addView(embeddedKeyboard, 0, lParams(matchConstraints, matchConstraints) { centerInParent() })
+    }
 
     // on the theme's `picker { fill }` (060-render-p3 T7b); not set, nothing: the keyboard's under it
     val grid = PickerGridView(context, theme, density).apply {
@@ -240,8 +269,8 @@ class PickerLayout(context: Context, private val theme: Theme, switchKey: KeyDef
         internal const val GRID_SLOT = "grid"
 
         // the emoji's search in place of the comma, which the letters have a step away
-        internal fun listKeys(switchKey: KeyDef, searchKey: KeyDef?) = listOf(
-            LayoutSwitchKey("ABC", TextKeyboard.Name),
+        internal fun listKeys(back: String, switchKey: KeyDef, searchKey: KeyDef?) = listOf(
+            LayoutSwitchKey(back, TextKeyboard.Name),
             searchKey ?: Keyboard.PunctuationKey(","),
             switchKey,
             SpaceKey(),
@@ -251,7 +280,7 @@ class PickerLayout(context: Context, private val theme: Theme, switchKey: KeyDef
             ReturnKey()
         )
 
-        /** Sogou's: 返回 where ABC was, the lock beside it; the punctuation is in the panel */
+        /** 返回 where 符 was, 123 where the letters have it, then the lock (0.6.1, symbols.xml); the punctuation is in the panel */
         internal fun panelKeys(context: Context, switchKey: KeyDef) = listOf(
             KeyDef(
                 KeyDef.Appearance.Text(
@@ -264,6 +293,7 @@ class PickerLayout(context: Context, private val theme: Theme, switchKey: KeyDef
                 setOf(KeyDef.Behavior.Press(KeyAction.PanelBackAction)),
                 name = "back",
             ),
+            switchKey,
             KeyDef(
                 KeyDef.Appearance.Image(
                     src = R.drawable.ic_baseline_lock_open_24,
@@ -275,7 +305,6 @@ class PickerLayout(context: Context, private val theme: Theme, switchKey: KeyDef
                 setOf(KeyDef.Behavior.Press(KeyAction.PanelLockAction)),
                 name = "lock",
             ),
-            switchKey,
             SpaceKey(),
             BackspaceKey(),
             ReturnKey()

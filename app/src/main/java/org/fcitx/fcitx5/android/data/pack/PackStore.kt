@@ -31,6 +31,7 @@ import org.fcitx.fcitx5.android.pack.PackStatus
 import org.fcitx.fcitx5.android.pack.Refusal
 import org.fcitx.fcitx5.android.pack.VerifyDue
 import org.fcitx.fcitx5.android.utils.appContext
+import org.fcitx.fcitx5.android.utils.causes
 import timber.log.Timber
 import java.io.File
 import java.io.IOException
@@ -194,7 +195,7 @@ object PackStore {
      * (restartIfRunning waits for the host it would be stopping). True if found damaged.
      */
     fun verifyAfterFailure(kind: PackKind, e: Throwable): Boolean {
-        if (generateSequence(e) { it.cause }.take(MAX_CAUSES).any { it is PackUnavailableException }) return false
+        if (e.causes().any { it is PackUnavailableException }) return false
         val gen = shelf.dir(kind) ?: return false
         val verifiedAt = shelf.verifiedAt(kind)
         val now = System.currentTimeMillis()
@@ -235,7 +236,8 @@ object PackStore {
     /**
      * [uri] (a file the user picked) imported; [progress] told on the worker as it copies. A pack older than
      * the one there replaces it only if [replaceNewer] (its manifest, the one there's) says so, asked before
-     * anything is copied (pending L8: a few hundred MB put in by a wrong tap in the downloads); else kept.
+     * anything is copied (pending L8: a few hundred MB put in by a wrong tap in the downloads); else kept. One
+     * this build cannot use is not asked about: refused as [Refusal.Incompatible] as any other.
      * With a pack there the file is opened twice (its head, then the import): a provider whose stream
      * opens only once is refused as unreadable then.
      */
@@ -254,7 +256,9 @@ object PackStore {
                 } else {
                     resolver.openInputStream(uri)?.use { shelf.manifestOf(it.buffered(BUFFER)) }
                 }
-                val newer = manifest?.let { shelf.installed(it.kind) }?.takeIf { it.version > manifest.version }
+                // one this build cannot use is not offered as the replacement: the import below refuses it at
+                // once, as it did only after 替换 (UAT 0.6.1)
+                val newer = manifest?.takeIf(shelf::usable)?.let { shelf.installed(it.kind) }?.takeIf { it.version > manifest.version }
                 if (manifest != null && newer != null && !replaceNewer(manifest, newer)) {
                     return@withContext ImportResult.KeptNewer(manifest, newer).also { Timber.i("pack import: %s", describe(it)) }
                 }
@@ -340,6 +344,5 @@ object PackStore {
     private const val BUFFER = 1 shl 16
     private const val VERIFY_AFTER_MS = 30_000L
     private const val CHARGING_POLL_MS = 15L * 60 * 1000
-    private const val MAX_CAUSES = 8
     private const val RECENTLY_MS = 10L * 60 * 1000
 }

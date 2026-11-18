@@ -4,6 +4,7 @@
  */
 package org.fcitx.fcitx5.android.core
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -15,14 +16,19 @@ import org.fcitx.fcitx5.android.engine.glide.Glide
 import org.fcitx.fcitx5.android.engine.handwriting.InkReading
 import org.fcitx.fcitx5.android.engine.learn.control.LearningOp
 import org.fcitx.fcitx5.android.engine.learn.control.LearningResult
+import org.fcitx.fcitx5.android.engine.pinyin.Touch
+import org.fcitx.fcitx5.android.engine.reading.CandidateCard
+import org.fcitx.fcitx5.android.engine.reading.CardReading
 import org.fcitx.fcitx5.android.engine.reading.CharCard
 import org.fcitx.fcitx5.android.engine.runtime.Engines
 import org.fcitx.fcitx5.android.engine.runtime.ImportLayer
 import org.fcitx.fcitx5.android.engine.runtime.UserWord
+import org.fcitx.fcitx5.android.engine.user.RareGrid
 import org.fcitx.fcitx5.android.host.HostCore
 import org.fcitx.fcitx5.android.host.HostEvent
 import org.fcitx.fcitx5.android.host.QuickPhraseBook
 import org.fcitx.fcitx5.android.host.StatusEntry
+import org.fcitx.fcitx5.android.input.voice.VoiceEdits
 import org.fcitx.fcitx5.android.input.voice.VoiceHomophones
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -39,9 +45,12 @@ class FakeHostApi : HostApi {
 
     /**
      * Engine requests in call order, e.g. `"select(2)"`, `"activateIme(pinyin)"`. Copy-on-write: a test
-     * polls it while a page's coroutine appends on another thread.
+     * polls it while a page's coroutine appends on another thread; so every list here the host's calls change.
      */
     val calls: MutableList<String> = CopyOnWriteArrayList()
+
+    /** The timestamp each hardware key sent carried, in order: what fcitx hands back with a key it did not take. */
+    val keyTimestamps: MutableList<Int> = CopyOnWriteArrayList()
 
     val events = MutableSharedFlow<HostEvent>(extraBufferCapacity = 64)
     override val eventFlow: SharedFlow<HostEvent> get() = events
@@ -80,7 +89,7 @@ class FakeHostApi : HostApi {
     }
 
     /** The user's words, as the engine would list them: kept as given, the pinyin not read. */
-    val userWords = ArrayList<UserWord>()
+    val userWords: MutableList<UserWord> = CopyOnWriteArrayList()
 
     override suspend fun userWords(): List<UserWord> = userWords.toList()
 
@@ -99,10 +108,23 @@ class FakeHostApi : HostApi {
 
     override suspend fun pinyinsOf(texts: List<String>): Map<String, String?> = texts.associateWith { readings[it] }
 
-    /** What [charCard] answers, by the candidate's text: no data to make one of, so none unless set here. */
-    val charCards = mutableMapOf<String, CharCard>()
+    /** What [candidateCard] answers, by the candidate's text: no data to make one of, so none unless set here. */
+    val candidateCards = mutableMapOf<String, CandidateCard>()
 
-    override suspend fun charCard(index: Int, text: String, paged: Boolean): CharCard? = charCards[text]
+    override suspend fun candidateCard(index: Int, text: String, paged: Boolean): CandidateCard? = candidateCards[text]
+
+    /** What [charCardOf] answers, by the character, and what it was asked. */
+    val charCards = mutableMapOf<String, CharCard>()
+    val charCardsAsked: MutableList<Pair<String, CardReading?>> = CopyOnWriteArrayList()
+
+    /** Held till completed, if set: [charCardOf]'s answer late. */
+    var charCardGate: CompletableDeferred<Unit>? = null
+
+    override suspend fun charCardOf(char: String, reading: CardReading?): CharCard? {
+        charCardsAsked += char to reading
+        charCardGate?.await()
+        return charCards[char]
+    }
 
     // no model: each char a word of its own
     override suspend fun wordBoundaries(texts: List<String>) = texts.associateWith { IntArray(it.length + 1) { i -> i } }
@@ -112,10 +134,49 @@ class FakeHostApi : HostApi {
     override suspend fun voiceHomophones(words: List<UserWord>) = VoiceHomophones.NONE
     override suspend fun voiceHomophonesAllowed(spans: List<VoiceHomophones.Span>) = BooleanArray(spans.size)
 
+    /** What [rareHeld] answers: the texts with a character of these. */
+    var rareChars: Set<String> = emptySet()
+    override suspend fun rareHeld(texts: Collection<String>) = texts.filterTo(HashSet()) { t -> rareChars.any { it in t } }
+
+    /** What [rareGrid] answers. */
+    var rareGridAnswer: RareGrid? = null
+    override suspend fun rareGrid() = rareGridAnswer
+
     override suspend fun addUserWord(text: String, pinyin: String): Boolean {
         calls += "addUserWord($text, $pinyin)"
         userWords += UserWord(text, pinyin, UserWord.Kind.ADDED)
         return true
+    }
+
+    // voice's text not followed: no engine to follow it (EngineBackedHostApi has); the calls recorded
+    override suspend fun voiceSaid(text: String, before: String?, hinted: Boolean) {
+        calls += "voiceSaid($text, $before, $hinted)"
+    }
+
+    /** What the next report of a put-in asks ([voicePutIn]), confirmed as it is ([voiceConfirm]): none unless set here. */
+    var voiceAsk: VoiceEdits.Ask? = null
+
+    /** Set, a report of a put-in ([voicePutIn]) answers once it is completed: what the field does meanwhile. */
+    var voicePutInHeld: CompletableDeferred<Unit>? = null
+
+    override suspend fun voicePutIn(text: String): VoiceEdits.Reply {
+        calls += "voicePutIn($text)"
+        voicePutInHeld?.await()
+        return VoiceEdits.Reply(true, voiceAsk)
+    }
+
+    override suspend fun voiceConfirm(before: String?, after: String?): VoiceEdits.Ask? {
+        calls += "voiceConfirm($before, $after)"
+        return voiceAsk.also { voiceAsk = null }
+    }
+    override suspend fun voiceEditsEnd() {
+        calls += "voiceEditsEnd()"
+    }
+
+    override suspend fun voiceRemember(ask: VoiceEdits.Ask) = addUserWord(ask.word, ask.pinyin)
+    override suspend fun voiceForget(word: String) {
+        calls += "voiceForget($word)"
+        userWords.removeAll { it.text == word && it.kind == UserWord.Kind.ADDED }
     }
 
     override suspend fun blockUserWord(text: String, pinyin: String): Boolean {
@@ -129,7 +190,7 @@ class FakeHostApi : HostApi {
         userWords -= words.toSet()
     }
 
-    val englishWords = ArrayList<UserWord>()
+    val englishWords: MutableList<UserWord> = CopyOnWriteArrayList()
 
     override suspend fun englishWords(): List<UserWord> = englishWords.toList()
 
@@ -152,11 +213,9 @@ class FakeHostApi : HostApi {
     }
 
     /** What [importBatches] answers, as set by a test: nothing is imported here. */
-    val importBatches = ArrayList<ImportLayer.Batch>()
+    val importBatches: MutableList<ImportLayer.Batch> = CopyOnWriteArrayList()
 
     override suspend fun importBatches(): List<ImportLayer.Batch> = importBatches.toList()
-
-    override suspend fun importedWords(batch: Int?): List<ImportLayer.Word> = emptyList()
 
     // the batch's words left, taken out of [importBatches]; null for none such
     override suspend fun dropImport(batch: Int): Int? {
@@ -190,17 +249,21 @@ class FakeHostApi : HostApi {
             (if (started) ", started" else "") + (after?.let { ", after $it" } ?: "") + (if (selected) ", selected" else "") + (if (said) ", said)" else ")")
     }
 
-    // written on the keys: marked so ([onKeys]), with its first reading
-    override suspend fun offerInk(reading: InkReading, piece: Int, onKeys: Boolean, takesBack: Boolean): Boolean {
-        calls += if (onKeys) "offerInk($piece, keys, ${reading.texts.firstOrNull()}${if (takesBack) ", takesBack" else ""})" else "offerInk($piece)"
+    // written on the letters, with its first reading
+    override suspend fun offerInk(reading: InkReading, piece: Int): Boolean {
+        calls += "offerInk($piece, ${reading.texts.firstOrNull()})"
         return true
     }
 
     /** What [learning] answers: a test puts its own; Done by default. */
     var learned: (LearningOp) -> LearningResult = { LearningResult.Done() }
 
+    /** Run in [learning] before [learned] answers: where a test waits on something else, as the host's thread would. */
+    var whileLearning: suspend (LearningOp) -> Unit = {}
+
     override suspend fun learning(op: LearningOp): LearningResult {
         calls += "learning($op)"
+        whileLearning(op)
         return learned(op)
     }
 
@@ -213,8 +276,8 @@ class FakeHostApi : HostApi {
         return true
     }
 
-    override suspend fun inkFinished(piece: Int, onKeys: Boolean): Boolean {
-        calls += if (onKeys) "inkFinished($piece, keys)" else "inkFinished($piece)"
+    override suspend fun inkFinished(piece: Int): Boolean {
+        calls += "inkFinished($piece)"
         return true
     }
 
@@ -227,9 +290,13 @@ class FakeHostApi : HostApi {
         if (ms > 0) kotlinx.coroutines.delay(ms)
     }
 
-    override suspend fun sendKey(key: String, states: UInt, code: Int, up: Boolean, timestamp: Int) {
+    /** Each key sent with a tap's place, and the place ([TypingApi.sendKey]'s touch). */
+    val touches: MutableList<Pair<String, Touch>> = CopyOnWriteArrayList()
+
+    override suspend fun sendKey(key: String, states: UInt, code: Int, up: Boolean, timestamp: Int, touch: Touch?) {
         slow()
         calls += "sendKey(key=$key, states=$states, code=$code, up=$up)"
+        if (touch != null) touches += key to touch
     }
 
     override suspend fun sendKey(c: Char, states: UInt, code: Int, up: Boolean, timestamp: Int) {
@@ -243,10 +310,12 @@ class FakeHostApi : HostApi {
     }
 
     override suspend fun sendKey(
-        sym: KeySym, states: KeyStates, code: Int, up: Boolean, timestamp: Int
+        sym: KeySym, states: KeyStates, code: Int, up: Boolean, timestamp: Int, touch: Touch?
     ) {
         slow()
         calls += "sendKey(sym=${sym.sym}, states=${states.states}, code=$code, up=$up)"
+        if (touch != null) touches += "sym=${sym.sym}" to touch
+        keyTimestamps += timestamp
     }
 
     override suspend fun select(idx: Int, text: String?): Boolean {
@@ -256,8 +325,13 @@ class FakeHostApi : HostApi {
 
     override suspend fun isEmpty() = inputPanelCached.preedit.isEmpty() && candidates.isEmpty()
 
-    override suspend fun reset() {
-        calls += "reset()"
+    override suspend fun reset(drop: Boolean) {
+        calls += if (drop) "reset(drop)" else "reset()"
+    }
+
+    override suspend fun dropPredictions(): Boolean {
+        calls += "dropPredictions()"
+        return candidatesCached.predicting
     }
 
     override suspend fun clearTyped(keyboard: (im: String) -> Any?): HostCore.Retyping? {
@@ -318,7 +392,8 @@ class FakeHostApi : HostApi {
         return punctuationMaps[lang].orEmpty()
     }
 
-    override suspend fun setPunctuationMap(lang: String, entries: List<PunctuationMapEntry>) {
+    /** [lang]'s table as fcitx would read it: a test's, as no app path saves one since 0.6.1 (HostApi has no setter). */
+    suspend fun setPunctuationMap(lang: String, entries: List<PunctuationMapEntry>) {
         calls += "setPunctuationMap($lang)"
         punctuationMaps[lang] = entries.toList()
     }

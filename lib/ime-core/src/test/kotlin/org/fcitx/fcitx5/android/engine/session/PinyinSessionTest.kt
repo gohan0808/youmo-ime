@@ -14,6 +14,7 @@ import org.fcitx.fcitx5.android.engine.pinyin.Fuzzy
 import org.fcitx.fcitx5.android.engine.pinyin.PinyinSegmenter
 import org.fcitx.fcitx5.android.engine.pinyin.ShuangpinScheme
 import org.fcitx.fcitx5.android.engine.pinyin.ShuangpinSegmenter
+import org.fcitx.fcitx5.android.engine.pinyin.Syllables
 import org.fcitx.fcitx5.android.engine.session.Action.Backspace
 import org.fcitx.fcitx5.android.engine.session.Action.CommitRaw
 import org.fcitx.fcitx5.android.engine.session.Action.Key
@@ -555,16 +556,58 @@ class PinyinSessionTest {
         assertFalse(after.handled)
         assertEquals(ni.candidates.first(), after.commit)
         assertEquals("", after.preedit)
-        // after an initial: ing, read into the input (no 星 in the data: shown as typed)
+        // after an initial: ing, read into the input
         val xing = session.type("x;")
         assertTrue(xing.handled)
-        assertEquals("x;", xing.preedit)
+        assertEquals("xing", xing.preedit)
+        assertEquals("星", xing.candidates.first())
         val segmenter = ShuangpinSegmenter(scheme)
         assertTrue(segmenter.readsAfter("x", ';'))
         assertTrue(segmenter.readsAfter("nix", ';'))
         assertFalse(segmenter.readsAfter("", ';'))
         assertFalse(segmenter.readsAfter("ni", ';'))
         assertFalse(segmenter.readsAfter("x;", ';'))
+    }
+
+    // review M1 (061 简拼 in the middle): lj is lan, whose l alone and j; (jing) would read ; as ing:
+    // typed whole, ; after it is still the app's, 蓝 committed and ；typed; so after wo xian
+    @Test
+    fun 双拼SemicolonAfterAWholeSyllableIsPunctuationThoughAKeyAloneWouldReadIt() {
+        val session = PinyinSession(data, ShuangpinSegmenter(ShuangpinScheme.MICROSOFT), spell = true)
+        assertEquals("蓝", session.type("lj").candidates.first())
+        val lan = session.apply(Key(';'))
+        assertFalse(lan.handled)
+        assertEquals("蓝", lan.commit)
+        assertEquals("", lan.preedit)
+        val woxian = session.type("woxm")
+        val after = session.apply(Key(';'))
+        assertFalse(after.handled)
+        assertEquals(woxian.candidates.first(), after.commit)
+    }
+
+    // ; as ing where the data has no word of the syllable: x read alone, as 简拼 in the middle, for a
+    // word typed before, ; shown as typed; with none typed, both keys as typed
+    @Test
+    fun 双拼SemicolonWithNoWordOfItsSyllableIsShownAsTyped() {
+        val data = pinyinDataOf(Triple("先", "xian", -3f))
+        val session = PinyinSession(data, ShuangpinSegmenter(ShuangpinScheme.MICROSOFT), spell = true)
+        val typed = session.type("x;")
+        assertTrue(typed.handled)
+        assertEquals("x;", typed.preedit)
+        val user = UserModel(data.dictionary, data.vocabulary, index = data.wordIndex)
+        user.own(UserModel.Entry("先", intArrayOf(Syllables.id("xian"))))
+        assertEquals("x ;", PinyinSession(data, ShuangpinSegmenter(ShuangpinScheme.MICROSOFT), spell = true, user = user).type("x;").preedit)
+    }
+
+    // review M2: a syllable typed whole and the next only begun is still being typed (小鹤 ni then h),
+    // though n alone and ih (chang) read it to its end: the refiner waits
+    @Test
+    fun 双拼EndsOnASyllableOnlyAsTypedInWholeSyllables() {
+        val xiaohe = ShuangpinSegmenter(ShuangpinScheme.XIAOHE)
+        assertFalse(endsOnSyllable(xiaohe.segment("nih")))
+        assertTrue(endsOnSyllable(xiaohe.segment("nihc")))
+        assertFalse(endsOnSyllable(xiaohe.segment("ufmuh")))
+        assertTrue(endsOnSyllable(xiaohe.segment("xm")))
     }
 
     @Test

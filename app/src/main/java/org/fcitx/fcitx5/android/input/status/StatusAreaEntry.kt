@@ -8,15 +8,25 @@ import android.content.Context
 import androidx.annotation.DrawableRes
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.host.StatusEntry
+import org.fcitx.fcitx5.android.input.bar.BarIcons
+import org.fcitx.fcitx5.android.input.bar.ToolbarButton
+import org.fcitx.fcitx5.android.input.bar.ToolbarButtonLooks
 
+/**
+ * A cell of the status panel: [icon] the app's image of it (0: its label's first character), [named] the name a
+ * theme's icon replaces it by (061-toolbar-icons §2.8), null where none does (unikey's, an engine's unknown).
+ */
 sealed class StatusAreaEntry(
     val label: String,
     @DrawableRes
     val icon: Int,
-    val active: Boolean
+    val active: Boolean,
+    val named: BarIcons.Icon?,
+    /** false: drawn greyed (a toolbar button of no use here, as on the bar) */
+    val available: Boolean = true,
 ) {
-    class Android(label: String, icon: Int, val type: Type, active: Boolean = false) :
-        StatusAreaEntry(label, icon, active) {
+    class Android(label: String, val type: Type, active: Boolean = false) :
+        StatusAreaEntry(label, ToolbarButtonLooks.drawable(iconOf(type).fallback), active, iconOf(type)) {
         enum class Type {
             InputMethod,
             Keyboard,
@@ -35,20 +45,30 @@ sealed class StatusAreaEntry(
         }
     }
 
+    /** A button of the toolbar's with no slot on the bar (ToolbarConfig.Layout.slots), as on it: lit, greyed */
+    class Bar(val button: ToolbarButton, label: String, active: Boolean, available: Boolean) :
+        StatusAreaEntry(
+            label, ToolbarButtonLooks.drawable(ToolbarButtonLooks.of(button).icon.fallback), active, ToolbarButtonLooks.of(button).icon, available,
+        )
+
     class Host(val action: StatusEntry, label: String, icon: Int, active: Boolean) :
-        StatusAreaEntry(label, icon, active)
+        StatusAreaEntry(label, icon, active, BarIcons.engine(action.icon))
 
     companion object {
-        private fun drawableFromIconName(icon: String) = when (icon) {
-            // fcitx5-chinese-addons
-            "fcitx-chttrans-active" -> R.drawable.ic_fcitx_status_chttrans_trad
-            "fcitx-chttrans-inactive" -> R.drawable.ic_fcitx_status_chttrans_simp
-            "fcitx-punc-active" -> R.drawable.ic_fcitx_status_punc_active
-            "fcitx-punc-inactive" -> R.drawable.ic_fcitx_status_punc_inactive
-            "fcitx-fullwidth-active" -> R.drawable.ic_fcitx_status_fullwidth_active
-            "fcitx-fullwidth-inactive" -> R.drawable.ic_fcitx_status_fullwidth_inactive
-            "fcitx-remind-active" -> R.drawable.ic_fcitx_status_prediction_active
-            "fcitx-remind-inactive" -> R.drawable.ic_fcitx_status_prediction_inactive
+        /** A cell of the app's own by the names of the bar's icons: the toolbar's button doing its job where there is one. */
+        fun iconOf(type: Android.Type): BarIcons.Icon = when (type) {
+            Android.Type.InputMethod -> BarIcons.INPUT_METHOD_SETTINGS
+            Android.Type.Keyboard -> BarIcons.KEYBOARD_SETTINGS
+            Android.Type.ThemeList -> BarIcons.THEME
+            Android.Type.OneHandedToggle -> BarIcons.ONE_HANDED
+            Android.Type.FloatingToggle -> BarIcons.FLOATING
+            Android.Type.HabitsToggle -> BarIcons.HABITS_OFF
+            Android.Type.ClearRecent -> BarIcons.CLEAR_RECENT
+            Android.Type.KeyboardChoice -> BarIcons.CHOOSE_KEYBOARD
+        }
+
+        // fcitx5-chinese-addons' by the bar's names (BarIcons.engine), the rest the app's alone
+        private fun drawableFromIconName(icon: String) = BarIcons.engine(icon)?.let { ToolbarButtonLooks.drawable(it.fallback) } ?: when (icon) {
             // fcitx5-unikey
             "document-edit" -> R.drawable.ic_baseline_edit_24
             "character-set" -> R.drawable.ic_baseline_text_format_24
@@ -65,8 +85,7 @@ sealed class StatusAreaEntry(
         }
 
         fun fromEntry(context: Context, it: StatusEntry): Host {
-            val active = it.icon.endsWith("-active")
-            return Host(it, label(context, it.name, active) ?: it.shortText, drawableFromIconName(it.icon), active)
+            return Host(it, label(context, it.name, it.active) ?: it.shortText, drawableFromIconName(it.icon), it.active)
         }
 
         // fcitx names its actions in its own language, not the app's (InputMethodNames)

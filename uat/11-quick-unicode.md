@@ -68,11 +68,11 @@
 - **预期**：编码显示 44，候选里先是 gh 的网址，再是内置的 ghost；空格上屏网址。改了九键字母后按新字母找。
 - **JVM**：`QuickPhraseMineTest.theNineKeysFindAKeyByItsLettersShowingDigits`、`the14KeysFindByTheWholeKeyAndBackspaceKeepsStep`。
 
-### QU-12 [P2] 九键、手写长按「符」进快速输入
-- **前提**：同 QU-10；九键用 B0-九键，手写在 B0 上换到手写键盘，注音九键用 B0-注音九键，大千用 B0-注音全键盘，注音两种先在 **按键 → 按键字符和快捷键** 里给一个键设上「快速输入」快捷键。
-- **操作**：九键、手写上长按「符」；注音九键、大千上从快捷键（或勾上的工具栏「快速输入」按钮）进快速输入。
-- **预期**：进快速输入；手写、注音九键、大千时换成全键盘，退出后回到原来的键盘；快速输入时换了输入法，和平时换输入法一样，退出后是新输入法的键盘。
-- **JVM**：`LayoutSwitchKeyTest.theNineKeysAndHandwritingsSymbolsKeyHoldsQuickInputTheirNumbersKeyOnlyTaps`；换键盘 `QuickPhraseKeyboardUatTest.handwritingLendsItsPlaceToTheFullKeyboardWhileQuickInputLasts`，快速输入时按语言键换了输入法不回手写板 `anotherInputMethodChosenDuringQuickInputKeepsItsOwnLetters`，和不在快速输入时换的一样 `anInputMethodChosenDuringQuickInputShowsWhatItShowsOutOfIt`；注音两种键盘 `theZhuyinKeyboardsLendTheirPlaceAsThePadDoes`。
+### QU-12 [P2] 九键长按「符」进快速输入；手写开着时快速输入里照打
+- **前提**：同 QU-10；九键用 B0-九键，手写用 B0-手写，注音九键用 B0-注音九键，大千用 B0-注音全键盘，注音两种先在 **按键 → 按键字符和快捷键** 里给一个键设上「快速输入」快捷键。
+- **操作**：九键上长按「符」；手写开着时长按「符」进快速输入，点几个字母，退出后写「人」；注音九键、大千上从快捷键（或勾上的工具栏「快速输入」按钮）进快速输入。
+- **预期**：进快速输入；手写开着时快速输入里字母不变淡、点了就打，退出后接着写；注音九键、大千时换成全键盘，退出后回到原来的键盘；快速输入时换了输入法，和平时换输入法一样，退出后是新输入法的键盘。
+- **JVM**：`LayoutSwitchKeyTest.theNineKeysSymbolsKeyHoldsQuickInputItsNumbersKeyOnlyTaps`、`KeyHandwritingUatTest.outOfQuickInputTheLettersAreWrittenOnAgain`；注音两种键盘 `QuickPhraseKeyboardUatTest.theZhuyinKeyboardsLendTheirPlaceToTheFullKeyboard`。
 
 ### QU-13 [P1] 密码框里不记顺序
 - **前提**：同 QU-10，测试页的「密码」框。
@@ -89,8 +89,8 @@
 ### QU-15 [P2] 设置页加、改、删、导入导出
 - **前提**：同 QU-10，**设置 → 词库与短语 → 快速输入**。
 - **操作**：快速输入页里加一条、改它、点开它按「删除」再撤销；再加一条 `zz`，让页面上有三条，点开中间那条按「删除」，再撤销；导出再导入；再导入测试页 `fixtures/fields.html`（不是 `.mb`，一条也读不出；先 `adb push uat/fixtures/fields.html /sdcard/Download/` 放进手机「下载」），再导入一个自己写的 `.mb`，里面两行跳过：一行关键词是 31 个字母（如 `abcdefghijklmnopqrstuvwxyzabcde 内容`），一行关键词后面跟着 31 个汉字（如 `ab` 加 31 个「长」再空格、内容：汉字起的部分读成注释，超过 30 个字）。（关键词里的普通空格做不出无效行：第一个普通空格就是关键词和内容的分界，`a b 内容` 读成关键词 `a`、内容 `b 内容`；关键词里的中文或全角空格也不是：从它起读成注释。）编辑框里关键词打一个汉字。
-- **预期**：每一步键盘上马上看得到；重复的拒绝（关键词只差大小写也算）；撤销的那条回到原来的位置（中间那条撤销后仍在中间，长按「符」看栏上也在原来的位置，不跑到末尾）；导入报加了几条、跳过几条重复的（和几条超过 5000 字的）；导入 `fields.html` 立刻提示「这个文件里没有快速输入：每行是关键词、空格、内容」，列表不变；那两行跳过，提示里另说「另跳过 2 条没有关键词或关键词、注释太长的（关键词最多 30 个字符，注释最多 30 个字）」；编辑框里关键词打了汉字，框下马上提示关键词只能是英文字母、数字和符号，点确定不存；自带表的开关关了不弹回，能再打开。
-- **JVM**：`QuickPhraseManagerTest`（六项，撤销放回原位并带回使用时间见 `aDeletionUndoneIsPutBackWhereItWasWithItsTimeOfUse`）；`QuickPhraseSettingsUatTest.anEntryAddedChangedFoundAndDeleted`、`aBuiltInTableTurnedOffStaysOffAndTurnsOnAgain`、`theImportToastCountsEveryLineSkipped`；关键词只许 ASCII `aKeyIsAsciiANoteAndAFolderAreSavedAndFolderChipsSortThePage`；文件正忙时开关连拨两次不先显示第一次 `aSwitchTurnedTwiceWhileTheFilesAreBusyNeverShowsTheFirstTurn`。
+- **预期**：每一步键盘上马上看得到；重复的拒绝（关键词只差大小写也算）；撤销的那条回到原来的位置（中间那条撤销后仍在中间，长按「符」看栏上也在原来的位置，不跑到末尾）；导入报加了几条、跳过几条重复的（和几条超过 5000 字的）；导入 `fields.html` 立刻提示「这个文件里没有快速输入：每行是关键词、空格、内容」，列表不变；那两行跳过，提示里另说「另跳过 2 条没有关键词或关键词、注释太长的（关键词最多 30 个字符，注释最多 30 个字）」；编辑框里关键词打了汉字，框下马上提示关键词只能是英文字母、数字和符号，点确定不存；自带表的开关关了不弹回，能再打开。导入最多加到 5000 条：列表快满时导入，只加到 5000 条（文件里靠前的先进），提示后面另写「另有 N 条没导入：导入最多加到 5000 条」，不说「不是 .mb 文件」；以前就超过 5000 条的列表不删，只是导入不再加；在编辑框里手动加不受这个限制。
+- **JVM**：`QuickPhraseManagerTest`（六项，上限见 `anImportFillsTheListToItsLimitAndCountsTheRest`（满 5000 条后在编辑框里手动加的照常加上）；撤销放回原位并带回使用时间见 `aDeletionUndoneIsPutBackWhereItWasWithItsTimeOfUse`）；`QuickPhraseSettingsUatTest.anEntryAddedChangedFoundAndDeleted`、`aBuiltInTableTurnedOffStaysOffAndTurnsOnAgain`、`theImportToastCountsEveryLineSkipped`（含只超上限时的提示）；关键词只许 ASCII `aKeyIsAsciiANoteAndAFolderAreSavedAndFolderChipsSortThePage`；文件正忙时开关连拨两次不先显示第一次 `aSwitchTurnedTwiceWhileTheFilesAreBusyNeverShowsTheFirstTurn`。
 
 ### QU-16 [P0] 条目跟着备份走
 - **前提**：同 QU-10，另在快速输入页关掉一张自带表；长按「符」点一次 addr，让它排到 gh 前面（快速输入页不能拖动排序，顺序就是用的先后）。

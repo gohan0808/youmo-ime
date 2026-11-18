@@ -7,10 +7,13 @@ package org.fcitx.fcitx5.android.uat
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.fcitx.fcitx5.android.FcitxApplication
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.Uat
+import org.fcitx.fcitx5.android.assertRows
 import org.fcitx.fcitx5.android.core.CandidateWord
 import org.fcitx.fcitx5.android.core.KotlinHost
 import org.fcitx.fcitx5.android.core.ScriptedEngine
@@ -18,7 +21,9 @@ import org.fcitx.fcitx5.android.core.keyboardOn
 import org.fcitx.fcitx5.android.core.startedHost
 import org.fcitx.fcitx5.android.data.theme.ThemeManager
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog
+import org.fcitx.fcitx5.android.engine.learn.control.LearningOp
 import org.fcitx.fcitx5.android.host.HostEvent
+import org.fcitx.fcitx5.android.host.StatusEntry
 import org.fcitx.fcitx5.android.input.KeyboardHarness
 import org.fcitx.fcitx5.android.until as waitUntil
 import org.fcitx.fcitx5.android.utils.appContext
@@ -127,12 +132,12 @@ class BarUatTest {
         tap(generateSequence(t) { it.parent as? View }.first { it.hasOnClickListeners() })
     }
 
-    // the host's toggle [name] on, as it now stands: its icon -active, but punctuation's is -active
-    // while Chinese punctuation is on, so its "on" (English punctuation) is the icon without it.
+    // the host's toggle [name] on, as it now stands: its entry active, but punctuation's is active
+    // while Chinese punctuation is on, so its "on" (English punctuation) is the entry not active.
     // Read on the test's thread, the host answering on its own (the cache is empty till its first event)
     private fun on(name: String) =
         fcitx!!.statusAreaCached.ifEmpty { runBlocking { fcitx!!.statusArea() } }
-            .first { it.name == name }.icon.endsWith("-active") != (name == "punctuation")
+            .first { it.name == name }.active != (name == "punctuation")
 
     private fun KeyboardHarness.toggled(name: String, from: Int, to: Int) {
         statusPanel()
@@ -160,6 +165,31 @@ class BarUatTest {
     @Test
     @Uat("TB-17")
     fun theStatusPanelTurnsFullWidthOn() = onTheHost().toggled("fullwidth", R.string.status_half_width, R.string.status_full_width)
+
+    // the panel's own read of the status, and a status the host sends before that read is shown (the field focused as
+    // the panel opened, the host slow to start): the newer stays. Shown last, the read's older one took the input
+    // method's toggles off the panel till the next status (TB-15 timed out so at SDK 29)
+    @Test
+    fun aStatusSentAsThePanelOpensIsNotTakenBackByItsOwnOlderRead() {
+        val h = harness().start()
+        val simplified = listOf(StatusEntry(7, "chttrans", "fcitx-chttrans-inactive", "", false))
+        // the read finds no input method focused yet; the status comes while the panel asks its next question.
+        // Load-bearing: StatusAreaWindow.onAttached reads statusArea() before learning(Saving). Were the two swapped,
+        // the read would find the new status and this would pass without the race (review R26 F8317)
+        h.api.statusAreaCached = emptyList()
+        h.api.whileLearning = { op ->
+            if (op == LearningOp.Saving) {
+                h.api.statusAreaCached = simplified
+                check(h.api.events.tryEmit(HostEvent.StatusArea(simplified, KeyboardHarness.PINYIN)))
+                // off the main thread and back, as the host's own: the status reaches the panel meanwhile
+                withContext(Dispatchers.Default) {}
+            }
+        }
+        h.statusPanel()
+        h.idle()
+        h.relayout()
+        assertTrue(h.texts(h.inputView).toString(), h.shownText(h.service.getString(R.string.status_simplified)))
+    }
 
     @Test
     @Uat("TB-19")
@@ -203,6 +233,55 @@ class BarUatTest {
         h.candidates()
         assertTrue(h.has(R.string.expand_toolbar))
         assertFalse(h.texts().toString(), "你" in h.texts())
+    }
+
+    // 联想's × (0.6.1): at the far right with 联想's words alone (the ⌄ before it), not with what is typed;
+    // tapped, the host asked to drop them, nothing else (the 联想 setting as it was)
+    @Test
+    @Uat("PY-134")
+    fun theCrossWithThePredictionsDropsThem() {
+        val h = harness().start()
+        fun predictions(vararg words: String) {
+            h.api.candidates = Array(words.size) { CandidateWord("", words[it], "") }
+            h.emit(HostEvent.Candidates(words.size, h.api.candidates.toList(), predicting = true))
+        }
+        val cross = h.service.getString(R.string.drop_predictions)
+        assertRows(
+            "联想's words: the × at the far right, the ⌄ before it" to {
+                // more than the bar holds: the ⌄ shown too
+                predictions(*Array(30) { "词$it" })
+                assertTrue(h.has(R.string.drop_predictions))
+                val x = h.described(cross)
+                val bar = x.rootView.width
+                val at = IntArray(2).also { x.getLocationInWindow(it) }
+                assertEquals("at the far right", bar, at[0] + x.width)
+                val expand = h.described(h.service.getString(R.string.expand_candidates_list))
+                val e = IntArray(2).also { expand.getLocationInWindow(it) }
+                assertTrue("the ⌄ before it", e[0] + expand.width <= at[0])
+                h.capture("BarUatTest/predictions")
+            },
+            "tapped: the host asked to drop them and nothing else (联想下一个词, an engine option, not set)" to {
+                h.api.calls.clear()
+                h.tap(h.described(cross))
+                assertEquals(listOf("dropPredictions()"), h.api.calls)
+            },
+            "dropped (the host's list still 联想's): the engine kept its context, none told again (review 061-small M1: " +
+                "a context told after it had English offer the word a correction replaced)" to {
+                h.api.candidatesCached = h.api.candidatesCached.copy(predicting = true)
+                h.api.calls.clear()
+                h.tap(h.described(cross))
+                h.idle()
+                assertEquals(listOf("dropPredictions()"), h.api.calls)
+            },
+            "the list emptied: no ×" to {
+                h.candidates()
+                assertFalse(h.has(R.string.drop_predictions))
+            },
+            "what is typed: no ×" to {
+                h.candidates("你", "呢")
+                assertFalse(h.has(R.string.drop_predictions))
+            },
+        )
     }
 
     @Test
@@ -271,29 +350,59 @@ class BarUatTest {
         popup.contentView.performClick()
         ShadowLooper.idleMainLooper(1, TimeUnit.SECONDS)
         assertFalse(popup.isShowing)
-        // again, left alone: gone after its two seconds
+        // again, left alone: gone after its one second
         h.service.say(R.string.text_copied)
         h.idle()
         val again = Shadows.shadowOf(RuntimeEnvironment.getApplication()).latestPopupWindow!!
         assertTrue(again.isShowing)
-        ShadowLooper.idleMainLooper(3, TimeUnit.SECONDS)
+        ShadowLooper.idleMainLooper(500, TimeUnit.MILLISECONDS)
+        assertTrue("still up at half a second", again.isShowing)
+        ShadowLooper.idleMainLooper(1, TimeUnit.SECONDS)
         assertFalse(again.isShowing)
+    }
+
+    // the open toolbar's buttons in the bar's slots (the user's call, 2026-11-15): each as wide as the menu key, never
+    // under 28 dp, side by side from it, ⋯ last; [least] the narrowest the slots may be here
+    private fun toolbarInSlots(h: KeyboardHarness, sp: Int, least: Int = h.service.dp(28)) {
+        val menu = h.described(h.service.getString(R.string.hide_toolbar)).width
+        val row = h.described(h.service.getString(R.string.status_area)).parent as ViewGroup
+        assertEquals("⋯ last", h.service.getString(R.string.status_area), row.getChildAt(row.childCount - 1).contentDescription)
+        for (i in 0 until row.childCount) {
+            val b = row.getChildAt(i)
+            assertEquals("${b.contentDescription} at $sp sp", menu, b.width)
+            assertTrue("${b.contentDescription} ${b.width} at $sp sp", b.width >= least)
+        }
+    }
+
+    // MN-20 where the bar has room for the open toolbar: at 14 sp no button squeezed below 40 dp
+    @Test
+    @Uat("MN-20")
+    @Config(qualifiers = "w480dp-h851dp-port-440dpi")
+    fun aRoomyBarsToolbarIsNotSqueezed() {
+        val size = ThemeManager.prefs.candidateTextSize
+        try {
+            size.setValue(14)
+            val h = KeyboardHarness().also { harness = it }.start()
+            h.tap(h.described(h.service.getString(R.string.expand_toolbar)))
+            // twelve slots of 40 dp
+            toolbarInSlots(h, 14, h.service.dp(40))
+        } finally {
+            size.setValue(size.defaultValue)
+        }
     }
 
     private fun sizes(sp: Int, name: String): Pair<Int, Int> {
         ThemeManager.prefs.candidateTextSize.setValue(sp)
         val h = KeyboardHarness().also { harness = it }.start()
         val bar = h.described(h.service.getString(R.string.expand_toolbar)).parent as View
-        // idle bar's keys: none narrower than 40 dp
+        // the idle bar's keys in its slots, as wide as the open toolbar's (the user's call, 2026-11-15): about a
+        // button's own (a tenth of 393 dp at 14 sp), never under 28 dp
         for (d in listOf(R.string.expand_toolbar, R.string.a11y_key_emoji, R.string.hide_keyboard)) {
-            assertTrue("$d at $sp sp", h.described(h.service.getString(d)).width >= h.service.dp(40))
+            val w = h.described(h.service.getString(d)).width
+            assertTrue("$d $w at $sp sp", w >= minOf(h.service.dp(40), bar.width / 10) && w >= h.service.dp(28))
         }
         h.tap(h.described(h.service.getString(R.string.expand_toolbar)))
-        val min = h.service.dp(if (sp <= 14) 40 else 28)
-        for (d in listOf(R.string.undo, R.string.redo, R.string.text_editing, R.string.clipboard, R.string.status_area)) {
-            val b = h.described(h.service.getString(d))
-            assertTrue("$d ${b.width} at $sp sp", b.width >= min)
-        }
+        toolbarInSlots(h, sp)
         h.capture("BarUatTest/toolbar_${name}")
         // the panels' own bar keys are as high as the bar (F4175, F4189): the clipboard's 清空, the
         // status area's settings, the text-editing panel's 剪贴板
@@ -307,7 +416,8 @@ class BarUatTest {
             R.string.text_editing to R.string.clipboard,
         )) {
             if (!has(R.string.hide_toolbar)) h.tap(h.described(h.service.getString(R.string.expand_toolbar)))
-            h.tap(h.described(h.service.getString(open)))
+            // on the bar where it has a slot, else from ⋯'s panel (28 sp: seven slots, room for one and ⋯)
+            ToolbarSpacingUatTest.openFromToolbar(h, open)
             h.waitFor("${h.service.getString(d)} shown") { h.relayout(); has(d) }
             val b = h.described(h.service.getString(d))
             assertEquals("$d at $sp sp", bar.height, b.height)

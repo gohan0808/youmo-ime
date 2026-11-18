@@ -68,14 +68,17 @@ object InputMethodCatalog {
     const val ERBI = "engine-erbi"
     const val WUBI_PINYIN = "engine-wubipinyin"
 
-    /** Handwriting: characters written one at a time on a pad, read as a sentence. */
-    const val HANDWRITING = "engine-handwriting"
+    /**
+     * 0.6.0's handwriting input method (手写), its pad a keyboard of its own: a user's list may still hold it
+     * (HandwritingRetire turns it into the toolbar's 手写 over the keys); never listed again.
+     */
+    const val HANDWRITING_RETIRED = "engine-handwriting"
 
     /**
      * The input methods but the tables ([TABLES], which read it too) whose sessions read pinyin's
-     * data and word index as they are made: the pinyins, and handwriting, which reads its sentences by them.
+     * data and word index as they are made: the pinyins.
      */
-    internal val READS_PINYIN_DATA = setOf(PINYIN, SHUANGPIN, T9, HANDWRITING)
+    internal val READS_PINYIN_DATA = setOf(PINYIN, SHUANGPIN, T9)
 
     /** Offered first to be added: the most asked for after pinyin, which is there already (its nine keys a keyboard of it). */
     private val ADDED_FIRST = listOf(WUBI)
@@ -111,12 +114,12 @@ object InputMethodCatalog {
 
     /**
      * Whether [im] reads the grouped keyboard code [c] ([isCode]): pinyin the 14 keys' (a tap's
-     * with its place too), the 18 keys' and the nine keys' of its own ([Keyboard.KEYED_CODES]);
+     * with its place too), the 18 keys' (so too) and the nine keys' of its own ([Keyboard.KEYED_CODES]);
      * 双拼 the 18 keys', the nine keys' 双拼's and its 14 keys'. A code is one keyboard's alone, so
      * one another input method gets (the keyboard shown behind a switch) is dropped, never read.
      */
     fun readsCode(im: String, c: Int): Boolean = when {
-        c in Keyboard.TAPS || c in Keyboard.PLACES || c in NineKeyLetters.CUSTOM_BLOCK || c in Keyboard.PINYIN_NINE || c in Keyboard.PINYIN_18 || c in Keyboard.ZHUYIN_NINE || c in Keyboard.ZHUYIN_FULL -> im == PINYIN
+        Keyboard.isTap(c) || c in NineKeyLetters.CUSTOM_BLOCK || c in Keyboard.PINYIN_NINE || c in Keyboard.PINYIN_18 || c in Keyboard.ZHUYIN_NINE || c in Keyboard.ZHUYIN_FULL -> im == PINYIN
         c in Keyboard.SHUANGPIN_14 -> im == SHUANGPIN
         else -> when (NineKeyLetters.ofCode(c)) {
             null -> false
@@ -126,20 +129,14 @@ object InputMethodCatalog {
     }
 
     /** Whether [c] is a grouped keyboard's code, some input method's to read ([readsCode]): never text for a field. */
-    fun isCode(c: Int): Boolean = c in NineKeyLetters.CODES || c in NineKeyLetters.CUSTOM_BLOCK || c in Keyboard.TAPS || c in Keyboard.PLACES || c in Keyboard.KEYED_CODES
+    fun isCode(c: Int): Boolean = c in NineKeyLetters.CODES || c in NineKeyLetters.CUSTOM_BLOCK || Keyboard.isTap(c) || c in Keyboard.KEYED_CODES
 
     // with nothing typed ' is the app's: through the engine it would be a mark, ‘
     private fun separates(c: Int, composing: Boolean) = composing && c == SyllableGraph.SEPARATOR.code
 
     /**
-     * Whether input method [name] is typed with a keyboard's keys: all but handwriting, made for a
-     * touch screen (pinyin's nine keys a keyboard of pinyin, which a hardware keyboard types 全拼 on).
-     */
-    fun takesKeyboard(name: String): Boolean = name != HANDWRITING
-
-    /**
      * Whether input method [name] reads a glide across its keys (滑行输入): English, the pinyins and
-     * the tables, not handwriting; pinyin's nine keys' session [T9] too, which pinyin hands a glide
+     * the tables; pinyin's nine keys' session [T9] too, which pinyin hands a glide
      * over them (KeyboardPair). Each is made a session that reads one (SessionFactory.make's
      * `when`): one added here is added there.
      */
@@ -147,17 +144,17 @@ object InputMethodCatalog {
 
     /**
      * Whether input method [name] filters its candidates by a stroke drawn on its keyboard (笔画筛选):
-     * pinyin and 双拼 on every keyboard they have, not the tables, English or handwriting. Each is made
+     * pinyin and 双拼 on every keyboard they have, not the tables or English. Each is made
      * a session that does (SessionFactory.make's [StrokeFilter][org.fcitx.fcitx5.android.engine.stroke.StrokeFilter]).
      */
     fun filtersByStrokes(name: String): Boolean = name == PINYIN || name == SHUANGPIN || name in KeyboardPair.KEYED
 
     /**
-     * Whether input method [name] may be written on over its keys (键盘手写, design 060-kbd-handwriting §4):
-     * the Chinese ones on every keyboard they have, not English nor handwriting itself (nor none, a keyboard not told yet). Each is made a
+     * Whether input method [name] may be written on over its keys (手写, the toolbar's, design 061-handwriting-toolbar):
+     * the Chinese ones on every keyboard they have, not English (nor none, a keyboard not told yet). Each is made a
      * session that reads the ink ([InkOver][org.fcitx.fcitx5.android.engine.handwriting.InkOver], SessionFactory.make).
      */
-    fun writesOnKeys(name: String): Boolean = name.isNotEmpty() && name != ENGLISH && name != HANDWRITING
+    fun writesOnKeys(name: String): Boolean = name.isNotEmpty() && name != ENGLISH
 
     /** English: fcitx's own name for it, which fcitx falls back to, so a user's lists keep it. */
     const val ENGLISH = "keyboard-us"
@@ -178,6 +175,9 @@ object InputMethodCatalog {
 
     /** Each character's radical, strokes and parts (CharInfo), for its card; read if the app has it. */
     const val CHAR_INFO_DATA = "engine/charinfo.data"
+
+    /** Each listed character's group for 生僻字屏蔽 (CharLevels), in the APK: without it the blocking is off. */
+    const val CHAR_LEVELS_DATA = "engine/charlevels.data"
     /** Read if the app has one; without it the engine types by the decoder alone. */
     const val SENTENCE_MODEL = "engine/sentence-model.safetensors"
     /** Six times the work of [SENTENCE_MODEL], and right more often: see [PinyinSession]'s refiner. */
@@ -220,7 +220,6 @@ object InputMethodCatalog {
         ListedInputMethod(ZIRANMA, "自", "自然码", "fcitx-ziranma", ListedInputMethod.CHINESE),
         ListedInputMethod(ERBI, "二", "二笔", "fcitx-erbi", ListedInputMethod.CHINESE),
         ListedInputMethod(WUBI_PINYIN, "五", "五笔拼音", "fcitx-wubi", ListedInputMethod.CHINESE),
-        ListedInputMethod(HANDWRITING, "手", "手写", "draw-freehand", ListedInputMethod.CHINESE, composesText = true),
         ListedInputMethod(ENGLISH, "En", "English", "input-keyboard", "en", composesText = true),
     )
 

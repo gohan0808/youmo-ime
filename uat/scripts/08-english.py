@@ -1,7 +1,7 @@
 """uat/08-english.md (B0-英文). The .md is the source of truth; each function follows its case's
 前提/操作/预期."""
 
-from uat import block_candidate, case, check, gear, glide_on
+from uat import block_candidate, case, check, choose, gear, glide_on, keys_at
 
 
 def en_settings(d):
@@ -118,3 +118,48 @@ def en27(d):
 
 
 case("EN-28", needs="jvm:EnglishBlockOffersTest")(lambda d: None)
+case("EN-29", needs="jvm:EnginesWordCardTest、CandidateMenuUatTest.noReadingLineWhereTheEngineHasNoCard")(lambda d: None)
+@case("EN-30", base="B0-英文", mutates="learn")
+def en30(d):
+    # a word typed with a capital of its own (a name, not a sentence's start) is corrected only for a key beside: b
+    # tapped near its left edge, toward v, reads as v (Stebe → Steve); all in the middle it is kept as typed. A place
+    # lost (read as no place) corrects both, a wrong reach (b and n, say) neither (review R26 F8418)
+    def typed(at):
+        keys_at(d, "hi", [None, None])
+        d.space()
+        d.tap(d.keys(refresh=True)["shift"], 0.6)
+        keys_at(d, "stebe", at)
+        d.space()
+        return d.field_text() or ""
+    edge = typed([None, None, None, (0.05, 0.5), None])
+    d.shot("kb", "b 点在靠 v 的边上打 hi Stebe、空格：上屏「hi Steve 」")
+    d.clear()
+    mid = typed([None] * 5)
+    d.clear()
+    check(edge.endswith(" Steve "), f"b 靠 v 点的 Stebe 空格后框里「{edge}」，该改成 Steve")
+    check(mid.endswith(" Stebe "), f"正中点的 Stebe 空格后框里「{mid}」，该照打的留着")
+    return f"靠边「{edge}」；正中「{mid}」"
+
+
+@case("EN-31", base="B0-英文", mutates=True)
+def en31(d):
+    d.hide_keyboard()
+    gear(d, "英文")
+    choose(d, "键盘", "九键")
+    d.open_page("text")
+    d.switch_im("英文")
+    d.clear()
+    # when (9436) with its 4 slipped onto 5, tapped 3% of 5's width in from its left edge, by 4: when; all in the
+    # middle, each key's first letter (9536 spells nothing)
+    keys_at(d, "9536", [None, (0.03, 0.5), None, None])
+    # English's nine keys compose in the field (no code row)
+    edge = d.field_text()
+    c = d.cands()
+    d.shot("kb", "9、5 贴着靠 4 的左边、3、6：框里正在打的是 when，首选 when")
+    d.clear()
+    keys_at(d, "9536", [None] * 4)
+    mid = d.field_text()
+    d.clear()
+    check(edge == "when" and "when" in c[:3], f"5 贴左边点的 9536：框里「{edge}」，候选 {c[:4]}")
+    check(mid == "wjdm", f"四个键都点在正中的 9536：框里「{mid}」")
+    return f"贴边「{edge}」{c[:3]}；正中「{mid}」"

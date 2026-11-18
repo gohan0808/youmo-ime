@@ -17,17 +17,26 @@ data class Penalties(
     /** A common slip: `zhagn` for zhang. */
     val typo: Float = -1.5f,
     /**
-     * A letter slipped onto the key next to it: `nihap` for nihao. From -0.5 to -2 it reads as
-     * many slips right and costs clean input nothing; the most of that, to prune the most.
-     * Twice [initial], so where input has a vowel elsewhere, a consonant pair read as a slip
-     * (`xh` for xu in `woxhni`) ties with the two initials (喜欢) and the model decides.
+     * A key slipped onto the key next to it (`nihap` for nihao), on top of what the slip costs by
+     * where the key was tapped ([SyllableGraph.slipCost][org.fcitx.fcitx5.android.engine.pinyin.SyllableGraph.slipCost];
+     * 061-neighbour-correction §3), which with no place is the 0.6.0 rule's -2: none of its own.
      */
-    val neighbour: Float = -2f,
+    val neighbour: Float = 0f,
     /**
      * An initial standing for its syllable (简拼): `n` in `nh`. Accuracy barely depends on it, as
      * abbreviated readings mostly compete among themselves; a larger one prunes more.
      */
     val initial: Float = -1f,
+    /**
+     * On top of [initial], 双拼's key read as an initial alone where it and the next make a
+     * syllable (简拼 in the middle, [SyllableMatches.ABBREV][org.fcitx.fcitx5.android.engine.pinyin.SyllableMatches.ABBREV]).
+     * Swept over 0, -1, -2 and -4 in 自然码, 小鹤 and 微软 (dev/design/061-shuangpin-abbrev-measure.md):
+     * -2 is the least that leaves input typed in whole syllables reading as before (2375 sentences,
+     * 1800 words, 500 characters, none changed; 0 lost 8 or 9 of chat's sentences, -1 two), and
+     * still puts a word typed with its first syllable whole and the rest by initials on the first
+     * page 96% of the time (47% without).
+     */
+    val abbrev: Float = -2f,
     /** A syllable still being typed at the end: `zho` for zhong. */
     val partial: Float = -1f,
     /**

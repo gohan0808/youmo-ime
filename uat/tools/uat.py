@@ -29,6 +29,7 @@ Output is kept short on purpose (counts and paths): an agent reading it re-reads
 """
 import argparse
 import datetime
+import hashlib
 import importlib.util
 import io
 import json
@@ -1478,6 +1479,20 @@ class Device:
             (n for n in s.ime() if n.desc.startswith("空格")), None)
         return sp.desc if sp else ""
 
+    def to_letters(self, s=None):
+        """a number pad, a panel or the emoji search left up: its way back (the scene's id `back`, which
+        says 返回 since 0.6.1, no longer ABC) until the letters are, three at most (the symbol panel
+        over a number pad, the emoji search over its panel); the screen then"""
+        s = s or self.screen()
+        for _ in range(3):
+            back = next((n for n in s.ime() if n.key == "back"), None)
+            if not back or s.find(rid="button_lang", where="ime"):
+                break
+            self.tap(back.c, 0.6)
+            self._keys = None
+            s = self.screen()
+        return s
+
     def switch_im(self, label):
         """the globe key until the space key names this input method"""
         for _ in range(8):
@@ -1485,11 +1500,7 @@ class Device:
             if label == self.im_label().split("，", 1)[-1]:
                 self._keys = None
                 return
-            s = self.screen()
-            abc = s.find(text="ABC", where="ime")   # a number/symbol layout up: the letters first
-            if abc and not s.find(rid="button_lang", where="ime"):
-                self.tap(abc.c, 0.6)
-                self._keys = None
+            self.to_letters()   # a number pad or a panel up: the letters first
             self.press("globe", after=0.8)
             self._keys = None
         raise Blocked(f"地球键切不到「{label}」：{self.im_label()}")
@@ -1757,7 +1768,7 @@ def ensure_ime(d):
 # set to this before the page is opened again (B0-14键 and B0-九键 are 拼音's keyboards, their own branch in reset)
 IM_BASES = {"B0-五笔": ("五笔", "五笔", None),
             "B0-二笔": ("二笔", "二笔", None), "B0-仓颉": ("仓颉", "仓颉", None),
-            "B0-双拼": ("双拼", "双拼", None), "B0-手写": ("手写", "手写", None),
+            "B0-双拼": ("双拼", "双拼", None),
             "B0-自然码": ("自然码", "自然码", None), "B0-五笔拼音": ("五笔拼音", "五笔拼音", None),
             "B0-英文": (None, "英文", None),
             "B0-18键": ("双拼", "双拼", "18 键"), "B0-九键双拼": ("双拼", "双拼", "九键")}
@@ -1858,8 +1869,38 @@ def reset(d, base, page):
     elif base == "B0-横屏":
         d.rotate(1)
         d.open_page(page)
+    elif base == "B0-手写":
+        handwriting(d, True)
     elif base not in ("B0", "B0-实体", "B0-语音"):
         raise Blocked(f"unknown baseline {base}")
+
+
+def handwriting(d, on, offered=True):
+    """0.6.1: handwriting is the toolbar's 手写 toggle (pinned on a new install), kept across fields and
+    restarts: lit for B0-手写, off for every other baseline (a case before may have left it on). Where it
+    is [offered] (every Chinese input method) a missing button blocks, turning it off too: a case left on
+    would go unseen (raised from a reset it blocks the case being reset, not the one that left it); English and
+    a password field grey it out (described 「手写，这里用不了」, not found by its name here) and a hardware
+    keyboard has none (the toggle is kept for the next field it is offered in)"""
+    tapped = False
+    for _ in range(3):
+        s = d.screen()
+        b = s.find(desc="手写", where="ime")
+        if not b and tapped and not on:
+            # turned off from the candidate bar while it shows predictions (HW-41 after 人 and space): that
+            # 手写 is there only while handwriting is on (docs/other-input-methods.md), so it goes, not dims
+            d._keys = None
+            return
+        if not b:
+            if not offered and not on:
+                return
+            raise Blocked("工具栏上没有「手写」")
+        if b.checked == on:
+            d._keys = None
+            return
+        d.tap(b.c, 0.6)
+        tapped = True
+    raise Blocked(f"「手写」按钮点了没变成{'开' if on else '关'}")
 
 
 def plug(d, base):
@@ -1897,10 +1938,7 @@ def soft_reset(d, base, page):
     if getattr(d, "rot", 0) != want_rot:   # a case turned the screen
         d.rotate(want_rot)
         s = d.screen()
-    abc = s.find(text="ABC", where="ime")   # a case left a number/symbol layout up
-    if abc and not s.find(rid="button_lang", where="ime"):
-        d.tap(abc.c, 0.6)
-        d._keys = None
+    s = d.to_letters(s)   # a case left a number pad or a panel up
     fold = s.find(desc="隐藏工具栏", where="ime")   # a case left the toolbar open: the next starts closed
     if fold:
         d.tap(fold.c, 0.4)
@@ -1911,6 +1949,8 @@ def soft_reset(d, base, page):
             d.open_page(page)
         d.clear()
     d.switch_im(IM_BASES[base][1] if base in IM_BASES else "拼音")
+    # no button where handwriting is not offered: English, a password field, a hardware keyboard (no toolbar on screen)
+    handwriting(d, base == "B0-手写", offered=base not in ("B0-英文", "B0-实体") and page != "password")
 
 
 # ---------------------------------------------------------------- helpers for the case scripts
@@ -1956,9 +1996,9 @@ def choose(d, title, option):
         pool = [n for n in box.walk()] if box and box.rid == "select_dialog_listview" else s.app()
         return next((n for n in pool if n.text == option), None) or \
             next((n for n in pool if n.text.startswith(option) and n.text != title and n.rid != "summary"), None)
-    try:   # the dialog up, then the option in it
-        d.wait(dialog, 3, step=0.15)
-        n = d.wait(opt, 2, step=0.15)
+    try:   # the dialog up, then the option in it (bounds only: ended as soon as it shows; a loaded machine took over 3 s)
+        d.wait(dialog, 10, step=0.15)
+        n = d.wait(opt, 5, step=0.15)
     except Blocked:
         raise Blocked(f"「{title}」里没有「{option}」：{d.screen().texts()[:12]}")
     d.tap(n.c, 0.3 if not SLOW else 1.0)
@@ -2050,6 +2090,31 @@ def has_keyboard_code(t):
     return any(unicodedata.category(c) == "Co" for c in t or "")
 
 
+def keys_at(d, keys, at, after=0.6):
+    """tap the letter or digit keys of keys one by one, the key at i where at[i] says: None its centre, or (fx, fy)
+    within its bounds (0 its left or top edge, 1 its right or bottom), a finger off the middle toward a key
+    beside it (061-neighbour-correction)"""
+    if len(at) != len(keys):
+        raise ValueError(f"at {at} for {keys}")
+    k = d.keys(refresh=True)
+    s = d.screen()
+    pts = []
+    for ch, place in zip(keys, at):
+        if ch not in k:
+            raise Blocked(f"键盘上没有 {ch}：{sorted(k)[:20]}")
+        if place is None:
+            pts.append(k[ch])
+            continue
+        # the key's node by its centre (the nine keys' digit is no text of theirs)
+        kb = s.find(rid="keyboard_view", where="ime")
+        n = next((m for m in (kb.walk() if kb else []) if m.clickable and m.c == k[ch]), None)
+        if not n:
+            raise Blocked(f"键盘上没有 {ch} 的边界")
+        fx, fy = place
+        pts.append((int(n.b[0] + (n.b[2] - n.b[0]) * fx), int(n.b[1] + (n.b[3] - n.b[1]) * fy)))
+    d.taps(pts, gap=0.3, after=after)
+
+
 def grouped_keys(d, groups, *, after=0.6, at=None, drift=None):
     """tap the 14 or 18 keys by their letters ("bn ui gh"), a key a word; "'" is the separator key.
     at: where across each key to tap, a value a word (0 its left edge, 1 its right; None its centre),
@@ -2138,6 +2203,22 @@ def in_picker(d, timeout=8):
         d.wait(shown, timeout, step=0.2, what="the file picker")
     except Blocked:
         pass
+
+
+def to_downloads(d, s=None):
+    """下载 in the file picker: through its roots drawer, opened by its ☰ (DocumentsUI's drawer_open, found by what it says
+    to a screen reader: no fixed place, which held for one AVD only), or tapped where the roots are listed with no ☰ (a
+    wide window keeps them on screen, review R26 F8494); blocked where neither shows"""
+    s = s or d.screen()
+    menu = next((n for n in s.nodes if n.desc in ("显示根目录", "Show roots")), None)
+    if menu:
+        d.tap(menu.c, 1.0)
+        d.tap_text("下载", scroll=False, after=2.0)
+        return
+    root = next((n for n in s.nodes if n.pkg.endswith("documentsui") and n.text in ("下载", "Downloads")), None)
+    if not root:
+        raise Blocked("文件选择里找不到「显示根目录」（☰），也没有「下载」")
+    d.tap(root.c, 2.0)
 
 
 def unhost(d):
@@ -2866,9 +2947,33 @@ def stop(d, msg):
     sys.exit(msg)
 
 
+# what was last imported, a pack's file SHA-256 each and the generation the app installed it as (<id>.sha256:
+# "<sha> <generation>"): a pack rebuilt during development keeps its version (packs.properties is raised for a
+# release), so the version the app reports cannot tell it from the old one. Only import_packs writes them; a pack
+# imported another way (Settings → 资源包 by hand) is a new generation (PackShelf names each import anew), so the
+# mark no longer matches and the build's pack is imported again
+PACK_MARKS = "/data/local/tmp/youmo-uat-packs"
+# an emulator a release gate brought up (gates.py, which kills only one with it); a run that takes the device drops it
+GATE_MARK = "/data/local/tmp/youmo-gate"
+
+
+def pack_generation(d, pid):
+    """the generation a pack is installed as (PackShelf's `<id>/current`), read as the app (a debug build)"""
+    return d.sh(f"run-as {PKG} cat /data/user_de/0/{PKG}/files/packs/{pid}/current 2>/dev/null").strip()
+
+
+def file_sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
 def import_packs(d, voice=True):
-    """the packs a run needs imported, once a device: those there at the build's version are kept
-    (an import of the same pack again is a no-op the app tells apart, but costs a copy over adb)"""
+    """the packs a run needs imported, once a device: those there at the build's version, of the same
+    file as last imported and still the generation that import made, are kept (an import of the same
+    pack again is a no-op the app tells apart, but costs a copy over adb)"""
     try:
         files = pack_files(voice)
     except SystemExit as e:
@@ -2878,7 +2983,8 @@ def import_packs(d, voice=True):
         return
     state = packs_state(d)
     for pid, (path, ver) in files.items():
-        if state.get(pid) == f"v{ver}":
+        sha, mark = file_sha256(path), f"{PACK_MARKS}/{pid}.sha256"
+        if state.get(pid) == f"v{ver}" and d.sh(f"cat {mark} 2>/dev/null").strip() == f"{sha} {pack_generation(d, pid)}":
             continue
         name = os.path.basename(path)
         with open(path, "rb") as src:
@@ -2889,7 +2995,12 @@ def import_packs(d, voice=True):
         out = d.sh(f"content call --uri {PACK_URI} --method import --arg {name}")
         if not re.search(r"result=(imported|already):", out):
             stop(d, f"{d.serial}: {name} not imported: {out.strip()[:200]}")
+        generation = pack_generation(d, pid)
+        d.sh(f"mkdir -p {PACK_MARKS} && echo {sha} {shlex.quote(generation)} > {mark}")
         print(f"{d.serial}: {name} imported", flush=True)
+        if not generation:
+            # the mark then never matches: the copy over adb the mark saves would come back each run unseen
+            print(f"{d.serial}: {pid} pack's generation not readable (run-as {PKG}): imported again each run", flush=True)
 
 
 def import_packs_ui(d, files=None):
@@ -2901,16 +3012,25 @@ def import_packs_ui(d, files=None):
     name = os.path.basename(path)
     if not d.sh(f"ls /sdcard/Download/{name} 2>/dev/null").strip():
         d.adb("push", path, f"/sdcard/Download/{name}", check=True, timeout=600)
+    # the newest in 下载 each time, and scanned: adb push keeps the build's mtime, and the files the cases
+    # put there since (layouts, themes, backups) sorted it off the picker's first screen (0.6.1 release run)
+    d.sh(f"touch /sdcard/Download/{name}; "
+         f"am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Download/{name}")
+    # the picker started afresh: one left open or remembering another folder by a case before (seen in
+    # the 0.6.1 release run after PR-52b and ST-101 on loaded hosts) hid the pack from every reset after it
+    for p in re.findall(r"package:(\S*documentsui\S*)", d.sh("pm list packages documentsui")):
+        d.sh(f"am force-stop {p}")
     home(d, "资源包")
     d.tap_text("导入资源包", after=0.5)
     in_picker(d)
     if "documentsui" not in d.top_activity():
         raise Blocked(f"导入资源包没出文件选择：{d.top_activity()}")
-    if d.screen().find(text="近期的文件"):
-        d.tap((77, 148), 1.0)   # the drawer's ☰ at the top left (1080×2340, 440 dpi)
-        d.tap_text("下载", scroll=False, after=2.0)
-    d.tap_text(name, scroll=False, after=1.0)
-    s = d.wait(lambda x: x if x.find(contains="导入结果") or x.find(contains="已导入") else None,
+    s = d.screen()
+    if s.find(text="近期的文件") or not s.find(text=name):
+        to_downloads(d, s)
+    d.tap_text(name, after=1.0)
+    # the same pack a second time says 「…已经导入过，没有变化…导入完成」 (gate 3's rewrite and backup steps)
+    s = d.wait(lambda x: x if x.find(contains="导入结果") or x.find(contains="已导入") or x.find(contains="导入完成") else None,
                timeout=180, step=1.0, what="导入结果")
     if not s.find(contains="文字包"):
         raise Blocked(f"文字包没导入：{s.texts()[:6]}")
@@ -3063,6 +3183,8 @@ def run_on(a, cases, ports):
         if d.sh("getprop sys.boot_completed").strip() != "1":
             sys.exit(f"{d.serial} is not up (uat.py up --port {p})")
         ours(d)
+        # this run's now: a gate left up with --keep (gates.py) would find its mark later and kill it under the run
+        d.sh(f"rm -f {GATE_MARK}")
         need_root(d)   # one started by hand
         # the voice pack only where it is used (a release run has no voice cases); a release run's
         # packs come with each reset's pm clear (clear_keeping_packs), so not here as well
@@ -3194,7 +3316,8 @@ def junit_results(dirs):
                     bad = tc.find("error")
                 state = "跳过" if tc.find("skipped") is not None else ("失败" if bad is not None else "通过")
                 msg = ((bad.get("message") or "").splitlines() or [""])[0][:200] if bad is not None else ""
-                key = (tc.get("classname"), tc.get("name"))
+                # a multiplatform module's jvmTest (keyboard-scene) names its methods "name[jvm]"
+                key = (tc.get("classname"), re.sub(r"\[jvm\]$", "", tc.get("name") or ""))
                 # the same test in two results (SDK 35's and 29's): the worse counts (a failure
                 # at one must not be hidden by the other read after it)
                 if key not in out or WORSE.index(state) < WORSE.index(out[key][0]):
@@ -3229,7 +3352,7 @@ def jvm_record(found, results, expected=()):
 def cmd_jvm(a):
     """the cases the app's and ime-core's JVM tests assert, recorded as a run of their own"""
     # one APK since 0.6.0: the speech flavors' testText and testVoice are gone
-    roots = [os.path.join(REPO, p) for p in ("app/src/test", "lib/ime-core/src/test", "lib/ime-eval/src/uatTest")]
+    roots = [os.path.join(REPO, p) for p in ("app/src/test", "lib/ime-core/src/test", "lib/ime-eval/src/uatTest", "lib/keyboard-scene/src/commonTest")]
     dirs = [os.path.join(REPO, p) for p in a.results.split(",")]
     load_scripts()
     expected = [c.id for c in CASES.values() if place(c.needs) == "jvm"]
@@ -3353,7 +3476,7 @@ def main():
     j = sub.add_parser("jvm")
     j.add_argument("--results", default="app/build/test-results/testDebugUnitTest,app/build/test-results/testDebugUnitTestAt29,"
                                          "lib/ime-core/build/test-results/test,"
-                                         "lib/ime-eval/build/test-results/uatTest")
+                                         "lib/ime-eval/build/test-results/uatTest,lib/keyboard-scene/build/test-results/jvmTest")
     sub.add_parser("counts")
     a = ap.parse_args()
     if a.cmd == "run":

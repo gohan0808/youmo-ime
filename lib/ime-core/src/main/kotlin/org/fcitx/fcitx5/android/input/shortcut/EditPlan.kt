@@ -35,11 +35,29 @@ object EditPlan {
      * was what is typed that went (the app types it again), the app's token for it; [restore] then empty.
      * [whole] false where the clear left text before the cursor it never read (an app giving less than
      * asked, or a reported cursor past the text read): the field then matches by its selection and what
-     * is after the cursor alone, [left]'s before not known.
+     * is after the cursor alone, [left]'s before not known. [cursorBefore] where [restore] ends by putting
+     * the cursor back before the text it put in ([restoreAt]).
      */
-    data class Cleared(val left: Field, val restore: List<Step>, val typed: Any? = null, val whole: Boolean = true) {
+    data class Cleared(
+        val left: Field,
+        val restore: List<Step>,
+        val typed: Any? = null,
+        val whole: Boolean = true,
+        val cursorBefore: Boolean = false,
+    ) {
         /** The field reads [now] as this clear left it. */
         fun leaves(now: Field) = if (whole) left == now else left.selected == now.selected && left.after == now.after
+
+        /**
+         * [restore] for a field whose cursor the editor reports at [cursor] as the text goes back (below 0:
+         * not known). A cursor to be left before the text ([cursorBefore]) is left there, not where it was
+         * reported as the clear was made: that report may have lagged (a tap at the field's start not
+         * reported yet as 清除 was pressed: R25 F7834), while by the time the clear is taken back it has
+         * settled, and the clear did not move the cursor. No edit says "before what I put in" for every
+         * editor: commitText's newCursorPosition 0 leaves the cursor after the text on Android 10.
+         */
+        fun restoreAt(cursor: Int): List<Step> =
+            if (!cursorBefore || cursor < 0) restore else restore.map { if (it is Step.Select) Step.Select(cursor, cursor) else it }
     }
 
     /** What a clear does ([steps]) and what it took, to put back ([cleared]); null when not kept. */
@@ -80,8 +98,20 @@ object EditPlan {
      * back from the editor's cursor as the report says, the start at most), nothing kept. A selection whose text the app gave
      * none of (or too long to) is deleted and not kept: with no text read it is no empty one, the
      * side before it never cleared in its place. Nothing of a [password] is kept.
+     * A side the app gave none of ([beforeGiven], [afterGiven] false; [field] has "" there) is no side read
+     * empty: nothing on it is cleared, the select-all that takes a whole field never used over it, and what
+     * is kept is kept as a short read's is ([Cleared.whole] false: text typed on that side cannot be told).
      */
-    fun clear(field: Field, start: Int, end: Int, limit: Int, password: Boolean): Clearing {
+    @Suppress("LongParameterList")
+    fun clear(
+        field: Field,
+        start: Int,
+        end: Int,
+        limit: Int,
+        password: Boolean,
+        beforeGiven: Boolean = true,
+        afterGiven: Boolean = true,
+    ): Clearing {
         val (before, selected, after) = field
         val from = minOf(start, end)
         return when {
@@ -105,14 +135,31 @@ object EditPlan {
                 listOf(Step.Delete(before.length, 0)),
                 Cleared(Field("", "", after), listOf(Step.Replace(before)), whole = from == before.length),
             )
-            // nothing before the cursor: all the field is after it
-            after.length >= limit -> Clearing(listOf(Step.ContextMenu(Menu.SelectAll), Step.Replace("")), null)
+            // nothing before the cursor: all the field is after it, taken whole. Only where that was read
+            // and the cursor is reported at the start: with text before it not given (or not reported yet)
+            // a select-all would take that too, never read and not to be put back; then what was read
+            // after the cursor alone goes, the rest left for another 清除
+            after.length >= limit -> Clearing(
+                if (beforeGiven && from == 0) listOf(Step.ContextMenu(Menu.SelectAll), Step.Replace("")) else listOf(Step.Delete(0, after.length)),
+                null,
+            )
+            // a reported cursor past the start with nothing read before it is a short read too (an app that
+            // gives no text before the cursor): the cursor put back where the report has it, the field matched
+            // as the before side's short read is ([Cleared.whole] false), never sent to the field's start.
+            // Or the report lags (the cursor just put at the start): the report as the text goes back is the
+            // one to go by ([Cleared.restoreAt]), this one only where that is not told
             after.isNotEmpty() -> Clearing(
                 listOf(Step.Delete(0, after.length)),
-                Cleared(Field("", "", ""), listOf(Step.Replace(after), Step.Select(0, 0))),
+                Cleared(Field("", "", ""), listOf(Step.Replace(after), Step.Select(from, from)), whole = from == 0, cursorBefore = true),
             )
             else -> Clearing(emptyList(), null)
-        }.let { if (password) it.copy(cleared = null) else it }
+        }.let {
+            when {
+                password -> it.copy(cleared = null)
+                beforeGiven && afterGiven -> it
+                else -> it.copy(cleared = it.cleared?.copy(whole = false))
+            }
+        }
     }
 
     /** [steps] carried out on [editor], the context menu's through [menu] (the editor has no such call). */

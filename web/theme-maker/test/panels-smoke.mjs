@@ -1,50 +1,14 @@
 // The editing's tabs in a real browser (060-render-p3 M2): a field's edit commits on leaving it, and what the user
 // does next is kept: the characters typed into the next field, the box clicked right after. A tab drawn anew under
-// the user (every change did that) took the field just entered away and the click with it. Local only, not CI: it
-// needs a Chromium (no jsdom here: no npm). Run: node web/theme-maker/test/panels-smoke.mjs [chromium]
-// (default: Playwright's headless shell, as pixel-smoke.mjs finds it; CHROMIUM=<path> too). Exit 0 all kept, 1 not, 2 not run.
-import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+// the user (every change did that) took the field just entered away and the click with it. CI runs it on every push
+// and PR (unit_test.yml, with the runner's Chrome; R25 B13); it needs a Chromium (no jsdom here: no npm).
+// Run: node web/theme-maker/test/panels-smoke.mjs [chromium]
+// (default: Playwright's headless shell, as cdp.mjs finds it; CHROMIUM=<path> too). Exit 0 all kept, 1 not, 2 not run.
+import { readFileSync } from 'node:fs';
 import { serve } from '../dev/serve.mjs';
-import { chromium } from './pixel-smoke.mjs';
+import { browser, chromium } from './cdp.mjs';
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-
-async function browser(shell) {
-  const dir = mkdtempSync(join(tmpdir(), 'panels-smoke-'));
-  const proc = spawn(shell, ['--headless', '--disable-gpu', '--remote-debugging-port=0', '--user-data-dir=' + dir, '--window-size=1400,1000', 'about:blank'], { stdio: 'ignore' });
-  const file = join(dir, 'DevToolsActivePort');
-  let ws;
-  try {
-    for (let i = 0; i < 100 && !existsSync(file); i++) await wait(100);
-    if (!existsSync(file)) throw new Error(shell + ' did not start (no DevToolsActivePort in 10 s)');
-    const port = readFileSync(file, 'utf8').split('\n')[0];
-    const pages = await (await fetch('http://127.0.0.1:' + port + '/json/list')).json();
-    ws = new WebSocket(pages.find((p) => p.type === 'page').webSocketDebuggerUrl);
-    await new Promise((r) => ws.addEventListener('open', r));
-  } catch (e) {
-    // a browser that never came up: no orphan Chromium, no profile left behind
-    proc.kill();
-    rmSync(dir, { recursive: true, force: true });
-    e.notRun = true;
-    throw e;
-  }
-  let id = 0;
-  const waiting = new Map();
-  ws.addEventListener('message', (e) => {
-    const m = JSON.parse(e.data);
-    if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id); }
-  });
-  const send = (method, params = {}) => new Promise((resolve, reject) => {
-    const n = ++id;
-    waiting.set(n, (m) => (m.error ? reject(new Error(method + ': ' + m.error.message)) : resolve(m.result)));
-    ws.send(JSON.stringify({ id: n, method, params }));
-  });
-  const close = () => { ws.close(); proc.kill(); rmSync(dir, { recursive: true, force: true }); };
-  return { send, close };
-}
 
 async function main() {
   const shell = chromium();
@@ -56,9 +20,9 @@ async function main() {
   let b = null;
   try {
     server = await serve(0);
-    b = await browser(shell);
+    b = await browser(shell, 'panels-smoke');
   } catch (e) {
-    if (b) b.close();
+    if (b) await b.close();
     if (server) server.close();
     if (!e.notRun) throw e;
     console.log(e.message + ': not run');
@@ -88,11 +52,24 @@ async function main() {
   const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) failed++; };
   try {
     await b.send('Page.navigate', { url: 'http://127.0.0.1:' + server.address().port + '/page.html' });
-    for (let i = 0; i < 100 && !(await js(`!!document.querySelector('#builtins button')`)); i++) await wait(100);
-    await js(`document.fonts.ready.then(() => 1)`);
-    await js(`(document.getElementById('new-panel').open || document.getElementById('new-panel').showModal(), document.querySelector('#builtins button').click())`);
+    // the page's start is done once it opens 新建 itself (its fonts loaded, no draft found, the first document set):
+    // a theme picked before that (the buttons are there from the first moment) had 新建 opened over it a moment
+    // later on a loaded machine, and the click meant for 大小 landed on the panel
+    // (?.: the navigation may not have put the page in yet)
+    const started = () => js(`!!document.getElementById('new-panel')?.open`);
+    for (let i = 0; i < 300 && !(await started()); i++) await wait(100);
+    if (!(await started())) throw new Error('the page did not start (新建 not opened in 30 s)');
+    await js(`document.querySelector('#builtins button').click()`);
     await js(`document.querySelector('#tabs [data-tab=text]').click()`);
     await wait(300);
+
+    // 061-toolbar-icons: the icons by where they are drawn, a name in two places noted in each
+    const groups = JSON.parse(await js(`JSON.stringify([...document.querySelectorAll('#edit .tab:not([hidden]) h4')].map((e) => e.textContent))`));
+    check(['回车键', '键', '快捷键的命令', '栏', '状态面板和编辑面板'].every((g) => groups.includes(g)), 'the icons grouped: ' + groups.join(' '));
+    const undo = JSON.parse(await js(`JSON.stringify([...document.querySelectorAll('#edit .tab:not([hidden]) label.row')].filter((r) => r.querySelector('.what').textContent === 'undo').map((r) => r.textContent))`));
+    check(undo.length === 2 && undo.every((t) => t.includes('也在')), 'undo in the commands and the bar, each noting the other: ' + undo.join(' | '));
+    const hide = await js(`[...document.querySelectorAll('#edit .tab:not([hidden]) label.row')].find((r) => r.querySelector('.what').textContent === 'hide-keyboard').textContent`);
+    check(hide.includes('栏上 App 自带的图和键上的不同'), 'hide-keyboard notes its bar image differs: ' + hide);
 
     // typed into 大小, then into 字距 (clicked): both kept, the second's characters not wiped
     await click('大小');
@@ -333,6 +310,39 @@ async function main() {
     const help = await js(`document.getElementById('help-panel').open ? [...document.querySelectorAll('#help-panel a')].map((a) => a.href).join(' ') : ''`);
     check(/docs\/theme-maker\.md/.test(help) && /docs\/theme-format\.md/.test(help), 'help: open with its links: ' + help);
     await js(`document.getElementById('help-panel').close()`);
+    // 061-custom-layout §10 (W3): 环境 › 键盘 › 打开 .layout: the theme drawn on a layout of the user's, a key of it picked
+    // by its own id, its values' sources found on it
+    const k17 = readFileSync(new URL('../examples/layouts/k17.layout', import.meta.url), 'utf8');
+    await js(`(() => {
+      for (const id of ['env-bar', 'env-show', 'env-sheet']) { const s = document.getElementById(id); s.value = ''; s.dispatchEvent(new Event('change', { bubbles: true })); }
+      const inp = document.getElementById('layout-input');
+      inp.click = function () { const dt = new DataTransfer(); dt.items.add(new File([${JSON.stringify(k17)}], 'k17.layout')); this.files = dt.files; this.onchange(); };
+      const s = document.getElementById('env-board'); s.value = '@open'; s.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    await wait(1000);
+    const board = await js(`[document.getElementById('env-board').value, document.getElementById('env-board').selectedOptions[0].textContent]`);
+    check(board[0] === '@own' && /^17 键（k17\.layout）$/.test(board[1]), '环境 › 键盘 › 打开 .layout: 17 键 drawn: ' + board);
+    await js(`(() => {
+      const c = document.getElementById('preview'); const r = c.getBoundingClientRect();
+      const at = { clientX: r.left + r.width * 0.7, clientY: r.top + r.height * 0.375, bubbles: true, pointerId: 1 };
+      c.dispatchEvent(new PointerEvent('pointerdown', at)); c.dispatchEvent(new PointerEvent('pointerup', at));
+    })()`);
+    await wait(500);
+    const pickedOwn = await js(`document.getElementById('picked').textContent`);
+    check(/选中的键：hjk（17 键）/.test(pickedOwn), 'a key of it picked: ' + pickedOwn);
+    await js(`document.querySelector('#tabs [data-tab=keys]').click()`);
+    await wait(300);
+    // 范围 › 选中的键: the changes written for the picked key by the layout's own id
+    await js(`(() => {
+      const r = [...document.querySelectorAll('#tab-keys select')].find((s) => [...s.options].some((o) => o.value === 'picked'));
+      r.value = 'picked'; r.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    await wait(300);
+    const keysTab = await js(`[document.querySelector('#tab-keys .selector code') ? document.querySelector('#tab-keys .selector code').textContent : '', document.querySelectorAll('#tab-keys table.sources tr').length]`);
+    check(String(keysTab[0]).includes('k17/hjk'), '按键: the key picked named by the layout\'s id: ' + keysTab);
+    check(keysTab[1] > 0, '按键: the sources of hjk on it: ' + keysTab);
+    await js(`(() => { const s = document.getElementById('env-board'); s.value = 'qwerty'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    await wait(500);
     await js(`(() => { window.__saved = 0; const u = URL.createObjectURL; URL.createObjectURL = (b) => { window.__saved++; return u(b); }; })()`);
     const edit = (f) => js(`(() => { const s = document.getElementById('source'); s.value = (${f})(s.value); s.dispatchEvent(new Event('input')); })()`);
     await edit(`(t) => t.replace('<style select="key"', '<style select="key" sticker="none"')`);
@@ -355,8 +365,39 @@ async function main() {
     await wait(300);
     const stopped = await js(`[!document.getElementById('export-panel').open, window.__saved, document.getElementById('problems').textContent]`);
     check(stopped[0] && stopped[1] === 1 && /nope\.png/.test(stopped[2]), '保存 with an error: nothing saved, the error in 问题: ' + JSON.stringify(stopped.slice(0, 2)));
+    // a phone's width with the top bar's link to the layout maker (W3): on two lines, nothing past the screen, each link one line
+    await b.send('Emulation.setDeviceMetricsOverride', { width: 360, height: 760, deviceScaleFactor: 2, mobile: true });
+    await wait(500);
+    const top = await js(`[document.documentElement.scrollWidth, ...[...document.querySelectorAll('#top a.link')].map((a) => Math.round(a.getBoundingClientRect().height))]`);
+    check(top[0] <= 360 && top.slice(1).every((h) => h < 24), '360 px: the top bar within the screen, its links one line each: ' + top);
+    await b.send('Emulation.clearDeviceMetricsOverride');
+
+    // a draft restored (review R26 F8152, F8447): its environment through the page's own selects (`form` is
+    // env-form-kind's, `panel` env-sheet's), a board the form does not offer now (0.6.0's 手写) or a layout opened (not
+    // kept: @own, @open) the default's, the rest as kept. A select id wrong threw inside the restore, and the page
+    // offered to drop the draft instead
+    await b.send('Page.enable');
+    await b.send('Page.addScriptToEvaluateOnNewDocument', { source: 'window.confirm = (m) => { window.__asked = m; return false; };' });
+    const url = 'http://127.0.0.1:' + server.address().port + '/page.html';
+    const offered = (q) => js(`(async () => { for (let i = 0; i < 300 && !document.getElementById('restore-panel')?.open; i++) await new Promise((r) => setTimeout(r, 50)); return ${q}; })()`);
+    for (const board of ['handwriting', '@own', '@open']) {
+      // the page's own pending draft written first, so it does not replace the one put in below on leaving; the theme
+      // without the error put in above (a theme with an error draws nothing)
+      await wait(800);
+      await js(`window.YoumoMaker.keepDraft(window.YoumoMaker.idbStore(indexedDB), window.YoumoMaker.doc(document.getElementById('source').value.replace('<style select="key:pressed" fill="image(nope.png, 0dp)"/>', '')),
+        Object.assign({}, window.YoumoMaker.ENV, { board: ${JSON.stringify(board)}, form: 'split', panel: 'voice', bar: 'typing' }))`);
+      await b.send('Page.navigate', { url });
+      check(await offered(`document.getElementById('restore-panel').open`), board + ': the draft offered on the next visit');
+      await js(`document.querySelector('#restore-panel button[value=restore]').click()`);
+      await wait(1500);
+      const got = await js(`[window.__asked || '', ...['env-board', 'env-form-kind', 'env-sheet', 'env-bar'].map((id) => document.getElementById(id).value)]`);
+      check(got[0] === '' && got[1] === 'qwerty' && got[2] === 'split' && got[3] === 'voice' && got[4] === 'typing',
+        board + ': the draft restored, 26 键 drawn, the rest of its environment kept: ' + JSON.stringify(got));
+      const blank = await js(`(() => { const c = document.getElementById('preview'); const e = document.createElement('canvas'); e.width = c.width; e.height = c.height; return c.width === 0 || c.toDataURL() === e.toDataURL(); })()`);
+      check(!blank, board + ': the preview drawn: ' + await js(`document.getElementById('problems').textContent`));
+    }
   } finally {
-    b.close();
+    await b.close();
     server.close();
   }
   return failed ? 1 : 0;

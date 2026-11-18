@@ -22,6 +22,7 @@ import kotlinx.coroutines.runBlocking
 import org.fcitx.fcitx5.android.FcitxApplication
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.Uat
+import org.fcitx.fcitx5.android.assertRows
 import org.fcitx.fcitx5.android.core.FakeHostApi
 import org.fcitx.fcitx5.android.core.InputMethodNames
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
@@ -120,9 +121,9 @@ class SettingsUatTest {
         activity
         open(SettingsRoute.UserWords)
         val words = preferences((page as PreferenceFragmentCompat).preferenceScreen)
-        // the two switches on top, both on
+        // the three switches on top, all on
         val switches = words.filterIsInstance<TwoStatePreference>()
-        assertEquals(listOf(s(R.string.learning_use_habits), s(R.string.learning_auto_backup)), switches.map { it.title.toString() })
+        assertEquals(listOf(s(R.string.learning_use_habits), s(R.string.learning_auto_backup), s(R.string.learning_voice_ask)), switches.map { it.title.toString() })
         assertTrue(switches.all { it.isChecked })
         val titles = words.map { it.title.toString() }
         for (t in listOf(R.string.learning_clear_learned, R.string.learning_backups, R.string.english_words, R.string.export_words)) {
@@ -156,8 +157,9 @@ class SettingsUatTest {
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
         idle()
         assertTrue(api.calls.toString(), "addUserWord(幽默, you mo)" in api.calls)
-        val list = KeyboardHarness.all(activity.window.decorView).filterIsInstance<TextView>().map { it.text.toString() }.toList()
-        assertTrue(list.toString(), "幽默" in list && list.any { "you mo" in it })
+        // the list reloads after a hop off the main thread (生僻字屏蔽's file read): waited for
+        fun list() = KeyboardHarness.all(activity.window.decorView).filterIsInstance<TextView>().map { it.text.toString() }.toList()
+        until("the word listed", state = ::list, step = ::idle) { list().let { l -> "幽默" in l && l.any { "you mo" in it } } }
     }
 
     @Test
@@ -193,6 +195,52 @@ class SettingsUatTest {
             ThemeManager.setNormalModeTheme(themeWas)
             ThemeManager.prefs.followSystemDayNightTheme.setValue(followWas)
             ThemeManager.prefs.codeRow.setValue(codeRowWas)
+        }
+    }
+
+    @Test
+    @Uat("ST-117")
+    fun theCodeRowsThreePlacesTheFieldOnlyOnceItsNoteIsAgreedTo() {
+        val was = ThemeManager.prefs.codeRow.getValue()
+        try {
+            ThemeManager.prefs.codeRow.setValue(CodeRowStyle.Floating)
+            activity
+            open(SettingsRoute.Theme)
+            st.tab(1)
+            val row = listed(R.string.code_row_style)
+            val entries = row.entries.map { it.toString() }
+            // 输入框里 picked: its note first, the setting unchanged till OK
+            row.callChangeListener(CodeRowStyle.InField.name)
+            idle()
+            val note = ShadowDialog.getLatestDialog() as AlertDialog
+            val noteText = KeyboardHarness.all(note.window!!.decorView).filterIsInstance<TextView>().map { it.text.toString() }.toList()
+            val beforeOk = ThemeManager.prefs.codeRow.getValue()
+            note.getButton(AlertDialog.BUTTON_NEGATIVE).performClick()
+            idle()
+            val cancelled = ThemeManager.prefs.codeRow.getValue() to row.value
+            row.callChangeListener(CodeRowStyle.InField.name)
+            idle()
+            (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+            idle()
+            val agreed = ThemeManager.prefs.codeRow.getValue() to row.value
+            // another back: no note
+            val dialogs = ShadowDialog.getShownDialogs().size
+            if (row.callChangeListener(CodeRowStyle.Embedded.name)) row.value = CodeRowStyle.Embedded.name
+            idle()
+            assertRows(
+                "three places, in the keyboard, over it, in the field" to {
+                    assertEquals(listOf(R.string.code_row_embedded, R.string.code_row_floating, R.string.code_row_in_field).map(::s), entries)
+                },
+                "the note says what the field gets" to { assertTrue(noteText.toString(), s(R.string.code_row_in_field_note) in noteText) },
+                "not set while the note is up" to { assertEquals(CodeRowStyle.Floating, beforeOk) },
+                "cancelled: as it was" to { assertEquals(CodeRowStyle.Floating to CodeRowStyle.Floating.name, cancelled) },
+                "OK: in the field" to { assertEquals(CodeRowStyle.InField to CodeRowStyle.InField.name, agreed) },
+                "the others set at once, no note" to {
+                    assertEquals(CodeRowStyle.Embedded, ThemeManager.prefs.codeRow.getValue()); assertEquals(dialogs, ShadowDialog.getShownDialogs().size)
+                },
+            )
+        } finally {
+            ThemeManager.prefs.codeRow.setValue(was)
         }
     }
 
@@ -249,7 +297,7 @@ class SettingsUatTest {
     private fun listed(title: Int) = st.pref(title) as ListPreference
 
     @Test
-    @Uat("ST-33")
+    @Uat("ST-28", "ST-33", "ST-136")
     fun everyInputMethodsPageAndTheSharedOnes() {
         val c = InputMethodCatalog
         pages()
@@ -268,12 +316,13 @@ class SettingsUatTest {
         open(SettingsRoute.SharedInput)
         val groups = listOf(R.string.shared_section_all, R.string.shared_section_chinese, R.string.shared_section_pinyin).map(::s)
         assertEquals(groups, st.titles().filter { it in groups })
-        assertTrue(summary(R.string.im_emoji).endsWith(notFor(c.HANDWRITING)))
-        assertTrue(summary(R.string.im_built_in_phrases).endsWith(notFor(c.HANDWRITING)))
+        // no 中文标点 page since 0.6.1 (FB9)
+        assertTrue(st.titles().toString(), st.titles().none { "punctuation" in it.lowercase() || "标点" in it })
         // 在键上划: the choice alone, which input methods each choice reaches the docs say
         assertEquals(s(R.string.swipe_off), summary(R.string.key_drawing))
-        // 双拼's 18 and 14 keys too: they read no slip, ü typed with its own key either
-        assertTrue(summary(R.string.im_typos).endsWith(notFor(c.T9, c.PINYIN_KEYS18, c.PINYIN_KEYS, c.SHUANGPIN_KEYS18, c.SHUANGPIN_KEYS14, c.SHUANGPIN_NINE, c.ZHUYIN_NINE, c.ZHUYIN)))
+        // every keyboard reads a slip, 注音九键 too since the user's 11-16: no 不适用 line (061-neighbour-correction,
+        // 061-neighbour-groups)
+        assertEquals(s(R.string.im_typos_summary), summary(R.string.im_typos))
         // no 不适用 line names English: the Chinese section's title says it for its rows, and every input
         // method's other rows are English's too
         val chinese = st.preferences().map { it.summary.toString() }
@@ -291,10 +340,10 @@ class SettingsUatTest {
         assertEquals(s(R.string.shared_input_link), st.titles().first())
         assertTrue(s(R.string.im_latin_words) in st.titles())
         assertTrue(st.titles().none { it in shared })
-        im(c.HANDWRITING)
-        assertEquals(s(R.string.shared_input_link), st.titles().first())
+        // 停笔时间: the shared page's 手写 (061-handwriting-toolbar §3.9), on no input method's
+        assertTrue(s(R.string.handwriting_pause) !in st.titles())
+        open(SettingsRoute.SharedInput)
         assertTrue(s(R.string.handwriting_pause) in st.titles())
-        assertTrue(st.titles().none { it in shared })
         im(c.SHUANGPIN)
         assertTrue(s(R.string.im_shuangpin_scheme) in st.titles())
         assertTrue(s(R.string.im_latin_words) !in st.titles())
@@ -315,7 +364,7 @@ class SettingsUatTest {
     }
 
     @Test
-    @Uat("ST-40")
+    @Uat("ST-40", "ST-137")
     fun pinyinsKeyboardOnItsPageAndTheSharedOptionsSayingFourteenKeys() {
         val c = InputMethodCatalog
         val setting = AppPrefs.getInstance().keyboard.pinyinKeyboard
@@ -328,7 +377,9 @@ class SettingsUatTest {
             assertTrue(keyboard.summary.toString().contains(s(R.string.pinyin_keyboard_summary)))
             for (t in listOf(R.string.im_chaizi, R.string.im_latin_words)) assertTrue(summary(t), summary(t).endsWith(notFor(c.T9, c.PINYIN_KEYS18, c.PINYIN_KEYS, c.ZHUYIN_NINE, c.ZHUYIN)))
             open(SettingsRoute.SharedInput)
-            assertTrue(summary(R.string.im_typos), c.PINYIN_KEYS.let { InputMethodNames.of(activity, it, it) } in summary(R.string.im_typos))
+            // neither 14 keys named where the slips are not read: pinyin's (061-neighbour-correction) nor 双拼's
+            // (061-neighbour-groups)
+            for (k in listOf(c.PINYIN_KEYS, c.SHUANGPIN_KEYS14)) assertFalse(summary(R.string.im_typos), InputMethodNames.of(activity, k, k) in summary(R.string.im_typos))
             im(c.PINYIN)
             val keys14 = PinyinKeyboard.Keys14
             listed(R.string.pinyin_keyboard).let { if (it.callChangeListener(keys14.name)) it.value = keys14.name }
@@ -382,10 +433,10 @@ class SettingsUatTest {
         }
     }
 
-    // 在键上划: one list, off till chosen, of 滑行输入, 笔画筛选, 键盘手写 and off; its summary the choice alone; a
-    // choice stored, the page opened again showing it. 键盘手写 says it needs the text pack while that is missing
+    // 在键上划: one list, off till chosen, of 滑行输入, 笔画筛选 and off; its summary the choice alone; a
+    // choice stored, the page opened again showing it (键盘手写 is the toolbar's 手写 now)
     @Test
-    @Uat("ST-46")
+    @Uat("ST-46", "ST-121")
     fun keyDrawingIsOneListOfItsChoices() {
         val keyboard = AppPrefs.getInstance().keyboard
         try {
@@ -395,7 +446,7 @@ class SettingsUatTest {
             open(SettingsRoute.SharedInput)
             val drawing = listed(R.string.key_drawing)
             assertEquals(
-                listOf(R.string.glide_typing, R.string.stroke_filter, R.string.key_drawing_handwriting, R.string.swipe_off).map(::s),
+                listOf(R.string.glide_typing, R.string.stroke_filter, R.string.swipe_off).map(::s),
                 drawing.entries.map { it.toString() },
             )
             assertEquals(s(R.string.swipe_off), summary(R.string.key_drawing))
@@ -405,10 +456,6 @@ class SettingsUatTest {
             assertEquals(s(R.string.stroke_filter), summary(R.string.key_drawing))
             open(SettingsRoute.SharedInput)
             assertEquals(s(R.string.stroke_filter), summary(R.string.key_drawing))
-            TestShelves.use(text = false, voice = true)
-            open(SettingsRoute.SharedInput)
-            val needs = activity.getString(R.string.key_drawing_needs_text_pack, s(R.string.key_drawing_handwriting))
-            assertEquals(needs, listed(R.string.key_drawing).entries[2].toString())
         } finally {
             TestShelves.use()
             keyboard.keyDrawing.setValue(KeyDrawing.Off)
@@ -496,7 +543,7 @@ class SettingsUatTest {
 
     private companion object {
         val PAGED = InputMethodCatalog.run {
-            listOf(PINYIN, SHUANGPIN, HANDWRITING, WUBI, ERBI, CANGJIE, ZIRANMA, WUBI_PINYIN)
+            listOf(PINYIN, SHUANGPIN, WUBI, ERBI, CANGJIE, ZIRANMA, WUBI_PINYIN)
         }
     }
 }

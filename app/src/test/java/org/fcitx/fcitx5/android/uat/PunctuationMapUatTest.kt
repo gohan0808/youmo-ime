@@ -7,9 +7,9 @@ package org.fcitx.fcitx5.android.uat
 import kotlinx.coroutines.runBlocking
 import org.fcitx.fcitx5.android.FcitxApplication
 import org.fcitx.fcitx5.android.R
-import org.fcitx.fcitx5.android.Uat
 import org.fcitx.fcitx5.android.core.KotlinHost
 import org.fcitx.fcitx5.android.core.ScriptedEngine
+import org.fcitx.fcitx5.android.core.putPunctuationTable
 import org.fcitx.fcitx5.android.core.startedHost
 import org.fcitx.fcitx5.android.data.punctuation.PunctuationManager
 import org.fcitx.fcitx5.android.host.ModuleConfigs
@@ -29,7 +29,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.File
 
-/** 中文标点 (uat/14 ST-28): the map saved as its page saves it, then the keyboard's ， typed through the Kotlin host. */
+/** The punctuation map in the Kotlin host's hands: a table put where a user's own is read (nothing in the app writes one since 0.6.1), then the keyboard's ， typed through it. */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(application = FcitxApplication::class, qualifiers = "w393dp-h851dp-port-440dpi")
@@ -65,12 +65,11 @@ class PunctuationMapUatTest {
     }
 
     @Test
-    @Uat("ST-28")
     fun theCommaMappedToAnotherMarkTypesIt() {
         fcitx = startedHost(ScriptedEngine(home))
         runBlocking {
-            // the page's table saved whole (the built-in one is not among the test's assets)
-            fcitx.setPunctuationMap("zh_CN", listOf(PunctuationMapEntry(",", "、", "")))
+            // a table of the user's (the built-in one is not among the test's assets)
+            fcitx.putPunctuationTable(home, listOf(PunctuationMapEntry(",", "、", "")))
             assertEquals(listOf(PunctuationMapEntry(",", "、", "")), fcitx.punctuationMap("zh_CN"))
         }
         h = KeyboardHarness(host = fcitx)
@@ -91,8 +90,8 @@ class PunctuationMapUatTest {
             File(home, "config/" + ModuleConfigs.PUNCTUATION).apply { parentFile!!.mkdirs() }
                 .writeText("HalfWidthPuncAfterLetterOrNumber=" + (if (on) "True" else "False") + "\n")
             fcitx = startedHost(ScriptedEngine(home))
-            // the built-in table is not among the test's assets: its comma saved
-            runBlocking { fcitx.setPunctuationMap("zh_CN", listOf(PunctuationMapEntry(",", "，", ""))) }
+            // the built-in table is not among the test's assets: its comma put in a user's table
+            runBlocking { fcitx.putPunctuationTable(home, listOf(PunctuationMapEntry(",", "，", ""))) }
             h = KeyboardHarness(host = fcitx)
             h.service.postFcitxJob { activate(1, "org.example.app") }
             h.start()
@@ -110,8 +109,7 @@ class PunctuationMapUatTest {
             val half = if (on) "," else "，"
             // the A typed back to the field before the host told the keys what the comma now types: that told first
             synced()
-            // the host tells the map after the A's selection reached it, maybe only as the next press runs the
-            // looper (CI 43202860764, SDK 29: face ，, bubble ,): its face drawn anew first, then both checked
+            // the host tells the map after the A's selection reached it: its face drawn anew first, then both checked
             until("the comma's face told") { comma().label == half }
             assertEquals(what, twice(half), shown())
             until("the mark typed") { h.field.text.toString() == "，A$half" }
@@ -132,7 +130,7 @@ class PunctuationMapUatTest {
     @Test
     fun theFirstPressAtOnceShowsWhatItTypes() {
         fcitx = startedHost(ScriptedEngine(home))
-        runBlocking { fcitx.setPunctuationMap("zh_CN", listOf(PunctuationMapEntry(",", "、", ""))) }
+        runBlocking { fcitx.putPunctuationTable(home, listOf(PunctuationMapEntry(",", "、", ""))) }
         h = KeyboardHarness(host = fcitx)
         h.service.postFcitxJob { activate(1, "org.example.app") }
         h.start()
@@ -145,12 +143,12 @@ class PunctuationMapUatTest {
         assertEquals(listOf("、", "、", "、"), listOf(face, bubble, h.field.text.toString()))
     }
 
-    // a host that ran before saved its table, and stopped; a new one made, not started, and the keyboard up before it,
+    // a host that ran before read a user's table, and stopped; a new one made, not started, and the keyboard up before it,
     // with what the last run kept ([kept]) or none
     private fun keyboardBeforeTheHost(kept: Boolean): KotlinHost {
         PunctuationStartKeys.forget(appContext)
         startedHost(ScriptedEngine(home)).let { first ->
-            runBlocking { first.setPunctuationMap("zh_CN", listOf(PunctuationMapEntry(",", "、", ""))) }
+            runBlocking { first.putPunctuationTable(home, listOf(PunctuationMapEntry(",", "、", ""))) }
             first.stop()
         }
         // the next process: what the last one kept, read from the file; or a first install's none
@@ -225,7 +223,7 @@ class PunctuationMapUatTest {
     @Test
     fun offThenOnTheCommaShowsWhatItTypesEachPress() {
         fcitx = startedHost(ScriptedEngine(home))
-        runBlocking { fcitx.setPunctuationMap("zh_CN", listOf(PunctuationMapEntry(",", "、", ""))) }
+        runBlocking { fcitx.putPunctuationTable(home, listOf(PunctuationMapEntry(",", "、", ""))) }
         h = KeyboardHarness(host = fcitx)
         h.service.postFcitxJob { activate(1, "org.example.app") }
         h.start()
@@ -252,14 +250,17 @@ class PunctuationMapUatTest {
         press("、")
     }
 
-    // the key's face and the bubble it shows pressed
+    // the key's face and the bubble it shows pressed, both read while it is held, before the release types (a key's
+    // label is looked up in the scene each time; the mark typed on release may already have made the host tell the
+    // next one, after a half-width , the full-width ， again: face ，, bubble , on SDK 29 and 35, CI 43202860764)
     private fun faceAndBubble(key: () -> org.fcitx.fcitx5.android.input.ShownKey): List<String> {
         h.after(BUBBLE_GONE_MS)
         val k = key()
         h.press(k)
+        val face = k.label
         val bubble = h.popupChoices().map { it.text }.single()
         h.release()
-        return listOf(k.label, bubble)
+        return listOf(face, bubble)
     }
 
     private companion object {

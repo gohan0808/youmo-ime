@@ -139,13 +139,13 @@ class SceneBuilderTest {
     fun keysAreReadAsTheyWere() {
         fun keys(board: String, env: Env = Forms.env(board, Forms.block)) = Forms.scene(board, env).keys.associateBy { it.id }
         val rime = Forms.block.copy(texts = Forms.texts.copy(imeName = "Rime"))
-        for (board in listOf("qwerty", "nine", "k14", "zhuyin", "handwriting")) {
+        for (board in listOf("qwerty", "nine", "k14", "zhuyin")) {
             assertEquals("空格，${Forms.env(board, Forms.block).texts.imeName}", keys(board).getValue("space").a11y, board)
             val named = Forms.env(board, rime).let { it.copy(texts = it.texts.copy(imeName = "Rime")) }
             assertEquals("空格，Rime", keys(board, named).getValue("space").a11y, "$board: a Latin name is not spelt")
         }
         assertEquals("ABC，2", keys("nine").getValue("2").a11y)
-        assertEquals("ABC", keys("number").getValue("back").a11y)
+        assertEquals("返回", keys("number").getValue("back").a11y, "the way back read as it says, 返回 since 0.6.1 (was ABC)")
         assertEquals("a，@", keys("qwerty").getValue("a").a11y)
         // the app's strings as given: the default ones English's
         val english = Forms.block.copy(texts = Texts(imeName = "English"))

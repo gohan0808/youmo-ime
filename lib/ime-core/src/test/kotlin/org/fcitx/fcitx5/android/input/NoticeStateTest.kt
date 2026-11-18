@@ -20,10 +20,17 @@ class NoticeStateTest {
     @Test
     fun howLongEachStays() = assertRows(
         // rule 5: nothing to reach for
-        "a line said, 2 s" to { assertEquals(SAID_MS, NoticeState<String>().show(null, steady = false).ms) },
-        "one with 撤销, 6 s" to { assertEquals(UNDO_MS, NoticeState<String>().show("删", steady = false).ms) },
+        "a line said, 1 s" to { assertEquals(1000L, NoticeState<String>().show(null, steady = false).ms) },
+        "one with 撤销, 3 s" to { assertEquals(3000L, NoticeState<String>().show("删", steady = false).ms) },
         // F3464: rule 4, said once as a key fails, read before it goes
-        "a failure, 6 s" to { assertEquals(UNDO_MS, NoticeState<String>().show(null, steady = true).ms) },
+        "a failure, 2 s" to { assertEquals(2000L, NoticeState<String>().show(null, steady = true).ms) },
+        // a button to reach for wins
+        "a failure with a button, 3 s" to { assertEquals(3000L, NoticeState<String>().show("删", steady = true).ms) },
+        // news of several lines (L7's boards chosen): the time its sayer asks, the kinds' own unchanged
+        "a time asked, that" to { assertEquals(4000L, NoticeState<String>().show(null, steady = false, ms = 4000L).ms) },
+        "a time asked, typed away all the same" to {
+            assertTrue(NoticeState<String>().apply { show(null, steady = false, ms = 4000L) }.typed())
+        },
     )
 
     @Test
@@ -73,6 +80,19 @@ class NoticeStateTest {
         assertEquals("删", s.dismiss())
         assertNull(s.dismiss())
     }
+
+    // R27 F8528: another notice waits while an act's 撤销 still works, and only then
+    @Test
+    fun whetherItHoldsAnUndo() = assertRows(
+        "shown with 撤销" to { assertTrue(NoticeState<String>().apply { show("删", steady = false) }.holdsUndo) },
+        "shown without" to { assertFalse(NoticeState<String>().apply { show(null, steady = false) }.holdsUndo) },
+        "put away: lapsed" to { assertFalse(NoticeState<String>().apply { show("删", steady = false); dismiss() }.holdsUndo) },
+        "taken back" to { assertFalse(NoticeState<String>().apply { show("删", steady = false); undo("删") }.holdsUndo) },
+        "replaced by one without: the act lapsed" to {
+            assertFalse(NoticeState<String>().apply { show("删", steady = false); show(null, steady = false) }.holdsUndo)
+        },
+        "none shown yet" to { assertFalse(NoticeState<String>().holdsUndo) },
+    )
 
     // 051-fix-popup: the edit menu goes where the notices go, under their window
     @Test

@@ -16,6 +16,7 @@ import android.text.style.UnderlineSpan
 import android.widget.TextView
 import org.fcitx.fcitx5.android.FcitxApplication
 import org.fcitx.fcitx5.android.R
+import org.fcitx.fcitx5.android.Uat
 import org.fcitx.fcitx5.android.core.FormattedText
 import org.fcitx.fcitx5.android.core.TextFormatFlag
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
@@ -29,6 +30,7 @@ import org.fcitx.fcitx5.android.host.HostEvent
 import org.fcitx.fcitx5.android.input.KeyboardHarness
 import org.fcitx.fcitx5.android.input.bar.ui.ToolButton
 import org.fcitx.fcitx5.android.input.candidates.SceneBar
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardStyle
 import org.fcitx.fcitx5.android.input.keyboard.TextKeyboard
 import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneThemes
 import org.fcitx.fcitx5.android.input.preedit.PreeditUi
@@ -76,9 +78,12 @@ class BarToolbarThemeTest {
     private fun dp(v: Int) = (v * ctx.resources.displayMetrics.density).toInt()
 
     // the bar's and the keys' heights, px, the keyboard shown
-    private fun heights(floating: Boolean, oneHanded: OneHanded = OneHanded.Off): Pair<Int, Int> {
-        prefs.set(ThemeManager.prefs.floatingKeyboard, floating)
-        prefs.set(ThemeManager.prefs.oneHanded, oneHanded)
+    private fun heights(floating: Boolean, oneHanded: Boolean = false): Pair<Int, Int> {
+        when {
+            floating -> prefs.setStyle(KeyboardStyle.FLOATING)
+            oneHanded -> prefs.setStyle(KeyboardStyle.ONE_HANDED, side = OneHanded.Right)
+            else -> prefs.setStyleDefault()
+        }
         return KeyboardHarness().use { h ->
             h.start()
             h.after(1000)
@@ -124,7 +129,7 @@ class BarToolbarThemeTest {
         assertEquals(dp(40), floatingBar)
         assertEquals(floatingKeys, floatingTallKeys)
         // one-handed: the same bar over the narrower keys
-        val (oneHandedTall, oneHandedKeys) = heights(floating = false, oneHanded = OneHanded.Right)
+        val (oneHandedTall, oneHandedKeys) = heights(floating = false, oneHanded = true)
         assertEquals(dp(48), oneHandedTall)
         assertEquals(keys, oneHandedKeys)
         // the least: a shorter bar, the keys as they were
@@ -145,7 +150,7 @@ class BarToolbarThemeTest {
 
     @Test
     fun theCapReachedTheKeysGiveTheBarItsRoom() {
-        // 90% asked: the cap (70% of the screen, the bar in it) binds, so a taller bar is the keys' loss
+        // 90% asked: the floor (the app keeps 120 dp, the bar in the room) binds, so a taller bar is the keys' loss
         val keyboard = AppPrefs.getInstance().keyboard
         prefs.set(keyboard.keyboardHeightFollowTheme, false)
         prefs.set(keyboard.keyboardHeightPercent, 90)
@@ -155,7 +160,9 @@ class BarToolbarThemeTest {
         assertEquals(keys - (dp(56) - dp(40)), KeyboardArea.keysHeight(ctx, 0))
     }
 
+    // TB-56: a toggle's button on (手写, 单手, 悬浮) is toolbar:selected's
     @Test
+    @Uat("TB-56")
     fun theToolbarAndTheCodeAreTheThemes() {
         styled(
             "<style select=\"toolbar\" fill=\"#ffeeeeee\" radius=\"8dp\" icon-color=\"#ff445566\"/>",

@@ -4,6 +4,7 @@
  */
 package org.fcitx.fcitx5.android.engine.pinyin
 
+import org.fcitx.fcitx5.android.scene.layout.Groups
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
@@ -34,6 +35,12 @@ class NineKeyLetters private constructor(
 
     /** The letters [code] types; none for what is no key of them. */
     fun letters(code: Char): String = codes.indexOf(code).let { if (it < 0) "" else keys[it] }
+
+    /**
+     * Whether where a tap on [code]'s key fell weighs its letters: two letters a–z or more (the 18
+     * keys' L; is l alone, its ; 微软 双拼's ing). The engine, the app and the eval count alike.
+     */
+    fun weighs(code: Char): Boolean = letters(code).count { it in 'a'..'z' } > 1
 
     /**
      * How far a tap at [at] across a key (0 its left edge, 1 its right) goes against its letter
@@ -140,12 +147,12 @@ class NineKeyLetters private constructor(
 
     companion object {
         /** The most letters a key types. */
-        const val MAX = 5
+        const val MAX = Groups.MAX
 
         private const val TYPINGS = 64
 
         /** The most groups a layout's own keyboard ([custom]) has: its codes' block, [CUSTOM_BLOCK]. */
-        const val CUSTOM_MAX = 30
+        const val CUSTOM_MAX = Groups.CUSTOM_MAX
 
         // a two dimensional place: x plus twice (1 + its row of [PLACE_ROWS] places); a one dimensional one is x alone, 0 to 1.
         // Keyboard.TAP_ROWS is this: a tap's row sent is read back here
@@ -264,47 +271,53 @@ class NineKeyLetters private constructor(
         @Volatile
         private var current: NineKeyLetters? = null
 
-        /**
-         * What is wrong with [groups] (each a key's letters, rows apart by a space) for a keyboard of
-         * their own: a to z each on some key (ü as v), a key 1 to [MAX] letters of a to z and ;, none
-         * twice, at most [CUSTOM_MAX] keys; null where nothing is.
-         */
-        @Suppress("ReturnCount")
-        fun problem(groups: List<String>): String? {
-            if (groups.isEmpty() || groups.size > CUSTOM_MAX) return "${groups.size} keys, not 1 to $CUSTOM_MAX"
-            for (g in groups) {
-                val letters = g.replace(" ", "")
-                if (letters.isEmpty() || letters.length > MAX) return "\"$g\" is not 1 to $MAX letters"
-                if (letters.any { it !in 'a'..'z' && it != ';' } || g.split(' ').any { it.isEmpty() }) return "\"$g\" is not letters in rows"
-                if (letters.toSet().size != letters.length) return "\"$g\" has a letter twice"
-            }
-            val missing = ('a'..'z').filter { c -> groups.none { c in it } }
-            return if (missing.isEmpty()) null else "no key types ${missing.joinToString("")}"
-        }
+        /** What is wrong with [groups] for a keyboard of their own (keyboard-scene's [Groups.problem], which the layout check asks too); null where nothing is. */
+        fun problem(groups: List<String>): String? = Groups.problem(groups)
 
         /**
          * The grouped keyboard of [groups] (a layout's `letters=`, rows apart by a space; [problem]
          * none, else IllegalArgumentException): [G14] or [G18] where their letters are those
-         * keyboards' (their codes, their record, so the built-in 14 and 18 keys move nothing; equal
-         * to them, and written in rows, those rows kept: a tap across alone then leans to no letter
-         * of a key stacked, rather than to the wrong one), otherwise one of its own, its codes from
-         * [CUSTOM_BLOCK], filed under its [tag].
+         * keyboards' groups, in any order (061-custom-layout §6: a group's code is its first letter's,
+         * whichever key it is on, so the built-in 14 and 18 keys rearranged keep their codes, their
+         * record and 双拼; equal to them, and written in rows, those rows kept, in the built-in
+         * keyboard's order: [rowsOf] says where each letter of a key is as drawn, which the app's
+         * GroupedKeyboard hands its taps (a key of two letters stacked is told apart by where down it
+         * was tapped, not across; review L4 S1), the engine's own G14 and G18 having one row a key),
+         * otherwise one of its own ([own]), its codes from [CUSTOM_BLOCK], filed under its [tag]. A
+         * group is its letters in their order: `wq` is not the 14 keys' `qw` (a tap's place there goes
+         * against the first letter on the left, so the other order would lean to the wrong letter), and
+         * a grouping with it is one of its own.
          */
         fun custom(groups: List<String>): NineKeyLetters {
             problem(groups)?.let { throw IllegalArgumentException(it) }
             val keys = groups.map { it.replace(" ", "") }
             val rows = groups.map { it.split(' ') }.takeIf { r -> r.any { it.size > 1 } }
-            listOf(G14, G18).firstOrNull { it.keys == keys }?.let { k ->
-                return if (rows == null) k else NineKeyLetters(k.keys, k.codes, k.separator, k.filedAs, rows)
+            // as many groups and the same ones: each of them once (a group twice would leave one of theirs out)
+            listOf(G14, G18).firstOrNull { it.keys.size == keys.size && it.keys.toSet() == keys.toSet() }?.let { k ->
+                return if (rows == null) k else NineKeyLetters(k.keys, k.codes, k.separator, k.filedAs, k.keys.map { rows[keys.indexOf(it)] })
             }
-            return NineKeyLetters(keys, keys.indices.map { FIRST_CUSTOM_CODE + it }.joinToString(""), separator = null, rows = rows)
+            return own(keys, rows)
         }
 
         /**
+         * The keyboard of their own [groups] make ([custom]): null where they make none ([problem]) or are G14's or
+         * G18's, which the built-in keyboards type with their own codes, sessions and record (a layout of those groups
+         * tells none, GroupedKeyboard; review L4 N2): what the engine's settings and the keyboard in use take of the
+         * groups told (EngineSettings.ownKeyboard, the app's EngineBridge.syncOwnKeys).
+         */
+        fun ownOf(groups: List<String>): NineKeyLetters? = if (problem(groups) != null) null else custom(groups).takeUnless { it == G14 || it == G18 }
+
+        // a keyboard of its own of [keys] in their order, [rows] each one's as written (null: a row each): its codes from
+        // CUSTOM_BLOCK by its keys' places, never compared with the built-in ones
+        private fun own(keys: List<String>, rows: List<List<String>>? = null) =
+            NineKeyLetters(keys, keys.indices.map { FIRST_CUSTOM_CODE + it }.joinToString(""), separator = null, rows = rows)
+
+        /**
          * [keyboard], a layout's own ([custom]), as the one in use: its codes are read as its keys
-         * ([ofCode], Keyboard.typedLetter) until another is. The session that types on it is to say
-         * so when it is made (T9b wires it: till then only tests call it, and [ofCode] reads no
-         * custom code); nothing else sets it (made, compared and filed keyboards do not).
+         * ([ofCode], Keyboard.typedLetter) until another is. Engines says so as the settings tell it
+         * ([EngineSettings.ownKeyboard][org.fcitx.fcitx5.android.engine.runtime.EngineSettings.ownKeyboard],
+         * the app's EngineBridge.syncOwnKeys; review F8245); nothing else sets it (made, compared and filed
+         * keyboards do not).
          */
         fun inUse(keyboard: NineKeyLetters) {
             if (keyboard.codes.firstOrNull()?.code in CUSTOM_BLOCK) current = keyboard
@@ -325,14 +338,16 @@ class NineKeyLetters private constructor(
 
         /**
          * The grouped keyboard what is learnt under `qk:` [tag] was typed on: [G14] or [G18], else a
-         * layout's own ([custom], a row a key); null for none. Not [NINE_SP] (双拼's, `spk:`): a layout
-         * of its groups is a keyboard of its own here.
+         * layout's own (a row a key, its codes by its keys' places as [custom] gave them); null for
+         * none. Not [NINE_SP] (双拼's, `spk:`): a layout of its groups is a keyboard of its own here.
+         * Nor [G14] or [G18] for their groups in another order: before 0.6.1 such a layout was typed on
+         * a keyboard of its own (custom compared the order), its rows here filed with those codes.
          */
         fun filedAs(tag: String): NineKeyLetters? {
             filed[tag]?.let { return it.keyboard }
             if (filed.size >= KEPT_FILED) filed.clear()
             return filed.getOrPut(tag) {
-                Filed(listOf(G14, G18).firstOrNull { it.tag() == tag } ?: tag.split(',').takeIf { problem(it) == null }?.let(::custom))
+                Filed(listOf(G14, G18).firstOrNull { it.tag() == tag } ?: tag.split(',').takeIf { problem(it) == null }?.let { own(it) })
             }.keyboard
         }
 

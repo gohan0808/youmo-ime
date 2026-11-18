@@ -82,14 +82,28 @@ class KeyGesture(private val key: Key, touchSlop: Float) {
     /**
      * Where across the key the touch that clicks it came down ([downAt]), for the click listener
      * alone: set as the finger lifts, before the touch's state is reset, cleared once the click
-     * returns. NaN for a click no touch made (TalkBack), one that left the key or swiped past the
-     * threshold, and for a swipe's own click (KeySwipe's Tap, made at the Up before this is set).
+     * returns. NaN for a click no touch made (TalkBack), and for the touch's own click where it left the
+     * key or swiped past the threshold. A swipe's own click (KeySwipe's Tap, made at the Up) and a stroke
+     * lifted short ([tap]) have where it came down: where the finger landed is what neighbour correction reads.
      */
     var clickAt = Float.NaN
         private set
 
     /** Where down the key that touch came down ([clickAt]'s y: 0 its top, 1 its bottom), NaN as [clickAt] is: a layout's own groups' taps (060-render-p3 T9b). */
     var clickDown = Float.NaN
+        private set
+
+    /**
+     * Where across and down the key ([clickAt], [clickDown]) the touch that clicks it came down,
+     * however far it went: a swipe's own click (KeySwipe's Tap) has it too, set before the Up goes to
+     * the swipe. For the click listener alone, NaN for a click no touch made (TalkBack): where a tap
+     * fell, the engine's to read a key next to it (061-neighbour-correction).
+     */
+    var fellAt = Float.NaN
+        private set
+
+    /** [fellAt]'s down the key. */
+    var fellDown = Float.NaN
         private set
 
     var longPressEnabled
@@ -116,6 +130,17 @@ class KeyGesture(private val key: Key, touchSlop: Float) {
             recognizer.repeatEnabled = value
         }
     private var repeatJob: Job? = null
+
+    /**
+     * This touch's hold, made anew as it goes down: a held ⌫'s repeats carry it ([BackspaceHold]), and once it is
+     * seen stopped the key repeats no more (what was typed as it began all deleted). It stops on the host's thread:
+     * a repeat or two already on their way are felt still, though not sent.
+     */
+    var hold = BackspaceHold()
+        private set
+
+    /** Told [hold] as a touch of a key that repeats goes down: a ⌫'s, for what is typed then. */
+    var holdBegan: ((BackspaceHold) -> Unit)? = null
 
     var swipeEnabled
         get() = recognizer.swipeEnabled
@@ -217,6 +242,8 @@ class KeyGesture(private val key: Key, touchSlop: Float) {
             MotionEvent.ACTION_CANCEL -> {
                 clickAt = Float.NaN
                 clickDown = Float.NaN
+                fellAt = Float.NaN
+                fellDown = Float.NaN
                 dispatchGestureEvent(GestureType.Up, x, y, cancelled = true)
                 cancelGestures()
             }
@@ -234,8 +261,11 @@ class KeyGesture(private val key: Key, touchSlop: Float) {
             downs[pointerId * 2] = downAt
             downs[pointerId * 2 + 1] = downDown
         }
+        // a click that threw last time leaves none of its places to this touch
         clickAt = Float.NaN
         clickDown = Float.NaN
+        fellAt = Float.NaN
+        fellDown = Float.NaN
         key.hotspot(x, y)
         key.showPressed(true)
         InputFeedbacks.hapticFeedback(key.feedback)
@@ -254,11 +284,12 @@ class KeyGesture(private val key: Key, touchSlop: Float) {
         }
         if (repeatEnabled) {
             repeatJob?.cancel()
+            hold = BackspaceHold().also { holdBegan?.invoke(it) }
             repeatJob = key.timers.launch {
                 delay(longPressDelay.toLong())
                 repeatStarted = true
                 var lastTriggerTime: Long
-                while (isActive && key.keyEnabled) {
+                while (isActive && key.keyEnabled && !hold.stopped) {
                     lastTriggerTime = SystemClock.uptimeMillis()
                     key.repeat()
                     val t = lastTriggerTime + RepeatInterval - SystemClock.uptimeMillis()
@@ -267,6 +298,25 @@ class KeyGesture(private val key: Key, touchSlop: Float) {
             }
         }
         recognizer.onDown(x, y)
+    }
+
+    /**
+     * A tap at ([x], [y]) in the key's pixels after its touch was cancelled for a stroke drawn that, lifted short, was
+     * none (笔画筛选, GlideTouch.Route.TAP_KEY): its click as a tap's there, the key-up buzz with it (the down's was given).
+     */
+    fun tap(x: Float, y: Float) {
+        if (!key.keyEnabled) return
+        InputFeedbacks.hapticFeedback(key.feedback, longPress = true, keyUp = true)
+        clickAt = across(x)
+        clickDown = downward(y)
+        // and where it fell, for the engine to read a key next to it (061-neighbour-correction)
+        fellAt = clickAt
+        fellDown = clickDown
+        key.click()
+        clickAt = Float.NaN
+        clickDown = Float.NaN
+        fellAt = Float.NaN
+        fellDown = Float.NaN
     }
 
     private fun up(x: Float, y: Float, pointerId: Int, eventTime: Long) {
@@ -280,6 +330,11 @@ class KeyGesture(private val key: Key, touchSlop: Float) {
         }
         key.showPressed(false)
         InputFeedbacks.hapticFeedback(key.feedback, longPress = true, keyUp = true)
+        // a swipe whose slot is nothing clicks the key at its Up (KeySwipe.Outcome.Tap): where it came down
+        clickAt = at
+        clickDown = atDown
+        fellAt = at
+        fellDown = atDown
         dispatchGestureEvent(GestureType.Up, x, y)
         val outcome = recognizer.onUp(
             nowMs = eventTime,
@@ -297,6 +352,8 @@ class KeyGesture(private val key: Key, touchSlop: Float) {
         }
         clickAt = Float.NaN
         clickDown = Float.NaN
+        fellAt = Float.NaN
+        fellDown = Float.NaN
     }
 
     private fun move(x: Float, y: Float): Boolean {

@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- nothing leaves the browser, as on the theme maker (061-custom-layout §12.1, §13): only the page's own scripts run, by their hashes -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src blob: data:; font-src blob: data:; style-src 'unsafe-inline'; script-src {{script-hashes}}; connect-src blob: data:; base-uri 'none'; form-action 'none'">
+<meta name="color-scheme" content="light dark">
+<title>幽默输入法 · 键盘布局</title>
+<style>
+{{base-css}}
+{{css}}
+</style>
+<style id="youmo-fonts">
+{{fonts}}
+</style>
+</head>
+<body>
+<header id="top" inert>
+  <button id="file" aria-haspopup="menu">文件</button>
+  <div id="file-menu" class="menu" role="menu" hidden>
+    <button data-act="new" role="menuitem">新建…</button>
+    <button data-act="open" role="menuitem">打开 .layout 或 .theme…</button>
+    <button data-act="save" role="menuitem">保存 .layout</button>
+  </div>
+  <button id="undo" title="撤销" aria-label="撤销">↶</button>
+  <button id="redo" title="重做" aria-label="重做">↷</button>
+  <span id="name" class="name"></span>
+  <span class="grow"></span>
+  <label class="inline">主题 <select id="env-theme" aria-label="预览用的主题"></select></label>
+  <button id="dark" aria-pressed="false">浅色</button>
+  <button id="help-button">帮助</button>
+  <a class="link" href="../">主题制作</a>
+</header>
+<main id="main" inert>
+  <section id="preview-area">
+    <canvas id="preview" tabindex="0" aria-label="键盘预览：点键或用方向键选键，Delete 删除选中的键，Esc 不选"></canvas>
+    <span id="selected" class="sr" aria-live="polite"></span>
+    <form id="env-bar" aria-label="预览环境">
+      <label>设备 <select id="env-device"></select></label>
+      <label>方向 <select id="env-turned"><option value="">竖</option><option value="turned">横</option></select></label>
+      <span id="env-shape" class="muted"></span>
+      <label>形态 <select id="env-form"></select></label>
+      <label>输入法 <select id="env-ime"></select></label>
+      <label>Shift <select id="env-shift"></select></label>
+      <label id="env-field-label">输入框 <select id="env-field"></select></label>
+      <label id="env-pad-label" hidden>数字键盘 <select id="env-pad"></select></label>
+      <label>上滑图标 <select id="env-up"></select></label>
+      <label>下滑图标 <select id="env-down"></select></label>
+    </form>
+  </section>
+  <section id="edit">
+    <nav id="tabs" role="tablist">
+      <button role="tab" data-tab="key" aria-selected="true">键</button>
+      <button role="tab" data-tab="row">行</button>
+      <button role="tab" data-tab="board">整块</button>
+      <button role="tab" data-tab="meta">信息</button>
+      <button role="tab" data-tab="source">源码</button>
+    </nav>
+    <div id="tab-key" class="tab"></div>
+    <div id="tab-row" class="tab" hidden></div>
+    <div id="tab-board" class="tab" hidden></div>
+    <div id="tab-meta" class="tab" hidden></div>
+    <div id="tab-source" class="tab" hidden>
+      <p class="muted">布局文件全文：改完即时重读，问题在下面列出，点一条跳到那一行。打开的文件换行一律存成 LF（Windows 的 CRLF 也改成 LF）。</p>
+      <textarea id="source" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
+    </div>
+  </section>
+  <section id="problems-area">
+    <h2>问题 <span id="count"></span></h2>
+    <ul id="problems"></ul>
+  </section>
+</main>
+<dialog id="new-panel">
+  <form method="dialog">
+    <h2>新建键盘布局</h2>
+    <p>从内置键盘开始：</p>
+    <div id="bases" class="cards" role="radiogroup" aria-label="内置键盘"></div>
+    <p>或者从示例开始：</p>
+    <div id="layout-examples" class="cards" role="radiogroup" aria-label="示例"></div>
+    <p id="new-note" class="muted"></p>
+    <label>名字 <input id="new-name" maxlength="24" autocomplete="off"></label>
+    <label>id <input id="new-id" maxlength="32" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+    <p class="muted">id 是这块布局的身份：小写字母、数字和连字符；同一个 id 再导入是更新。</p>
+    <p id="new-problem" class="bad" role="alert"></p>
+    <button id="new-make" value="make">新建</button>
+    <p>或者 <button type="button" id="new-open">打开文件…</button>（.layout，或者从 .theme 主题带的键盘开始）</p>
+    <button value="cancel">取消</button>
+  </form>
+</dialog>
+<dialog id="export-panel">
+  <form method="dialog">
+    <h2>保存前检查</h2>
+    <p id="export-text"></p>
+    <ul id="export-list"></ul>
+    <button value="save">仍然保存</button> <button value="cancel">回去改</button>
+  </form>
+</dialog>
+<datalist id="action-args-layout"><option value="Text"><option value="Number"><option value="Symbol"></datalist>
+<datalist id="action-args-keypad"><option value="1"><option value="2"><option value="3"><option value="4"><option value="5"><option value="6"><option value="7"><option value="8"><option value="9"><option value="0"></datalist>
+<datalist id="action-args-sym"><option value="BackSpace"><option value="Return"><option value="space"><option value="Tab"><option value="Escape"><option value="Left"><option value="Right"><option value="Up"><option value="Down"></datalist>
+<datalist id="action-args-shortcut">
+  <option value="select_all"><option value="copy"><option value="cut"><option value="paste"><option value="undo"><option value="redo"><option value="clear"><option value="restore">
+  <option value="field_start"><option value="field_end"><option value="edit_menu"><option value="swipe_select"><option value="clipboard"><option value="quick_input"><option value="emoji">
+  <option value="voice"><option value="trad_simp"><option value="choose_keyboard"><option value="hide_keyboard"><option value="stroke_h"><option value="stroke_s"><option value="stroke_p"><option value="stroke_n"><option value="stroke_z">
+</datalist>
+<dialog id="own-panel">
+  <form method="dialog">
+    <p>改成这块键盘自己的底行？以后 App 改底行不会跟着变</p>
+    <button value="yes">改成自己的</button> <button value="no">不改</button>
+  </form>
+</dialog>
+<dialog id="help-panel">
+  <form method="dialog">
+    <h2>怎么做一个键盘布局</h2>
+    <ol>
+      <li>「文件 › 新建」：从内置键盘（26 键、14 键、18 键、九键、数字键盘、符号面板）或示例（17 键、AZERTY、大按键数字键盘）开始，或者打开一个 .layout 文件；打开 .theme 主题时，预览换成这个主题，还可以从它带的键盘开始。</li>
+      <li>上面是预览，点一个键就选中它，拖它换位置、拖右边缘改宽；Shift 或 Ctrl 点多选。预览下面换输入法、输入框、设备和横竖屏，顶栏换预览用的主题。</li>
+      <li>下面的标签页逐项改：「键」加键、改字和图标、按下和长按做什么，选两个以上字母键能合并成分组键；「行」换行序、加行；「整块」改名字、底稿、列数、分体，数字键盘还有它管哪几种输入框；「信息」写作者、版本、许可、说明；「源码」是布局全文。</li>
+      <li>「问题」里有错误时不能保存（App 会拒收），警告可以不管。点一条跳到那一行。</li>
+      <li>「文件 › 保存 .layout」，再在手机上：幽默输入法 → 外观 → 布局 → ＋ → 导入布局文件，导入后选它用在哪个输入法上（数字键盘、符号面板选「数字键盘用这个」）。</li>
+    </ol>
+    <p>撤销、重做在顶栏；草稿自动存在这个浏览器里，下次打开会问要不要恢复。什么都不会上传。</p>
+    <p>布局文件每个元素、每个属性的说明：<a href="https://github.com/Sraw/youmo-ime/blob/main/docs/layout-format.md" target="_blank" rel="noopener">布局格式参考（docs/layout-format.md）</a>；
+      这个页面的用法：<a href="https://github.com/Sraw/youmo-ime/blob/main/docs/layout-maker.md" target="_blank" rel="noopener">docs/layout-maker.md</a>。</p>
+    <button value="close">知道了</button>
+  </form>
+</dialog>
+<dialog id="theme-panel">
+  <form method="dialog">
+    <p id="theme-text"></p>
+    <ul id="theme-boards"></ul>
+    <button value="close">只用它预览</button>
+  </form>
+</dialog>
+<dialog id="restore-panel">
+  <form method="dialog">
+    <p id="restore-text"></p>
+    <button value="restore">恢复</button> <button value="discard">丢弃草稿</button>
+  </form>
+</dialog>
+<input id="open-input" type="file" accept=".layout,.xml,.theme,application/xml,text/xml" hidden>
+<div id="toast" role="status" aria-live="polite"></div>
+<!-- the examples (§12.4 从示例开始): web/theme-maker/examples/layouts/, put in by tools/assemble.mjs -->
+<script type="application/json" id="youmo-layout-examples">
+{{layout-examples}}
+</script>
+<!-- generated by the app's tests: not edited by hand -->
+<script type="application/json" id="youmo-format">
+{{youmo-format}}
+</script>
+<script type="application/json" id="youmo-engine-icons">
+{{youmo-engine-icons}}
+</script>
+<!-- the drawing engine (060-render-p3 W1): lib/keyboard-scene's library, ./gradlew :lib:keyboard-scene:youmoEngine -->
+<script id="youmo-engine">
+{{engine}}
+</script>
+<!-- the theme maker's library (youmo-lib): a .theme opened (§12.4) read as the theme maker reads it -->
+<script id="youmo-lib">
+{{lib}}
+</script>
+<script id="youmo-form">
+{{form}}
+</script>
+<script id="youmo-maker">
+{{maker}}
+</script>
+<script id="youmo-layout-maker">
+{{layout-maker}}
+</script>
+<script id="youmo-layout-edit">
+{{layout-edit}}
+</script>
+<script id="youmo-ui">
+{{ui}}
+</script>
+</body>
+</html>

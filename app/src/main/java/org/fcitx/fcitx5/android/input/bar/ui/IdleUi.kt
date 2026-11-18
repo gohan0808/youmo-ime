@@ -15,12 +15,14 @@ import android.view.ViewGroup
 import android.view.animation.AlphaAnimation
 import android.view.animation.AnimationSet
 import android.view.animation.TranslateAnimation
-import android.widget.LinearLayout
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ViewAnimator
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.data.theme.Theme
+import org.fcitx.fcitx5.android.input.bar.BarIconDrawables
+import org.fcitx.fcitx5.android.input.bar.BarIcons
 import org.fcitx.fcitx5.android.input.bar.IdleUiPolicy.Display
 import org.fcitx.fcitx5.android.input.bar.KawaiiBarComponent
 import org.fcitx.fcitx5.android.input.bar.ToolbarButton
@@ -35,6 +37,7 @@ import org.fcitx.fcitx5.android.input.candidates.SceneBar
 import org.fcitx.fcitx5.android.input.keyboard.CommonKeyActionListener
 import org.fcitx.fcitx5.android.input.keyboard.KeyAction
 import org.fcitx.fcitx5.android.input.keyboard.KeyActionListener
+import org.fcitx.fcitx5.android.input.keyboard.canvas.PackIcons
 import org.fcitx.fcitx5.android.input.motion.Motion
 import org.fcitx.fcitx5.android.input.popup.PopupComponent
 import org.fcitx.fcitx5.android.utils.interpolator
@@ -74,17 +77,35 @@ class IdleUi(
         if (ctx.resources.configuration.layoutDirection == View.LAYOUT_DIRECTION_LTR) 1f else -1f
     }
 
-    private val menuButtonRotation
-        get() = when {
-            currentState == Display.Toolbar -> 90f * translateDirection
-            else -> -90f * translateDirection
-        }
+    private val packIcons = PackIcons.of(theme)
+
+    // the app's menu key is one ⌄ turned to say the state; a theme's icon of either state (061-toolbar-icons Q3) has
+    // each state drawn as its own, none turned, the one it does not write the app's ⌄ turned as ever. As drawn, not as
+    // named: a file that failed is the app's ⌄. Asked each time: a file not read yet counts as drawn (R26 F8451)
+    private val menuTurns get() = BarIcons.menuStates.none { BarIconDrawables.drawsOwn(packIcons, it) }
+
+    private val menuOpen get() = currentState == Display.Toolbar
+
+    private fun menuRotation(open: Boolean): Float = when {
+        BarIconDrawables.drawsOwn(packIcons, BarIcons.menu(open)) -> 0f
+        open -> 90f * translateDirection
+        else -> -90f * translateDirection
+    }
 
     // the theme's toolbar button, worked out once for the bar's every button (T6b)
     private val toolbar = SceneBar.of(ctx, theme).toolbar
 
-    val menuButton = ToolButton(ctx, R.drawable.ic_baseline_expand_more_24, theme, toolbar).apply {
-        iconRotation = menuButtonRotation
+    // the state the menu key's icon is drawn for
+    private var menuDrawnOpen = menuOpen
+
+    // the menu key drawn as ⋯ (ToolbarConfig.Layout.moreOnly)
+    private var menuDrawnMore = false
+
+    /** Nothing of the toolbar's to show: the menu key is ⋯, a tap opening its panel (ToolbarConfig.Layout.moreOnly). */
+    val moreOnly: Boolean get() = arranged?.moreOnly == true
+
+    val menuButton = ToolButton(ctx, BarIcons.menu(menuOpen), theme, toolbar).apply {
+        iconRotation = menuRotation(menuOpen)
         fixIconSize(ctx.dp(KawaiiBarComponent.ICON_DP))
     }
 
@@ -92,6 +113,20 @@ class IdleUi(
         // updateState keeps this current, but is not called for the initial state; without
         // this the button starts out unlabelled
         updateMenuButtonContentDescription()
+        followMenuIcons()
+    }
+
+    // a menu icon not read yet is turned as the theme's (none); one that failed once read is the app's ⌄, turned for the
+    // state drawn now, not left upright till the next state's (R26 F8451). A read pending at a forget is told and followed
+    // anew; one in already is not told of it (PackIcons.forget tells the waiting alone), drawn as read till the next
+    // state's: the pack in use written over is told as changed (ThemeManager.filesChanged), the keyboard drawn anew (R26 F8510)
+    private fun followMenuIcons() {
+        for (state in BarIcons.menuStates) packIcons.file(state.name)?.let { packIcons.outline(it, ::menuIconRead) }
+    }
+
+    private fun menuIconRead() {
+        if (!menuDrawnMore) menuButton.iconRotation = menuRotation(menuDrawnOpen)
+        followMenuIcons()
     }
 
     /**
@@ -119,6 +154,7 @@ class IdleUi(
             fixIconSize(ctx.dp(KawaiiBarComponent.ICON_DP))
         }
         made[button] = view
+        view.available = button !in arranged?.unavailable.orEmpty()
         // the emoji, as Sogou's 表情: a long press on the comma was all there was, and nobody finds
         // that. Opens the emoji or kaomoji, whichever was last
         if (button == ToolbarButton.Emoji) view.setOnClickListener {
@@ -138,44 +174,58 @@ class IdleUi(
 
     private var arranged: ToolbarConfig.Layout? = null
 
-    private var layoutFor: ((Int) -> ToolbarConfig.Layout)? = null
+    // the bar's slots as last worked out for its width (ToolbarConfig.Layout.slots)
+    private var slots: ToolbarConfig.Slots? = null
 
-    // the layout whose toolbar [buttonsUi] holds; null while it holds an older one's or none
-    private var toolbarShown: ToolbarConfig.Layout? = null
+    // the buttons [buttonsUi] holds; null while it holds an older arrangement's or none
+    private var toolbarShown: List<ToolbarButton>? = null
+
+    /** The toolbar's buttons with no slot on the bar, in order: in ⋯'s panel (StatusAreaWindow). */
+    val overflow: List<ToolbarButton> get() = slots?.overflow.orEmpty()
 
     private fun showToolbar() {
-        val layout = arranged ?: return
-        if (layout == toolbarShown) return
-        toolbarShown = layout
-        buttonsUi.show(layout.toolbar.map(::button))
+        val shown = slots?.toolbar ?: return
+        if (shown == toolbarShown) return
+        toolbarShown = shown
+        buttonsUi.show(shown.map(::button))
     }
 
-    /**
-     * How many buttons fit at the right beside the menu key, the middle (a clipboard suggestion,
-     * a sum, the password's digits) kept [MIDDLE_BUTTONS] buttons wide: the rest go onto the toolbar.
-     */
-    private fun roomForPinned(width: Int): Int {
-        if (width <= 0) return Int.MAX_VALUE
-        val button = ctx.dp(KawaiiBarComponent.buttonWidthDp(ctx))
-        return (width - button * (1 + MIDDLE_BUTTONS)) / button
-    }
-
-    /** The buttons [layout] places given the room at the right, the others nowhere; again as the bar's width changes. */
-    fun arrange(layout: (maxPinned: Int) -> ToolbarConfig.Layout) {
-        layoutFor = layout
-        place(layout(roomForPinned(root.width)))
-    }
-
-    private fun place(layout: ToolbarConfig.Layout) {
+    /** The buttons [layout] places, the others nowhere; the same ones but for which are greyed only greyed anew. */
+    fun arrange(layout: ToolbarConfig.Layout) {
         if (layout == arranged) return
+        val placed = arranged?.let { it.toolbar == layout.toolbar && it.pinned == layout.pinned } == true
         arranged = layout
+        made.forEach { (button, view) -> view.available = button !in layout.unavailable }
+        showMenuKey()
+        if (placed) return
         made.values.forEach { (it.parent as? ViewGroup)?.removeView(it) }
         // the toolbar's buttons made and put on it as it is first opened
         toolbarShown = null
-        if (currentState == Display.Toolbar) showToolbar()
         val size = ctx.dp(KawaiiBarComponent.heightDp(ctx))
         val buttonWidth = ctx.dp(KawaiiBarComponent.buttonWidthDp(ctx))
         layout.pinned.forEach { pinnedBar.addView(button(it), LinearLayout.LayoutParams(buttonWidth, size)) }
+        sizeCells()
+    }
+
+    // the bar in slots of one width (ToolbarConfig.Layout.slots), the menu key in the first, the right's in the last,
+    // the toolbar's between as it is open: nothing moves nor changes width as it opens or shuts, nor as 中/英 switch
+    // (the user's call, 2026-11-15); narrower where the bar is narrow (the floating keyboard's), every one at the right
+    // kept. An icon too big for its slot shrinks.
+    private fun sizeCells() {
+        val layout = arranged ?: return
+        val s = layout.slots(root.width, ctx.dp(KawaiiBarComponent.buttonWidthDp(ctx)))
+        slots = s
+        val cell = s.cellPx
+        buttonsUi.cellPx = cell
+        (listOf<View>(menuButton) + (0 until pinnedBar.childCount).map(pinnedBar::getChildAt)).forEach {
+            if (it.layoutParams.width != cell) {
+                it.layoutParams.width = cell
+                it.requestLayout()
+            }
+        }
+        if (currentState == Display.Toolbar) showToolbar()
+        val icon = minOf(ctx.dp(KawaiiBarComponent.ICON_DP), cell - ctx.dp(ICON_MARGIN_DP)).coerceAtLeast(1)
+        (listOf(menuButton) + made.values).forEach { it.fixIconSize(icon) }
     }
 
     // what the bar shows with nothing else to: the address suggestions (AddressStrip), when there are
@@ -323,19 +373,43 @@ class IdleUi(
         add(idleBody, lParams(matchParent, matchParent))
         add(numberRow, lParams(matchParent, matchParent))
         addOnLayoutChangeListener { _, left, _, right, _, oldLeft, _, oldRight, _ ->
-            if (right - left != oldRight - oldLeft) layoutFor?.let { f -> post { place(f(roomForPinned(width))) } }
+            if (right - left != oldRight - oldLeft) post { sizeCells() }
         }
+    }
+
+    // ⋯ where the toolbar has nothing to show, else the menu key of its state
+    private fun showMenuKey() {
+        val more = moreOnly
+        if (more == menuDrawnMore) return
+        menuDrawnMore = more
+        menuButton.apply {
+            iconAnimate().cancel()
+            iconAlpha = 1f
+            if (more) {
+                setIcon(BarIcons.MORE)
+                iconRotation = 0f
+            } else {
+                menuDrawnOpen = menuOpen
+                setIcon(BarIcons.menu(menuOpen))
+                iconRotation = menuRotation(menuOpen)
+            }
+        }
+        updateMenuButtonContentDescription()
     }
 
     private fun updateMenuButtonContentDescription() {
         menuButton.contentDescription = when {
+            menuDrawnMore -> ctx.getString(R.string.toolbar_more)
             currentState == Display.Toolbar -> ctx.getString(R.string.hide_toolbar)
             else -> ctx.getString(R.string.expand_toolbar)
         }
     }
 
-    private fun updateMenuButtonRotation(instant: Boolean = false) {
-        val targetRotation = menuButtonRotation
+    private fun updateMenuButtonIcon(instant: Boolean = false) {
+        if (menuDrawnMore) return
+        val open = menuOpen
+        if (!menuTurns) return crossfadeMenuButton(open, instant)
+        val targetRotation = menuRotation(open)
         menuButton.apply {
             if (targetRotation == iconRotation) return
             iconAnimate().cancel()
@@ -344,6 +418,29 @@ class IdleUi(
                 iconAnimate().setDuration(ms).setInterpolator(Motion.Curve.Move.interpolator).rotation(targetRotation)
             } else {
                 iconRotation = targetRotation
+            }
+        }
+    }
+
+    // a theme's menu key: the state's own icon faded in for the other's, Motion.Long (150 ms) in all, at once with 禁用动画
+    private fun crossfadeMenuButton(open: Boolean, instant: Boolean) {
+        if (open == menuDrawnOpen) return
+        menuDrawnOpen = open
+        menuButton.apply {
+            iconAnimate().cancel()
+            val show = {
+                setIcon(BarIcons.menu(open))
+                iconRotation = menuRotation(open)
+            }
+            val ms = if (instant) 0L else Motion.Long.enter(motionSettings())
+            if (ms > 0L) {
+                iconAnimate().setDuration(ms / 2).alpha(0f).withEndAction {
+                    show()
+                    iconAnimate().setDuration(ms / 2).alpha(1f)
+                }
+            } else {
+                show()
+                iconAlpha = 1f
             }
         }
     }
@@ -420,14 +517,16 @@ class IdleUi(
             popup.dismissAll()
         }
         currentState = state
+        sizeCells()
         layOutWork()
         updateMenuButtonContentDescription()
-        updateMenuButtonRotation(instant = !fromUser)
+        updateMenuButtonIcon(instant = !fromUser)
     }
 
     companion object {
         private const val WORK_BAR_DP = 2
 
-        private const val MIDDLE_BUTTONS = 2
+        // the least room beside an icon in its cell, dp: a cell narrower than the icon and this shrinks the icon
+        private const val ICON_MARGIN_DP = 6
     }
 }

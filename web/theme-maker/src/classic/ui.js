@@ -34,7 +34,7 @@
   };
   const BOARD_LABEL = {
     qwerty: '26 键', nine: '九键', k14: '14 键', k18: '18 键', zhuyin: '注音全键盘', 'zhuyin-nine': '注音九键',
-    number: '数字', symbols: '符号', emoji: '表情', handwriting: '手写',
+    number: '数字', symbols: '符号', emoji: '表情',
   };
   const MODE_LABEL = { normal: '普通', 'one-handed': '单手', floating: '悬浮' };
   const STATE_LABEL = { idle: '空闲', typing: '打字中', longpress: '长按', clipboard: '剪贴板' };
@@ -531,7 +531,9 @@
     const fill = colorOf(e);
     // rot: the view turned about its middle (the bar's menu arrow is expand_more at -90°)
     const turn = e.rot ? `rotate(${e.rot} ${(l + r) / 2} ${(t + b) / 2}) ` : '';
-    return s('g', { transform: `${turn}translate(${(l + r) / 2 - (ic.vw * k) / 2},${(t + b) / 2 - (ic.vh * k) / 2}) scale(${k})` },
+    // flip: drawn mirrored left to right (the floating strip's resize arrow where the keyboard grows up and left)
+    const flip = e.flip ? `translate(${l + r} 0) scale(-1 1) ` : '';
+    return s('g', { transform: `${turn}${flip}translate(${(l + r) / 2 - (ic.vw * k) / 2},${(t + b) / 2 - (ic.vh * k) / 2}) scale(${k})` },
       ic.paths.map((p) => s('path', {
         d: p.d, transform: p.transform, 'fill-rule': p.rule === 'evenodd' ? 'evenodd' : undefined,
         fill: p.stroke ? 'none' : fill, stroke: p.stroke ? fill : undefined, 'stroke-width': p.stroke, opacity: p.alpha,

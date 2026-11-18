@@ -4,9 +4,10 @@
  */
 package org.fcitx.fcitx5.android.core
 
+import android.os.Looper
 import org.fcitx.fcitx5.android.FcitxApplication
+import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.Uat
-import org.fcitx.fcitx5.android.assertRows
 import org.fcitx.fcitx5.android.data.pack.PackStore
 import org.fcitx.fcitx5.android.data.pack.TestShelves
 import org.fcitx.fcitx5.android.data.pinyin.CommonWordsManager
@@ -19,6 +20,7 @@ import org.fcitx.fcitx5.android.data.replaceDirectory
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog
 import org.fcitx.fcitx5.android.engine.data.DataFormatException
 import org.fcitx.fcitx5.android.engine.handwriting.HandwritingSession
+import org.fcitx.fcitx5.android.engine.assertRows
 import org.fcitx.fcitx5.android.engine.learn.LearnLog
 import org.fcitx.fcitx5.android.engine.learn.control.BackupOp
 import org.fcitx.fcitx5.android.engine.learn.control.LearningOp
@@ -31,8 +33,11 @@ import org.fcitx.fcitx5.android.engine.runtime.EngineEvent
 import org.fcitx.fcitx5.android.engine.runtime.EngineSettings
 import org.fcitx.fcitx5.android.engine.runtime.Engines
 import org.fcitx.fcitx5.android.engine.runtime.Keyboard
+import org.fcitx.fcitx5.android.engine.runtime.UserWord
 import org.fcitx.fcitx5.android.engine.session.Action
 import org.fcitx.fcitx5.android.engine.session.Snapshot
+import org.fcitx.fcitx5.android.engine.store.RecordStore
+import org.fcitx.fcitx5.android.engine.store.Unsaved
 import org.fcitx.fcitx5.android.host.EngineOptions
 import org.fcitx.fcitx5.android.pack.PackKind
 import org.fcitx.fcitx5.android.pack.PackStatus
@@ -53,6 +58,7 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import java.io.File
 import java.io.FileNotFoundException
@@ -124,14 +130,18 @@ class EngineBridgeTest {
     }
 
     @Test
+    @Uat("WD-48")
     fun aKeyboardChangeNotSavedIsSavedWithTheNext() {
         val file = phraseFile()
-        val saves = EngineBridge.PhraseFile(file, file.readText(), true) { it.run() }
+        // a save that fails is told, as what is learned and not kept is (0.6.1 audit decode-2)
+        var told = 0
+        val saves = EngineBridge.PhraseFile(file, file.readText(), true, unsaved = { told++ }) { it.run() }
         val pinned = CustomPhrases.parse(file.readText()).pinned("yx", "信箱")
         // where the new file is written first: the save fails
         val blocker = File(file.path + ".new").apply { mkdir() }
         saves.save(pinned)
         assertEquals(listOf(phone, email), CustomPhraseManager.load(file))
+        assertEquals(1, told)
         // taken away here, not by the failed save: the next save then depends on the base alone
         blocker.delete()
         saves.save(pinned.without("dh", "电话"))
@@ -155,6 +165,42 @@ class EngineBridgeTest {
         val unsettled = bridge.additions(folder.root, writable = false)
         assertThrows(IOException::class.java) { unsettled.saveCommonWords(CommonWords.EMPTY) }
         assertEquals(2, CommonWordsManager.load(file).words.size)
+    }
+
+    // 0.6.1 audit decode-2: a keyboard's delete of a common word that is not saved is told, not only logged
+    @Test
+    fun aCommonWordsSaveThatFailsIsTold() {
+        // a directory where the file is: neither read nor replaced
+        val file = folder.newFolder("commonwords.txt")
+        var told = 0
+        val saves = EngineBridge.WordsFile(file, "", true, unsaved = { told++ }) { it.run() }
+        saves.save(CommonWords.parse("米字旁[mi'zi'pang] 米\n").words)
+        assertEquals(1, told)
+    }
+
+    // R25r4 F7969, as the phrases' above: a keyboard's delete of a common word not saved is saved with the next, the
+    // base taken as saved only once it is. Taken as saved at the failure, the next save would read 米字旁's 米 alone as
+    // a word it left alone and keep the file's 米 糸: the first delete undone. (The next deleting 米字旁's 米 too would
+    // not tell: a word gone from both is gone either way, CommonWords.merged)
+    @Test
+    @Uat("WD-48")
+    fun aCommonWordsChangeNotSavedIsSavedWithTheNext() {
+        val file = File(folder.root, "commonwords.txt")
+        CommonWordsManager.write(CommonWords.parse("米字旁[mi'zi'pang] 米 糸\n中华人民共和国[zhong'hua'ren'min'gong'he'guo] 中国\n").words, file)
+        val before = CommonWordsManager.load(file).words.map { it.toString() }
+        var told = 0
+        val saves = EngineBridge.WordsFile(file, file.readText(), true, unsaved = { told++ }) { it.run() }
+        val read = CommonWords.parse(file.readText()).words
+        // where the new file is written first (CommonWordsManager.write): the save fails
+        val blocker = File(file.path + ".new").apply { mkdir() }
+        saves.save(read.without("米字旁", "糸"))
+        assertEquals(before, CommonWordsManager.load(file).words.map { it.toString() })
+        assertEquals(1, told)
+        // taken away here, not by the failed save: the next save then depends on the base alone
+        blocker.delete()
+        saves.save(read.without("米字旁", "糸").without("中华人民共和国", "中国"))
+        assertEquals(listOf("米字旁[mi'zi'pang] 米"), CommonWordsManager.load(file).words.map { it.toString() })
+        assertEquals(1, told)
     }
 
     @Test
@@ -428,73 +474,203 @@ class EngineBridgeTest {
                 dir.deleteRecursively()
             }
         }
+
+        /**
+         * As 0.5.2's fresh installs lost it (061-userdict-loss): words typed with no files/engine, the host
+         * made anew as after the process was killed, and the words are there; nothing said, all kept.
+         */
+        @Test
+        fun aFreshInstallsTypedWordsAreThereWhenTheHostIsMadeAnew() {
+            val dir = checkNotNull(bridge.userDir())
+            dir.deleteRecursively()
+            val said = sayer()
+            try {
+                typeEnglish("youmo")
+                bridge.close()
+                assertEquals(listOf("youmo"), LearnLog.replay(File(dir, LearnLog.FILE).readBytes()).enWords.keys.toList())
+                assertTrue(bridge.engines.englishWords().any { it.text == "youmo" && it.kind == UserWord.Kind.LEARNED })
+                shadowOf(Looper.getMainLooper()).idle()
+                assertEquals(emptyList<String>(), said)
+            } finally {
+                EngineNotices.sayer = null
+                bridge.close()
+                dir.deleteRecursively()
+            }
+        }
+
+        /**
+         * What is learned in memory alone, whatever the cause (here files/engine cannot be made, a file in
+         * its place), is said on the keyboard as a failure, what to do with it; once a process, not again
+         * with every word nor with the host made anew.
+         */
+        @Test
+        fun whatIsLearnedInMemoryAloneIsSaidOnTheKeyboardOnce() {
+            val dir = checkNotNull(bridge.userDir())
+            dir.deleteRecursively()
+            dir.writeText("")
+            val said = sayer()
+            try {
+                typeEnglish("youmo")
+                typeEnglish("youmo")
+                bridge.close()
+                typeEnglish("youmo")
+                shadowOf(Looper.getMainLooper()).idle()
+                assertEquals(listOf("${appContext.getString(R.string.learning_unkept)} steady=true"), said)
+                // learned for the run all the same
+                assertTrue(bridge.engines.englishWords().any { it.text == "youmo" })
+            } finally {
+                EngineNotices.sayer = null
+                EngineNotices.forgetToldOnce()
+                bridge.close()
+                dir.delete()
+            }
+        }
+
+        /**
+         * In direct boot mode (before the first unlock, or unlocked and the app not yet restarted) what is
+         * learned in memory alone is as meant: news, typed away, once a process; not the failure.
+         */
+        @Test
+        fun whatIsLearnedNotKeptBeforeTheUnlockIsNewsOnce() {
+            val said = sayer()
+            try {
+                bridge.sayUnkept(directBoot = true)
+                bridge.sayUnkept(directBoot = true)
+                shadowOf(Looper.getMainLooper()).idle()
+                assertEquals(listOf("${appContext.getString(R.string.learning_unkept_locked)} steady=false"), said)
+            } finally {
+                EngineNotices.sayer = null
+                EngineNotices.forgetToldOnce()
+            }
+        }
+
+        /**
+         * R25r2 F7839: what the engine tells of the user's data ([EngineBridge.userDataFailed], its onError) is said on
+         * the keyboard, each in its own words: the two `if`s and their strings were in no test.
+         */
+        @Test
+        @Uat("WD-47", "WD-48")
+        fun whatTheEngineCouldNotReadOrWriteIsSaidInItsOwnWords() {
+            fun saidOf(e: IOException): List<String> {
+                val said = sayer()
+                bridge.userDataFailed(e)
+                // the same again: once a process
+                bridge.userDataFailed(e)
+                shadowOf(Looper.getMainLooper()).idle()
+                return said.toList()
+            }
+            try {
+                class Row(val why: String, val failure: IOException, val said: Int)
+                assertRows(
+                    listOf(
+                        Row("the record did not read and was kept aside (decode-1): what read is used, said so", RecordStore.KeptAside("kept"), R.string.learning_kept_aside),
+                        Row("a word added or blocked by hand not written (decode-2): in memory alone, as what is learned and not kept", Unsaved("not written"), R.string.learning_unkept),
+                    ),
+                    { it.why },
+                ) { row -> assertEquals(listOf("${appContext.getString(row.said)} steady=true"), saidOf(row.failure)) }
+                // any other failure is logged, nothing said
+                assertEquals(emptyList<String>(), saidOf(IOException("a file not closed")))
+            } finally {
+                EngineNotices.sayer = null
+                EngineNotices.forgetToldOnce()
+            }
+        }
+
+        /** As the engine finds it: a learning record that is no record is kept aside whole, and that is said, once. */
+        @Test
+        @Uat("WD-47")
+        fun aLearningRecordThatDoesNotReadIsSaidKeptAside() {
+            val dir = checkNotNull(bridge.userDir())
+            dir.deleteRecursively()
+            dir.mkdirs()
+            // no header of the record's: not a log this reads
+            File(dir, LearnLog.FILE).writeText("x".repeat(64))
+            val said = sayer()
+            try {
+                typeEnglish("youmo")
+                shadowOf(Looper.getMainLooper()).idle()
+                assertEquals(listOf("${appContext.getString(R.string.learning_kept_aside)} steady=true"), said)
+                // learned over it all the same, the file as it was beside it
+                assertTrue(bridge.engines.englishWords().any { it.text == "youmo" })
+                assertTrue(dir.list().orEmpty().toList().toString(), dir.list().orEmpty().any { RecordStore.isAside(LearnLog.FILE, it) })
+            } finally {
+                EngineNotices.sayer = null
+                EngineNotices.forgetToldOnce()
+                bridge.close()
+                dir.deleteRecursively()
+            }
+        }
+
+        /**
+         * R25r2 F7855/F7881: a keyboard's change to the phrases or the common words that is not saved is said by the
+         * files' own wiring (no `unsaved` given: [EngineBridge]'s), once a process, in words of its own: it was said
+         * as 学到的词暂时无法保存, which is not what failed, and spent that notice's once.
+         */
+        @Test
+        @Uat("WD-48")
+        fun aPhraseOrCommonWordNotSavedIsSaidOnceInItsOwnWordsNotAsLearning() {
+            val dir = File(appContext.cacheDir, "unsaved").apply { deleteRecursively(); mkdirs() }
+            val said = sayer()
+            try {
+                // a directory where the file is: neither read nor replaced
+                val words = EngineBridge.WordsFile(File(dir, "commonwords.txt").apply { mkdir() }, "", true) { it.run() }
+                words.save(CommonWords.parse("米字旁[mi'zi'pang] 米\n").words)
+                words.save(CommonWords.parse("米字旁[mi'zi'pang] 糸\n").words)
+                val file = File(dir, "customphrase").also { CustomPhraseManager.save(listOf(PinyinCustomPhrase("dh", 1, "电话")), it) }
+                // where the new file is written first: the save fails
+                File(file.path + ".new").mkdir()
+                EngineBridge.PhraseFile(file, file.readText(), true) { it.run() }.save(CustomPhrases.parse(file.readText()).pinned("dh", "店话"))
+                shadowOf(Looper.getMainLooper()).idle()
+                assertEquals(listOf("${appContext.getString(R.string.user_lists_unkept)} steady=true"), said)
+                // the learning's own failure after it is still said
+                bridge.sayUnkept(directBoot = false)
+                shadowOf(Looper.getMainLooper()).idle()
+                assertEquals(appContext.getString(R.string.learning_unkept) + " steady=true", said.last())
+            } finally {
+                EngineNotices.sayer = null
+                EngineNotices.forgetToldOnce()
+                dir.deleteRecursively()
+            }
+        }
+
+        // what is said on the keyboard, as said; with nothing told once yet
+        private fun sayer(): MutableList<String> {
+            EngineNotices.forgetToldOnce()
+            val said = ArrayList<String>()
+            EngineNotices.sayer = EngineNotices.Sayer { message, steady -> said += "$message steady=$steady"; true }
+            return said
+        }
+
+        // [word] typed in English and committed with a space: learned
+        private fun typeEnglish(word: String) {
+            val engines = bridge.engines
+            word.forEach { engines.onEvent(InputMethodCatalog.ENGLISH, EngineEvent.CHAR, it.code) }
+            assertEquals("$word ", engines.onEvent(InputMethodCatalog.ENGLISH, EngineEvent.CHAR, ' '.code).commit)
+        }
         /** Taken, it says so: an Ink key goes out for what is shown. */
         @Test
         fun handwritingThatLoadsTakesTheInk() {
             bridge.unloadable.clear()
             var calls = 0
             try {
-                assertTrue(bridge.handwriting(InputMethodCatalog.HANDWRITING) { calls++ })
+                assertTrue(bridge.handwriting { calls++ })
                 assertEquals(1, calls)
-                assertFalse(InputMethodCatalog.HANDWRITING in bridge.unloadable)
+                assertFalse("handwriting" in bridge.unloadable)
             } finally {
                 bridge.unloadable.clear()
             }
         }
 
-        /**
-         * Written on the letter keys (键盘手写): an Ink key goes to the input method's own handwriting (InkOver),
-         * not handwriting's; under English, none; and every answer of such an input method says whether its
-         * own input is typed, a new value each time (KeyInkGesture.engineTyped).
-         */
+        /** Written on the letters (the toolbar's 手写): under English, nothing asked of the engine and no Ink key. */
         @Test
-        fun inkWrittenOnTheKeysIsTheInputMethodsOwnAndEveryAnswerSaysWhatIsTyped() {
+        fun inkWrittenUnderEnglishIsNotSent() {
             bridge.unloadable.clear()
             var sent = 0
             try {
-                // taken for pinyin's own: the key goes out (handwriting's data aside, a JVM's packs have no model)
-                assertTrue(bridge.handwriting(InputMethodCatalog.PINYIN, onKeys = true) {})
-                assertFalse(bridge.handwriting(InputMethodCatalog.PINYIN) {})
-                // English is not written on: nothing asked of the engine, no key
-                assertFalse(bridge.sendInk(Action.Ink(1), InputMethodCatalog.ENGLISH, onKeys = true) { sent++ })
+                assertFalse(bridge.sendInk(Action.Ink(1), InputMethodCatalog.ENGLISH) { sent++ })
                 assertEquals(0, sent)
-                // the engine made: its answers followed
-                assertNotNull(bridge.engines)
-                val before = EngineState.keysTyped.value.answer
-                repeat(2) { bridge.answer(InputMethodCatalog.PINYIN, EngineEvent.CHAR) { emptySnapshot() } }
-                assertEquals(before + 2, EngineState.keysTyped.value.answer)
-                assertFalse(EngineState.keysTyped.value.typed)
             } finally {
                 bridge.unloadable.clear()
-                bridge.close()
-            }
-        }
-
-        /**
-         * Every answer of an input method written on the keys carries the number of the last key sent whose job the fcitx
-         * thread took (EngineState.keyTaken), whatever its event: a space sent before a tap and answered after it carries
-         * the space's, not the tap's, so the tap's mark stays (KeyInkGesture.engineTyped).
-         */
-        @Test
-        fun anAnswerCarriesTheNumberOfTheLastKeyTaken() {
-            bridge.unloadable.clear()
-            try {
-                assertNotNull(bridge.engines)
-                val space = EngineState.keySent()
-                val tap = EngineState.keySent()
-                assertEquals(tap + 1, EngineState.nextKey())
-                EngineState.keyTaken(space)
-                bridge.answer(InputMethodCatalog.PINYIN, EngineEvent.CHAR) { emptySnapshot() }
-                assertEquals(space, EngineState.keysTyped.value.keysHeard)
-                // a refining step's answer counts no key
-                bridge.answer(InputMethodCatalog.PINYIN, EngineEvent.REFINE) { emptySnapshot() }
-                assertEquals(space, EngineState.keysTyped.value.keysHeard)
-                EngineState.keyTaken(tap)
-                bridge.answer(InputMethodCatalog.PINYIN, EngineEvent.CHAR) { emptySnapshot() }
-                assertEquals(tap, EngineState.keysTyped.value.keysHeard)
-            } finally {
-                bridge.unloadable.clear()
-                bridge.close()
             }
         }
 
@@ -507,9 +683,9 @@ class EngineBridgeTest {
                 assertThrows(FileNotFoundException::class.java) {
                     bridge.unloadable.call(InputMethodCatalog.PINYIN) { throw FileNotFoundException("pinyin") }
                 }
-                assertFalse(bridge.sendInk(Action.Ink(1), InputMethodCatalog.PINYIN, onKeys = true) { sent++ })
+                assertFalse(bridge.sendInk(Action.Ink(1), InputMethodCatalog.PINYIN) { sent++ })
                 assertEquals(0, sent)
-                assertFalse(InputMethodCatalog.HANDWRITING in bridge.unloadable)
+                assertFalse("handwriting" in bridge.unloadable)
             } finally {
                 bridge.unloadable.clear()
             }
@@ -519,20 +695,6 @@ class EngineBridgeTest {
             commit = "", preedit = "", candidates = emptyList(), page = 0, hasPreviousPage = false,
             hasNextPage = false, handled = true, predicting = false, syllables = emptyList(), syllablesId = 0,
         )
-
-        /** A piece finished as the pad leaves for English: the engine is told, but no Ink key goes into keyboard-us. */
-        @Test
-        fun inkUnderAnotherInputMethodReachesTheEngineButIsNotTaken() {
-            bridge.unloadable.clear()
-            var calls = 0
-            try {
-                assertFalse(bridge.handwriting(InputMethodCatalog.ENGLISH) { calls++ })
-                assertEquals(1, calls)
-                assertFalse(InputMethodCatalog.HANDWRITING in bridge.unloadable)
-            } finally {
-                bridge.unloadable.clear()
-            }
-        }
 
         // Robolectric: a latch is said on the keyboard (EngineNotices)
         @Test
@@ -591,14 +753,14 @@ class EngineBridgeTest {
                 // each a character written: offerInk, inkFinished; none taken, so no Ink key is sent for it
                 repeat(3) {
                     assertFalse(
-                        bridge.handwriting(InputMethodCatalog.HANDWRITING) {
+                        bridge.handwriting {
                             calls++
                             throw FileNotFoundException("pinyin")
                         }
                     )
                 }
                 assertEquals(1, calls)
-                assertTrue(InputMethodCatalog.HANDWRITING in bridge.unloadable)
+                assertTrue("handwriting" in bridge.unloadable)
             } finally {
                 bridge.unloadable.clear()
             }
@@ -730,6 +892,50 @@ class EngineBridgeTest {
             }
         }
 
+        // review L4 S3: other groups shown while the ones before are typed on (turnAt waiting) do not reach the engine
+        // by a config read again (a setting changed, the module files reread): the session typing would be made anew
+        // and what it typed dropped. They reach it as its first code syncs them
+        @Test
+        fun theConfigReadAgainKeepsTheGroupsTypedOnTillTheOthersFirstCode() {
+            val own = listOf("qw", "er", "ty", "ui", "op", "as", "df", "gh", "jk", "l", "zx", "cv", "bn", "m", "pq rs", "abc", "xyz")
+            val other = own.reversed()
+            try {
+                bridge.configure(EngineSettings())
+                EngineState.ownKeys = own
+                bridge.syncOwnKeys()
+                EngineState.ownKeys = other
+                bridge.configure(EngineSettings(prediction = false))
+                assertEquals(own, bridge.engines.settings.ownKeys)
+                assertEquals(false, bridge.engines.settings.prediction)
+                bridge.syncOwnKeys()
+                assertEquals(other, bridge.engines.settings.ownKeys)
+                bridge.configure(EngineSettings())
+                assertEquals(other, bridge.engines.settings.ownKeys)
+            } finally {
+                EngineState.ownKeys = null
+                NineKeyLetters.clearInUse()
+                bridge.close()
+            }
+        }
+
+        // review L4 N2: the 14 or 18 keys' groups told (no keyboard tells them: guarded all the same) are no keyboard of
+        // their own: the one in use for codes is cleared, the engine names none
+        @Test
+        fun theBuiltInGroupsToldAreNoKeyboardOfTheirOwn() {
+            val g18 = NineKeyLetters.G18.tag().split(',').reversed()
+            try {
+                bridge.configure(EngineSettings())
+                EngineState.ownKeys = g18
+                bridge.syncOwnKeys()
+                assertNull(bridge.engines.settings.ownKeyboard)
+                assertNull(NineKeyLetters.ofCode(NineKeyLetters.CUSTOM_BLOCK.first))
+            } finally {
+                EngineState.ownKeys = null
+                NineKeyLetters.clearInUse()
+                bridge.close()
+            }
+        }
+
         // the keyboard reads it to tell 微软双拼's ; from text (CommonKeyActionListener.typedAsIs)
         @Test
         fun theShuangpinSchemeIsTheOneConfigured() {
@@ -791,5 +997,14 @@ class EngineBridgeTest {
     fun recentsAreClearedFromTheMinuteLearningWas() {
         assertEquals(0L, bridge.recentsSince(LearningResult.ALL))
         assertEquals(30_000_000L * 60_000L, bridge.recentsSince(30_000_000))
+    }
+
+    // audit-061 app-rest-13: the engine's input methods are those the catalog lists, not any name that looks like one
+    @Test
+    fun theEnginesInputMethodsAreTheListedOnes() {
+        assertTrue(InputMethodCatalog.LISTED.all { EngineBridge.isEngines(it.name) })
+        assertFalse(EngineBridge.isEngines("engine-unknown"))
+        assertFalse(EngineBridge.isEngines("keyboard-de"))
+        assertFalse(EngineBridge.isEngines(""))
     }
 }

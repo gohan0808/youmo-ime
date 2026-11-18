@@ -6,6 +6,7 @@ package org.fcitx.fcitx5.android.input
 
 import android.app.Activity
 import android.content.ClipData
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Rect
@@ -85,8 +86,8 @@ import org.robolectric.shadows.ShadowPopupMenu
 class KeyboardHarness(
     theme: Theme? = TestThemes.PixelLight,
     im: InputMethodEntry = PINYIN,
-    /** A real host to type through (a [KotlinHost] on a scripted engine) in place of [api]: its own events, its own answers. */
-    host: HostApi? = null,
+    /** A real host to type through (a [KotlinHost] on a scripted engine) in place of [api]; [ready] the one a job waits on, a wrapper's too. */
+    host: HostApi? = null, ready: org.fcitx.fcitx5.android.core.KotlinHost? = host as? org.fcitx.fcitx5.android.core.KotlinHost,
     /** Each input method's keyboard (I1), [NINE_KEYS] pinyin's nine keys: set before the keyboard is made, put back at [close]; null leaves the preferences as they are. */
     keyboards: ImKeyboards.Chosen? = null,
     /**
@@ -115,7 +116,7 @@ class KeyboardHarness(
         TestShelves.use()
         keyboards?.let(::setKeyboards)
         codeRowWas?.let { ThemeManager.prefs.codeRow.setValue(codeRow) }
-        val connection = host?.let { HarnessConnection(scope, it) } ?: FakeHostConnection(scope, api)
+        val connection = host?.let { HarnessConnection(scope, it, ready) } ?: FakeHostConnection(scope, api)
         HostDaemon.testConnection = { connection }
         // the seam is global: a harness that fails to build leaves it to no later test (no close() to call)
         try {
@@ -168,13 +169,15 @@ class KeyboardHarness(
     /**
      * Focus a field of this [inputType], as the app's field gaining focus would; [packageName] the
      * app's, [fieldId] its view's (one field told from another by them, as ContextMemory.field does),
-     * [prefill] what the app put in it before it was focused.
+     * [prefill] what the app put in it before it was focused. [terminal]: the field tells TYPE_NULL yet its
+     * connection takes text, as Termux's view (a BaseInputConnection over its own buffer) does.
      */
     fun start(
         inputType: Int = InputType.TYPE_CLASS_TEXT,
         imeOptions: Int = 0,
         packageName: String = "org.example.app",
         fieldId: Int = 0,
+        terminal: Boolean = false,
         prefill: (EditText) -> Unit = {},
     ): KeyboardHarness {
         val activity = Robolectric.buildActivity(Activity::class.java).setup().also { activities += it }.get()
@@ -187,18 +190,57 @@ class KeyboardHarness(
             it.requestFocus()
         }
         delivered = intArrayOf(field.selectionStart, field.selectionEnd, -1, -1)
+        deliveredText = field.text.toString()
         val info = EditorInfo().also {
             it.packageName = packageName
             it.fieldId = fieldId
         }
         val target = field
+        val made = ++connectionsMade
         // a key the keyboard sends (←, Home, Ctrl+Z) the system hands to the focused view: Robolectric's does not
         val ic = object : android.view.inputmethod.InputConnectionWrapper(field.onCreateInputConnection(info), true) {
+            // closed (closeConnection): every call dropped, as the system's connection to a gone view drops it
+            private val open get() = made > closedThrough
+
             override fun sendKeyEvent(event: KeyEvent): Boolean =
                 // with Ctrl, a shortcut (Ctrl+Z), as the view root hands it on
-                (event.isCtrlPressed && event.action == KeyEvent.ACTION_DOWN && target.onKeyShortcut(event.keyCode, event)) ||
-                    target.dispatchKeyEvent(event)
+                open && ((event.isCtrlPressed && event.action == KeyEvent.ACTION_DOWN && target.onKeyShortcut(event.keyCode, event)) ||
+                    target.dispatchKeyEvent(event))
+
+            override fun getTextBeforeCursor(n: Int, flags: Int): CharSequence? =
+                if (nothingBeforeGiven || !open) null else super.getTextBeforeCursor(n, flags).also { beforeReads += n }
+
+            override fun getSurroundingText(beforeLength: Int, afterLength: Int, flags: Int): android.view.inputmethod.SurroundingText? =
+                if (nothingBeforeGiven || nothingAfterGiven || !open) null else super.getSurroundingText(beforeLength, afterLength, flags)
+
+            override fun getTextAfterCursor(n: Int, flags: Int): CharSequence? =
+                if (nothingAfterGiven || !open) null else super.getTextAfterCursor(n, flags)
+
+            override fun takeSnapshot(): android.view.inputmethod.TextSnapshot? =
+                if (nothingBeforeGiven || nothingAfterGiven || !open) null else super.takeSnapshot()
+
+            override fun beginBatchEdit() = open && super.beginBatchEdit()
+
+            override fun endBatchEdit() = open && super.endBatchEdit()
+
+            override fun commitText(text: CharSequence?, newCursorPosition: Int) = open && (writesDropped || super.commitText(text, newCursorPosition))
+
+            override fun setComposingText(text: CharSequence?, newCursorPosition: Int) = open && (writesDropped || super.setComposingText(text, newCursorPosition))
+
+            override fun setComposingRegion(start: Int, end: Int) = open && (writesDropped || super.setComposingRegion(start, end))
+
+            override fun finishComposingText() = open && (writesDropped || super.finishComposingText())
+
+            override fun deleteSurroundingText(beforeLength: Int, afterLength: Int) = open && (writesDropped || super.deleteSurroundingText(beforeLength, afterLength))
+
+            override fun deleteSurroundingTextInCodePoints(beforeLength: Int, afterLength: Int) =
+                open && (writesDropped || super.deleteSurroundingTextInCodePoints(beforeLength, afterLength))
+
+            override fun setSelection(start: Int, end: Int) = open && (writesDropped || super.setSelection(start, end))
+
+            override fun performEditorAction(editorAction: Int) = open && super.performEditorAction(editorAction)
         }
+        if (terminal) info.inputType = InputType.TYPE_NULL
         this.info = info
         connection = ic
         doStartInput(ic, info, restarting = false)
@@ -208,6 +250,34 @@ class KeyboardHarness(
         idle()
         relayout()
         return this
+    }
+
+    /**
+     * The app closes the field's connection (its view gone, another focused) before the service is told
+     * of it: every call on it dropped from now, till the next [start].
+     */
+    fun closeConnection() {
+        closedThrough = connectionsMade
+    }
+
+    private var connectionsMade = 0
+    private var closedThrough = 0
+
+    /**
+     * The app's screen made anew (a configuration it handles by recreating, a theme change): the old
+     * field's connection closed first, then a new field, its id and kind the old one's (its options, a
+     * terminal's TYPE_NULL: the field's info told it, a field of its own type or not), starting input with the old one's text and selection as its saved state brings
+     * them (no composing span).
+     */
+    fun recreate() {
+        val text = field.text.toString()
+        val (start, end) = field.selectionStart to field.selectionEnd
+        val type = field.inputType
+        closeConnection()
+        start(inputType = type, imeOptions = field.imeOptions, packageName = info.packageName, fieldId = info.fieldId, terminal = info.inputType == InputType.TYPE_NULL) {
+            it.setText(text)
+            it.setSelection(start, end)
+        }
     }
 
     /** The app restarting input in the same field, now of [inputType] (a WebView's field told anew). */
@@ -349,8 +419,35 @@ class KeyboardHarness(
 
     private var delivered = intArrayOf(-1, -1, -1, -1)
 
+    /**
+     * The app gives nothing of what is before its cursor while set (getTextBeforeCursor, getSurroundingText and
+     * takeSnapshot null), what is after it as ever: the testbed's `null_before` field (uat/TESTBED.md).
+     */
+    var nothingBeforeGiven = false
+
+    /** The length each read of the text before the field's cursor asked for, in order (CommitCheck's is [CommitCheck.READ]). */
+    val beforeReads = mutableListOf<Int>()
+
+    /** The mirror: nothing of what is after the cursor given (getTextAfterCursor null, and the reads of both sides), what is before it as ever. */
+    var nothingAfterGiven = false
+
+    /**
+     * The field takes every write and does nothing with it while set, reads answered as ever: a WebView whose
+     * view lost the focus with the keyboard up (the screen turned, LC-24). Nothing changes, so nothing is reported.
+     */
+    var writesDropped = false
+
     /** The field's selection changes not told to the service while set: its tracked selection lagging, as an editor's report can. */
     var selectionLags = false
+
+    /**
+     * As a device's EditText: a change of the composing span alone, the text and selection as they were
+     * (an app's clearComposingText), not told to the service; told with the next change that is. Off,
+     * every change is told, as Robolectric's field gives the harness no other way to tell them apart.
+     */
+    var spanAloneUnreported = false
+
+    private var deliveredText = ""
 
     // what the system's input method manager does as the field's selection or composing text
     // changes: Robolectric's tells the service nothing, whose tracking of the cursor would lag
@@ -363,6 +460,10 @@ class KeyboardHarness(
             android.view.inputmethod.BaseInputConnection.getComposingSpanEnd(text),
         )
         if (now.contentEquals(delivered)) return
+        val textNow = text.toString()
+        val spanAlone = now[0] == delivered[0] && now[1] == delivered[1] && textNow == deliveredText
+        if (spanAloneUnreported && spanAlone) return
+        deliveredText = textNow
         val was = delivered
         delivered = now
         service.onUpdateSelection(was[0], was[1], now[0], now[1], now[2], now[3])
@@ -405,20 +506,32 @@ class KeyboardHarness(
         relayout()
     }
 
-    /** A second finger put down at [x], [y] beside the one down, then both lifted, the second first. */
-    fun secondFingerThenLift(x: Float, y: Float) {
+    /**
+     * A second finger put down at [x], [y] beside the one down, then both lifted, the second first; or the first
+     * first ([firstLifts]: two thumbs overlapping), each event's work done before the next.
+     */
+    fun secondFingerThenLift(x: Float, y: Float, firstLifts: Boolean = false) {
         val (fx, fy) = fingerAt
         val props = Array(2) { MotionEvent.PointerProperties().apply { id = it; toolType = MotionEvent.TOOL_TYPE_FINGER } }
         val coords = arrayOf(MotionEvent.PointerCoords().apply { this.x = fx; this.y = fy }, MotionEvent.PointerCoords().apply { this.x = x; this.y = y })
         val target = (inputView.parent as? ViewGroup) ?: inputView
         for (action in listOf(MotionEvent.ACTION_POINTER_DOWN, MotionEvent.ACTION_POINTER_UP)) {
             after(16)
-            val e = MotionEvent.obtain(downAt, SystemClock.uptimeMillis(), action or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT),
+            val index = if (firstLifts && action == MotionEvent.ACTION_POINTER_UP) 0 else 1
+            val e = MotionEvent.obtain(downAt, SystemClock.uptimeMillis(), action or (index shl MotionEvent.ACTION_POINTER_INDEX_SHIFT),
                 2, props, coords, 0, 0, 1f, 1f, 0, 0, 0, 0)
             target.dispatchTouchEvent(e)
             e.recycle()
+            if (firstLifts) idle()
         }
-        finger(MotionEvent.ACTION_UP, fx, fy)
+        if (firstLifts) {
+            after(16)
+            val e = MotionEvent.obtain(downAt, SystemClock.uptimeMillis(), MotionEvent.ACTION_UP, 1, arrayOf(props[1]), arrayOf(coords[1]), 0, 0, 1f, 1f, 0, 0, 0, 0)
+            target.dispatchTouchEvent(e)
+            e.recycle()
+        } else {
+            finger(MotionEvent.ACTION_UP, fx, fy)
+        }
         idle()
         relayout()
     }
@@ -514,13 +627,15 @@ class KeyboardHarness(
     fun longPress(v: View, pick: String? = null): List<String> = longPress(box(v), pick)
 
     /** [longPress] on [k]. */
-    fun longPress(k: ShownKey, pick: String? = null): List<String> = longPress(k.bounds, pick)
+    fun longPress(k: ShownKey, pick: String? = null, meanwhile: () -> Unit = {}): List<String> = longPress(k.bounds, pick, meanwhile)
 
-    private fun longPress(b: Rect, pick: String?): List<String> {
+    // [meanwhile] run once the popup is up, before the finger moves
+    private fun longPress(b: Rect, pick: String?, meanwhile: () -> Unit = {}): List<String> {
         var x = b.exactCenterX()
         var y = b.exactCenterY()
         finger(MotionEvent.ACTION_DOWN, x, y)
         after(AppPrefs.getInstance().keyboard.longPressDelay.getValue() + 100L)
+        meanwhile()
         val popup = popupChoices()
         val labels = popup.map { it.text }
         if (pick != null) {
@@ -596,7 +711,12 @@ class KeyboardHarness(
             after(500)
             relayout()
         }
-        tap(described(clipboard))
+        // no slot for it on the bar (one-handed, floating): ⋯'s panel has it
+        if (all(inputView).none { shown(it) && it.contentDescription == clipboard }) {
+            tap(described(service.getString(R.string.status_area)))
+            waitFor("$clipboard in ⋯'s panel") { relayout(); entry(clipboard) != null }
+        }
+        tap(entry(clipboard) ?: described(clipboard))
         if (shown != null) waitFor("$shown listed") { entry(shown) != null }
     }
 
@@ -729,7 +849,7 @@ class KeyboardHarness(
      * off, no status entry, as the addon tells that.
      */
     fun chinesePunctuation(im: InputMethodEntry = PINYIN, marks: Map<String, String> = ChinesePunctuation.map) {
-        val status = if (marks.isEmpty()) emptyList() else listOf(StatusEntry(1, "punctuation", "fcitx-punc-active", ""))
+        val status = if (marks.isEmpty()) emptyList() else listOf(StatusEntry(1, "punctuation", "fcitx-punc-active", "", true))
         api.statusAreaCached = status
         api.punctuationCached = marks
         emit(HostEvent.StatusArea(status, im, marks))
@@ -839,15 +959,14 @@ class KeyboardHarness(
     }
 
     // the daemon's connection to a real host, which answers on its own thread
-    private class HarnessConnection(override val lifecycleScope: CoroutineScope, val host: HostApi) : HostConnection {
+    private class HarnessConnection(override val lifecycleScope: CoroutineScope, val host: HostApi, val ready: org.fcitx.fcitx5.android.core.KotlinHost?) : HostConnection {
         override fun <T> runImmediately(block: suspend HostApi.() -> T): T = runBlocking { block(host) }
         // as the daemon's: a host not up yet (a test pressing before it starts) does it once it is
         override suspend fun <T> runOnReady(block: suspend HostApi.() -> T): T {
             // the wait timed alone, not [block]; a plain error, which a cancelled job could not swallow. Timed on the
             // caller's dispatcher: on the paused main looper that is the test's clock (after()/advance() run it on,
             // idle() does not), not real time
-            if (host is org.fcitx.fcitx5.android.core.KotlinHost)
-                withTimeoutOrNull(READY_TIMEOUT_MS) { host.lifecycle.whenReady { } } ?: error("the host not up in $READY_TIMEOUT_MS ms")
+            ready?.let { withTimeoutOrNull(READY_TIMEOUT_MS) { it.lifecycle.whenReady { } } ?: error("the host not up in $READY_TIMEOUT_MS ms") }
             return block(host)
         }
         override fun runIfReady(block: suspend HostApi.() -> Unit) {
@@ -931,4 +1050,30 @@ class KeyboardHarness(
             if (v is ViewGroup) for (i in 0 until v.childCount) yieldAll(all(v.getChildAt(i)))
         }
     }
+}
+
+/**
+ * [block] with the screen turned on its side (the service told of the new configuration, as the system tells it),
+ * upright again after it whether it passed or not; [relayout]: laid out again once upright. A turn back failing on a
+ * harness [block] broke is added to its failure, not put in its place (review R26 F8476; one copy, F8511; KeyMarksUatTest turns by restarting the input instead). Outside the
+ * class, as its size allows (detekt's LargeClass).
+ */
+fun KeyboardHarness.inLandscape(relayout: Boolean = false, block: () -> Unit) {
+    fun turnTo(qualifiers: String) {
+        RuntimeEnvironment.setQualifiers(qualifiers)
+        service.onConfigurationChanged(Configuration(service.resources.configuration))
+        idle()
+    }
+    fun upright() {
+        turnTo("+port")
+        if (relayout) relayout()
+    }
+    try {
+        turnTo("+land")
+        block()
+    } catch (e: Throwable) {
+        runCatching { upright() }.exceptionOrNull()?.let(e::addSuppressed)
+        throw e
+    }
+    upright()
 }

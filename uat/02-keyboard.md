@@ -68,6 +68,12 @@
 - **预期**：按住期间一个接一个地删，越删越快；松开就停。手指挪一点也照样连续删（只有真正横滑才变成选择，见 KB-12）。
 - **JVM**：`KeyboardUatTest.holdingBackspaceRepeatsFasterTillLetGo`（按住退格连删且第二秒比第一秒多，松手即停；手指小幅移动照样连删）；设备上不跑。
 
+### KB-112 [P1] 打拼音时按住退格，删完拼音就停
+- **前提**：B0。
+- **操作**：点 n i h a o，点空格上屏（框里是「你好」）；再点 n i h a o，按住 ⌫ 约 4 秒（删完拼音后接着按住）再松开。再按住 ⌫ 约 2 秒再松开。
+- **预期**：第一次按住：拼音一个字母一个字母删光，编码行和候选消失，然后就停；接着按住、再松开也不删，框里还是「你好」（一个字也没删）。第二次按住（没在打字）：框里的字照常连着删，删空。一下一下点 ⌫ 照旧：删完拼音接着点就删框里的字。双拼、九键、14/18 键、形码、笔画筛选、英文在框里打着的词，以及实体键盘按住 Backspace，同样删完正在打的就停。
+- **JVM**：`BackspaceHoldHostTest`（真 KotlinHost、脚本引擎：按住删完拼音停、框里的字不动，再按住删框里的字；没在打字时按住照常连删；一下一下点删完拼音接着删框里的；实体键盘按住 Backspace 一样；按下后长按等待里另一指上屏了，连删不动框里的字；英文在框里打着的词删完就停）；ime-core `BackspaceHoldTest`（按住时在打字的删完就停、停了不再动；按住时没在打字的一直删；按下那一刻定是否在打字；键上手写的笔画算在打字）。设备上跑全拼这一条。
+
 ### KB-12 [P1] 在退格键上向左滑选中并删除光标前的文字
 - **前提**：B0，「普通文本」框里已有「今天天气很好」，光标在末尾。
 - **操作**：手指按在 ⌫ 上向左慢慢滑一段，先不松手看一眼，再松手。
@@ -195,7 +201,7 @@
 - **前提**：B0-英文，在 **通用输入** 的 **在键上划** 里选 **滑行输入**。
 - **操作**：点 o k；手指按在 h 上，不抬手依次划过 e、l、o，在 o 上抬起；接着划 w-o-r-l-d；点候选栏里另一个词（例如第二个）；再划一次 h-e-l-l-o，点 ⌫；再划一次 h-e-l-l-o，打一个逗号 `,`。
 - **预期**：划的时候键盘上画出手指走过的线；第一次抬手后框里是「ok hello 」（ok 像按了空格那样先上屏），候选栏是它可能的其他词；划 world 后是「ok hello world 」（中间只有一个空格）；点候选后刚上屏的 world 换成那个词；再划出 hello 后点一下 ⌫，整个 hello 连同空格删掉，前面那个词还在；最后划 hello 再打逗号，结尾是「hello, 」（空格移到逗号后面）。
-- **JVM**：`HostCasesUatTest.aGlideGoesInWithItsSpaceItsWordChangedOrErasedWholeAMarkTakesTheSpace`（上屏、换词、退格、标点）+ `KeyboardFieldsUatTest.aGlideDrawsTheFingersTrail`（轨迹截图）；设备上不跑。
+- **JVM**：`HostCasesUatTest.aGlideGoesInWithItsSpaceItsWordChangedOrErasedWholeAMarkTakesTheSpace`（上屏、换词、退格、标点）+ `KeyboardFieldsUatTest.aGlideDrawsTheFingersTrail`（轨迹截图）+ `TextSceneWiringTest.aGlideReadsEachLetterWhereTheKeySendingItIsWhateverItsId`（字母键按键发的字母认，不看 id：主题包布局的 id 不是字母照样滑行、每个字母读在发它的键上；两个键发同一个字母只认布局里靠前的那个；按下时的气泡也是键发的那个字母，不是它的 id。拼音下测，认键各输入法共用）；设备上不跑。
 
 ### KB-35 [P1] 快速点击、上下短划和长按不算滑行
 - **前提**：滑行开，切到英文。
@@ -222,6 +228,18 @@
   （0.3.0 发版前发现：加了 ; 键以后最下面一排一直显示大写。）
 - **JVM**：`KeyboardUatTest.shiftChangesAllThreeRows`（三排字母关/开/关；图）；设备上不跑。
 
+### KB-106 [P1] 全键盘打拼音时 ⇧ 是分词
+- **前提**：B0（全拼，全键盘）；读屏关。
+- **操作**：点 x i，看 ⇧ 的位置；点它，再点 a n，看编码行和候选；点「西安」。再把输入法换成双拼（自然码），点 x i、⇧ 的位置、a j（自然码的 an）。
+- **预期**：没打字时那里是 ⇧；打出 `xi` 后变成写着「分词」的键（字和 14 键的分词键一样，宽度和位置同 ⇧），点了编码行是 `xi'an`，候选有「西安」，选了框里是「西安」，键又变回 ⇧（字母小写）。双拼下一样：打字时是分词，编码里有分隔，选「西安」上屏。键盘没有闪一下或整个重画（其它键不动）。开着读屏时，打字中摸到这个键念「分词」。
+- **JVM**：`ShiftSeparatorTypedTest.shiftSplitsXianWhilePinyinIsTyped`（真引擎：xi 分词 an 是 xi'an，选西安上屏，分词的位置同 ⇧、读「Syllable separator」，上屏后是 ⇧）、`ShiftSeparatorTypedTest.shiftSplitsOnZiranmasFullKeyboard`（真引擎，自然码：xi 分词 aj，选西安上屏）、`ShiftSeparatorCanvasTest.pinyinTypedSwapsShiftKeepingTheScenes`（打字开始做一次画面，之后来回复用）、`ShiftSeparatorCanvasTest.aFieldsActionAndTheSeparatorReuseTheKeptScenes`（带「发送」的框：回车字样和分词分开变，之后各轮全用留着的画面）；ime-core `ShiftSeparatorTest`、`TextBoardSceneTest.separatingShowsTheSeparatorInShiftsPlace`；设备上截图看打字中的「分词」。
+
+### KB-107 [P1] 分词不动 ⇧ 的状态；英文、码表打字时 ⇧ 不变
+- **前提**：B0（全拼，全键盘）。
+- **操作**：点 ⇧（字母变大写），点 x i，点「分词」，点 a n，点空格；看字母。切到英文打 `he`，看 ⇧ 的位置；切到五笔打 `gg`，看那个位置。
+- **预期**：分词打出 `'`，不是大写的 `"`；上屏后 ⇧ 还亮着（字母大写，下一个字母大写）。英文打字时那里仍是 ⇧（点了下一个字母大写）；五笔打字时那里仍是「拼」键（反查），不是分词。按住 ⇧ 时打出第一个字母（另一指）、在分词上松手：打出分词，⇧ 不变。按住「分词」时上屏（另一指点空格）再松手：打出 `'`，⇧ 还亮着。之后导入的、恢复 0.6.1 及以后做的备份带进来的主题自带全键盘布局（没写分词键），在 **外观 → 布局** 里选它给拼音用后，⇧ 一直是 ⇧：打拼音时点它字母变大写，不打 `'`；升级时已装的见 ST-143，旧备份恢复的见 PR-63。
+- **JVM**：`ShiftSeparatorCanvasTest.aShiftKeptBesideTheSeparatorStaysShift`（布局另有分词键、⇧ 还在时点 ⇧ 仍是 ⇧）、`ShiftSeparatorCanvasTest.theSeparatorKeepsShiftAsItWas`（分词发 `'`、不带 Shift，打完 ⇧ 还开着）、`ShiftSeparatorCanvasTest.shiftDownAsTypingBeginsUpIsTheSeparator`（⇧ 上按下、换成分词后松手发 `'`）、`ShiftSeparatorCanvasTest.theSeparatorLiftedAfterTypingEndedKeepsShiftOnce`（打完才松开的分词发 `'`，⇧ 不用掉）、`ShiftSeparatorCanvasTest.aThemesOwnShiftStaysShiftWhilePinyinIsTyped`（没分词键的主题布局 ⇧ 照旧是 Shift，点、长按都不发 `'`）、`ShiftSeparatorCanvasTest.aThemesPlainApostropheKeyUsesUpShiftOnce`（主题里发 `'` 的普通键照旧：带 Shift，一次性大写用掉）；ime-core `ShiftSeparatorTest.neverEnglishATableNorZhuyin`；设备上切英文、五笔看一眼。
+
 ### KB-41 [P2] 等长按时已滑出键的下边，弹出后第一下往旁边挪不关掉
 - **前提**：B0。
 - **操作**：长按 q，等弹出时手指往下挪到键的下边外约 3dp；弹出后往右挪约 25dp（不往下）松手。
@@ -230,12 +248,12 @@
 
 ## 笔画筛选（键盘这一半）
 
-前提里的 **笔画开**：B0-设置，在 **通用输入** 的 **在键上划** 里选 **笔画筛选**，回测试页点「普通文本」框。笔画怎么筛候选见 PY-103、PY-104、T9-57、SP-25。
+前提里的 **笔画开**：B0-设置，在 **通用输入** 的 **在键上划** 里选 **笔画筛选**，回测试页点「普通文本」框。笔画怎么筛候选见 PY-103、PY-104、T9-57、SP-25，划多远才算一笔见 KB-101–104 和 ST-134。
 
 ### KB-42 [P1] 打着拼音时在键上画一笔：发出这一笔，不打字母
 - **前提**：笔画开。
-- **操作**：打 hao；从 w 往右划过三个键抬起（横）；从 t 往下划两行（竖）；从 o 往左下划（撇）；从 e 往右下划（点）；从 e 往右划再往下拐（折）；再从 x 往上划两行；接着从 x（最下一行）往下划半个键、在 e 上往右下短短点一下、在 a 上往右划半个键；再点一下 q。然后在 **输入法 → 拼音** 里把 **键盘** 选成「14 键」，打 hao，从 GH 往下划两行；再把键盘选成「九键」，点 9 2 6 4，从 2 往右下划。最后键盘换回全键盘，横过手机（分体），打 hao，从 T 和 Y 中间的空白处往下划两行，再在空白处点一下。
-- **预期**：划的时候画出手指走过的线，抬手后编码行末尾依次多出 一 丨 丿 丶 乛，候选跟着筛，没有打出字母，也没有滑行出词。往上划不算一笔，编码行不变。短的那三下也各是一笔（竖、点、横），不打出角标；点一下 q 照常打出 q。14 键、九键上一样能画（14 键上竖、九键上点）。分体时从中间空白处起笔也是一笔（竖），点一下空白处什么也不发生。
+- **操作**：打 hao；从 w 往右划过三个键抬起（横）；从 t 往下划两行（竖）；从 o 往左下划（撇）；从 e 往右下划（点）；从 e 往右划再往下拐（折）；再从 x 往上划两行；接着从 x（最下一行）往下划大半个键、在 e 上往右下划大半个键、在 a 上往右划大半个键（都要超过 **笔画筛选灵敏度** 的距离，默认「中」是 24dp，约 4mm）；再点一下 q。然后在 **输入法 → 拼音** 里把 **键盘** 选成「14 键」，打 hao，从 GH 往下划两行；再把键盘选成「九键」，点 9 2 6 4，从 2 往右下划。最后键盘换回全键盘，横过手机（分体），打 hao，从 T 和 Y 中间的空白处往下划两行，再在空白处点一下。
+- **预期**：划的时候画出手指走过的线，抬手后编码行末尾依次多出 一 丨 丿 丶 乛，候选跟着筛，没有打出字母，也没有滑行出词。往上划不算一笔，编码行不变。短的那三下也各是一笔（竖、点、横），不打出角标（短过灵敏度的距离是点按，见 KB-101）；点一下 q 照常打出 q。14 键、九键上一样能画（14 键上竖、九键上点）。分体时从中间空白处起笔也是一笔（竖），点一下空白处什么也不发生。
 - **JVM**：`StrokeUatTest.aStrokeDrawnWhilePinyinIsTypedIsSentAsOneTheKeysNone`（26 键短的、长的五种笔画都只发笔画键，没有滑行，向上不发，点按照旧；门槛见 `GlideGestureTest`）、`StrokeUatTest.theNineAndFourteenKeysSendAStrokeToo`（拼音九键、14 键、18 键和双拼九键各发一笔，不发别的键）、`StrokeUatTest.aStrokeStartsInTheSplitGapTooATapOrAGlideThereDoNothing`（横屏分体，从中间空白起笔发一笔，点空白不发键，开滑行输入时从空白划不滑行；空白怎么认见 `SplitGapTest`）、`aSecondFingerOnALetterWhileOneRestsInTheGapTypesIt`（一指停在空白、另一指点字母照常打字母）、`aStrokeFromTheGapCancelledSendsNothingAndLeavesNoTrail`（划到一半被取消不发、线消失）、`noOtherLayoutHasAGap` 和 `theSweepFindsTheSplitGap`（不分体的全键盘、单手、14 键、18 键、九键、注音都没有空白，分体的有）；筛候选见 `StrokeFilterUatTest`；设备上不跑。
 
 ### KB-43 [P1] 没打字、选了滑行输入、快速输入、英文和码表里划，都不是笔画
@@ -243,6 +261,29 @@
 - **操作**：什么都没打时从 w 往右划过三个键；在 **通用输入** 的 **在键上划** 里选 **滑行输入**，打 hao 后同样划一次；再改选 **笔画筛选**，长按「符」进快速输入打 ab 后划一次；换到英文打 hel 后划一次；换到五笔打 wq 后划一次。
 - **预期**：没打字时划了不发笔画（按键照常）。选了滑行输入时这一划是滑行，不是笔画。快速输入里打的不是拼音，划了不发笔画。选了笔画筛选时英文、五笔里既不滑行也不发笔画（英文、码表没有笔画筛选，滑行要选滑行输入）。
 - **JVM**：`StrokeUatTest.withNothingTypedGlideChosenOrEnglishNoStrokeIsSent`；设备上不跑。
+
+### KB-101 [P1] 打着拼音点键时手指滑了一点：还是点按这个键
+- **前提**：笔画开，**笔画筛选灵敏度** 是「中」（默认）。
+- **操作**：打 hao；按住 q 往右滑约 2.5mm（15dp，不到 q 键宽的一半）抬起；再打 hao，按住 q 往下滑同样一段抬起；再打 hao，按住 q 往右划到 w 上（约 5mm）再滑回 q 中间抬起；再打 hao，按住 q 往右慢慢滑约 4mm（超过 24dp），看手指下有没有线。再打 hao，一只拇指按住 q 往下滑约 2.5mm 不抬，另一只拇指按 a，先抬 q 再抬 a（两手快打时常有）。然后在 **输入法 → 拼音** 把 **键盘** 选成「九键」，点 9 2 6 4，按住 2 往右下滑约 3mm 抬起。
+- **预期**：前两次都和点一下 q 一样，编码行是 `haoq`（或候选随 q 变），编码行里没有笔画，手指下也不画线。划到 w 再滑回来的那次是一笔（横），编码行末尾多一个 `一`，没打 q：算不算笔画看手指离按下的点最远到过哪里，不看抬手的地方。慢慢滑时，过了约 4mm 才开始画线。两只拇指那次编码行是 `haoqa`，q、a 都打出，没有笔画。九键上滑一点和点一下 2 一样（编码行多一个 2 键的码），不发笔画。
+- **JVM**：`StrokeUatTest.aFingerThatSlidesShortOfTheLiftDistanceIsTheKeysTap`（横、竖、斜、向上向左 15–23.5dp 都和点按发的键一样；先到 30dp 再回 5dp 是一笔；线过了灵敏度才画；九键滑 18dp 和点 2 一样；14 键上从 GH 左边按下划 15dp 和点左边发的码一样，落点照算）、`CustomGestureViewTest.aSwipesTapAndAStrokeLiftedShortHaveWhereTheFingerCameDown`（这样补出的点按和上下滑没设东西时的点按都带按下的位置）、`StrokeUatTest.aShortStrokeAsAnotherFingerLandsIsItsTapAndTheOtherKeyTypedToo`（两只拇指快打：q 往下滑了 14dp 时 a 按下，q 先抬再抬 a，q、a 都打出，不发笔画）；起笔 12dp、抬手判定见 `GlideTouchTest`、`GlideGestureTest`；设备上不跑。
+
+### KB-102 [P1] 点在键边上、手指滑出这个键：还是打这个键
+- **前提**：笔画开，**笔画筛选灵敏度** 是「中」。
+- **操作**：打 hao；在 s 键靠左边缘的地方按下，往左滑出 s 键（滑进 a 键约 2mm）抬起。
+- **预期**：打出的是 s（编码行 `haos`），不是 a，也没有笔画：打着拼音时，没划够灵敏度距离的一下按按下的那个键算。
+- **JVM**：`StrokeUatTest.aTapNearTheEdgeSlidingOffTheKeyIsStillItsTap`（离 s 左边 3dp 按下，滑出键外 11dp，和点 s 发的键一样）；设备上不跑。
+
+### KB-103 [P2] 慢慢画一竖：长按弹出来之前就是一笔
+- **前提**：笔画开。
+- **操作**：在 **按键** 里把 **长按延迟** 依次设成「短」「中」「长」，每次回测试页打 hao，在 e 上用约半秒慢慢往下画一竖（约 7mm）抬起。
+- **预期**：三种长按延迟下都是一笔竖：编码行末尾多一个 `丨`，不弹长按的候选框，不打 e 也不打长按的字符。手指一过 12dp（约 2mm）就算开始划了，后面再慢也不会变成长按。
+- **JVM**：`StrokeUatTest.aSlowStrokeIsReadBeforeAnyLongPress`（长按 200、300、450ms，40dp 竖画 480ms，都发一笔竖）；设备上不跑。
+
+### KB-104 [P1] 真机触摸上：滑一点是点按，划过灵敏度是一笔
+- **前提**：笔画开，**笔画筛选灵敏度** 是「中」（默认）。
+- **操作**：打 hao，在 q 上 0.15 秒往右滑 15dp（约 2.5mm）抬起；清空，再打 hao，在 q 上 0.15 秒往右划 40dp（约 7mm）抬起。
+- **预期**：第一次编码行是 `haoq`，没有笔画；第二次编码行末尾多一个 `一`，没打 q。这条是 KB-101 在系统真正的触摸事件上的冒烟：判定由 JVM 测，这里看设备上的触摸（取样、触摸溢出）不改变结果。
 
 ## 网址和邮箱建议
 
@@ -358,7 +399,13 @@
 - **前提**：B0，上滑、下滑是默认，输入框里有字。
 - **操作**：空格上滑不松手，左挪一格松开；框里写 `one two three`，选中 `two` 退格上滑；光标放在 `one` 后再上滑两次；退格下滑三次；打拼音 `nihao` 时退格上滑，再下滑。换到 B0-九键，打 6 4，点音节栏上第一个音节，退格上滑清除，再退格下滑。开着 TalkBack（做法同 MN-13）时空格上滑，手指在编辑菜单的格子上移动。
 - **预期**：空格上滑出一排五格（全选、剪切、复制、粘贴、撤销），在键盘上方（"已复制"这类提示出现的地方，手指挡不住），粘贴对着空格；和菜单重叠的提示先收起，按键出错的提示（「词库没装上」这类）和菜单开着时新来的提示藏到菜单后、菜单收起后出现；候选栏上的提示不受影响；左挪一格松开是复制。悬浮键盘、横屏时也在键盘上方。第一次上滑删掉 `two`，接着删掉光标前的 `one`，再删掉光标后的部分，框空了；每次提示"已清除"带撤销。下滑三次按倒序放回，最后 `two` 又是选中的。打拼音时上滑只清掉拼音串，什么都不上屏；下滑拼音串回来，候选照旧。清除后打了字再下滑，提示"没有可恢复的内容"。九键在音节栏选了音节后清除的，下滑也提示"没有可恢复的内容"，拼音不回来（14、18 键的音节栏一样）。TalkBack 按格子上的字读（全选、剪切、复制、粘贴、撤销），不读 select_all 这类内部名字。
-- **JVM**：`BaseKeyboardTest.theSpaceUpIsTheEditMenuAndTheBackspaceUpAndDownClearAndRestore`（弹出编辑菜单；退格上下滑发出清除、恢复）；菜单在键盘上方、提示收起、左挪一格松开复制见 `SwipePopupScreenshotTest.theEditMenuIsAboveTheKeyboardAndPicksAsBefore`，出错提示藏起再回来见 `SwipePopupScreenshotTest.aFailureIsHiddenUnderTheEditMenuAndBackAsItGoes`、`UndoChipTest.theEditMenuPutsAwayWhatWasDoneAndHidesAFailureTillItGoes`、ime-core `NoticeStateTest.theEditMenuPutsAwayOrHides`，摆放规则见 ime-core `EditPlanTest.theEditMenuGoesWhereTheNoticesGo`，竖屏、紧凑、悬浮、横屏的样子见 `SwipePopupScreenshotTest` 的 `edit_menu_*` 金样；清除和恢复对输入框做什么、倒序放回、改动后不放回见 ime-core `EditPlanTest`；只给出部分光标前文本的应用里清除只删那部分、撤销放回光标处、在光标前打了字就不放回见 `EditPlanTest.aShortReadClearsWhatWasGivenAndPutsBackJustThatAtTheCursor`、`aClearAtTheLimitWithTheCursorReportedAheadKeepsWhatIsAfterTheCursor`、`aShortReadClearIsNotPutBackOnceSomethingWasTypedBeforeTheCursor`；拼音串清掉不上屏、放回同样的拼音见 `HostCoreEnginesTest`（`what is typed is cleared without a commit and typed again`），音节栏选过音节后清除的不放回见 `HostCoreEnginesTest`（`what is typed after a syllable taken off the nine keys' bar is never typed again`）、ime-core `EnginesTest.aSyllableTakenOffTheBarIsAPick`；TalkBack 读格子的字见 `SwipePopupScreenshotTest.theEditMenusCellsAreReadByTheirLabels`；设备上的冒烟见报告。
+- **JVM**：`BaseKeyboardTest.theSpaceUpIsTheEditMenuAndTheBackspaceUpAndDownClearAndRestore`（弹出编辑菜单；退格上下滑发出清除、恢复）；菜单在键盘上方、提示收起、左挪一格松开复制见 `SwipePopupScreenshotTest.theEditMenuIsAboveTheKeyboardAndPicksAsBefore`，出错提示藏起再回来见 `SwipePopupScreenshotTest.aFailureIsHiddenUnderTheEditMenuAndBackAsItGoes`、`UndoChipTest.theEditMenuPutsAwayWhatWasDoneAndHidesAFailureTillItGoes`、ime-core `NoticeStateTest.theEditMenuPutsAwayOrHides`，摆放规则见 ime-core `EditPlanTest.theEditMenuGoesWhereTheNoticesGo`，竖屏、紧凑、悬浮、横屏的样子见 `SwipePopupScreenshotTest` 的 `edit_menu_*` 金样；清除和恢复对输入框做什么、倒序放回、改动后不放回见 ime-core `EditPlanTest`；只给出部分光标前文本的应用里清除只删那部分、撤销放回光标处、在光标前打了字就不放回见 `EditPlanTest.aShortReadClearsWhatWasGivenAndPutsBackJustThatAtTheCursor`、`aClearAtTheLimitWithTheCursorReportedAheadKeepsWhatIsAfterTheCursor`、`aShortReadClearIsNotPutBackOnceSomethingWasTypedBeforeTheCursor`；光标前什么都不给的应用里清除光标后的部分、撤销后放回，光标回到原处而不是开头见 `EditPlanTest.nothingReadBeforeAReportedCursorPutsWhatIsAfterBackAtThatCursor`，设备上在输入测试台的 `null_before` 框里手工看见 KB-88；光标刚挪、输入框的报告还没到就清除的，放回后光标在输入框那时报告的位置（不是清除时滞后的那个）见 `KeyShortcutsHostTest.aClearMadeBeforeTheCursorsReportIsInIsPutBackWithTheCursorWhereItIsReportedThen`；拼音串清掉不上屏、放回同样的拼音见 `HostCoreEnginesTest`（`what is typed is cleared without a commit and typed again`），音节栏选过音节后清除的不放回见 `HostCoreEnginesTest`（`what is typed after a syllable taken off the nine keys' bar is never typed again`）、ime-core `EnginesTest.aSyllableTakenOffTheBarIsAPick`；TalkBack 读格子的字见 `SwipePopupScreenshotTest.theEditMenusCellsAreReadByTheirLabels`；设备上的冒烟见报告。
+
+### KB-105 [P1] 编辑菜单看得清选了哪一格
+- **前提**：B0，输入框里有字；主题依次换成 Material 浅色、Material 深色、Deep Blue（再看一个自己的 3.0 主题更好）；Android 12+ 的 Monet（动态取色）也看一眼。
+- **操作**：空格上滑不松手，左右挪到全选、剪切、复制、撤销；在密码框里同样上滑，挪到复制。
+- **预期**：没选的格子是长按弹出的底色、图标是长按弹出的字色，手指所在的那一格是回车键的颜色（白色或主题的回车字色图标），一眼看得出选的是哪一格，挪到哪格哪格变色；选中的格子比别的大一点、形状不变。密码框里复制、剪切是淡的，挪上去时那一格仍是回车色、只是淡下去，看得出选中了但不能用。
+- **JVM**：画出来的样子见 `SwipePopupScreenshotTest` 的 `edit_menu_*` 金样（`uprightOnTheCanvas`、`compactOnTheCanvas`、`floatingOnTheCanvas`、`turnedOnTheCanvas`）和 `KeyShortcutsScreenshotTest.theEditMenuOverTheSpace`（选中「粘贴」）；每个内置主题浅色深色里选中格和其它格的底色对比不低于 1.6:1 见 keyboard-scene `BuiltinThemeEquivalenceTest.theMenusCellInFocusStandsOutInEveryBuiltInTheme`；格子的颜色、大小、不能用的淡下去见 keyboard-scene `PopupsTest.aMenusCellInFocusIsLargerAndReturnsColourOneDisabledFaded`，选中的那格不能用时仍是回车色、只是淡下去见 `PopupsTest.aMenusCellInFocusThatIsDisabledKeepsReturnsColourFaded`；3.0 主题换算见 keyboard-scene `LookThemeTextTest`（data/look-theme，不在 `uat.py jvm` 的结果里）。设备截图见报告。
 
 ### KB-63 [P2] 自己设的文字快捷键
 - **前提**：B0，**按键字符和快捷键** 里把 Q 的下滑设成文字「你好」。
@@ -381,14 +428,20 @@
 ### KB-66 [P1] 标点和快捷键图标各在自己选的位置，两项不能选同一处，第一次打开和改过设置后一样
 - **前提**：新装（B0），第一次打开键盘，上滑、下滑、上滑图标位置、下滑图标位置都是默认。
 - **操作**：看 a、z、s 和退格的键角；打开 **按键**，看 **上滑图标位置** 和 **下滑图标位置** 两项；**下滑图标位置** 依次选左下、右下、底部、无，每次回来看；**上滑图标位置** 选左上、左下、底部、无，每次回来看；在 **上滑图标位置** 的列表里看快捷键占着的那一项，点它；**按键字符和快捷键** 点 **翻转上下滑** 再看；都改回默认；给 s 设一个文字快捷键再清掉；给 q 设一个文字快捷键，在 **按键字符和快捷键** 页清掉 q 的长按，回测试页看 q，再恢复 q 的长按回来看，每次收起键盘再打开对比；收起键盘再打开。键盘高度选 **紧凑**，上滑图标位置选底部再看，下滑图标位置选右上再看；下滑图标位置改回左上、上滑图标位置改回右上，再把下滑图标位置选底部看；上滑图标位置再选左上看。**按键字符和快捷键** 页每选一个位置也看一遍。
-- **预期**：两项挨着，选项都是"右上 / 右下 / 左上 / 左下 / 底部 / 无"，默认上滑图标位置右上、下滑图标位置左上。默认：a、z 的快捷键图标在左上角，@、「，」在右上角；s 只有右上角的 *；退格上滑的清除在右上、下滑的恢复在左上，空格的编辑菜单图标在右上。下滑图标位置选左下：快捷键都在左下，退格的清除在右上、恢复在左下；选右下：快捷键在右下，退格清除右上、恢复右下；选底部：快捷键在键下边中间，退格的清除在右上、恢复在下边中间；选无：快捷键都不画，下滑照样执行。上滑图标位置选左上、左下：小字和退格的清除在那个角；选底部：在字母下面；选无：不画，上滑照样打出。一项的列表里，另一项占着的位置是灰的，后面注「下滑图标在这里」/「上滑图标在这里」，点了没反应；两项都能选无。点 **翻转上下滑** 后小字和快捷键都不动（两个图标位置跟着一起交换）。数字键盘和符号面板的字符格子不画键角标记；面板上的 ⌫、空格、，。照常画（PAN-25）。每次改完，和改成这个设置后重新打开键盘一模一样；改回默认后和第一次打开时一样。设了快捷键的 s 多一个标记。q 关掉、恢复长按时，键盘不收起看到的 q 键角和收起再打开后一样。上滑图标位置选底部：小字在字母下面，退格的清除在下边中间、恢复照下滑图标位置。紧凑时「底部」画在角上，按右上、右下、左上、左下取第一个另一个方向没占着的：上滑图标底部、下滑图标左上 → 小字和退格的清除右上；下滑图标改右上 → 小字和清除右下；下滑图标底部、上滑图标右上 → 快捷键和退格的恢复右下，上滑图标左上 → 快捷键和恢复右上；标记小一号，都画出来。设置页的键跟着一起变。
-- **JVM**：`KeyMarksUatTest`（`eachWhereItsSettingSays`、`onePlaceStoredInBothTheSymbolYields`、`theFirstOpenIsAsAfterAnySettingChanges`、`eitherChangedTheKeyboardIsMadeAnew`（改两项都重建键盘）、`aLongPressTurnedOffPlacesTheMarksAsAKeyboardMadeWithIt`（键盘开着时关掉 q 的长按，标记和重开键盘后一样）、`turnedTheSymbolWhereTheNewOrientationPutsIt`、`theSwipesTurnedTheMarksStay`（翻转上下滑后小字和快捷键不动））；`KeyMarkPositionSettingsTest.theTwoTogetherTheOthersPlaceGreyedOut`（两项挨着、同一组选项、另一项的位置置灰并注明、点不了）、`onePlaceStoredInBothThenTheOtherChangedTheSummaryIsTheKeyboards`（备份里两项同位置，改另一项后摘要和键盘一致）；`AppPrefsTest.theSymbolStoredInTheShortcutsPlaceStoredWhereItReads`（这种备份下次启动时存成纠正后的位置）；ime-core `KeyMarksTest`（两个设置 6×6 × 横屏 × 紧凑 × 有无小字和快捷键的全部组合；读出时同一位置的纠正）；`KeyMarksScreenshotTest`（全键盘、九键、大千、手写每个位置的截图，全键盘紧凑）；`KeyShortcutsPageScreenshotTest.theMarksWhereTheirSettingsSay`（设置页每个位置）；设备上新装后看一遍，再切几个位置看。
+- **预期**：两项挨着，选项都是"右上 / 右下 / 左上 / 左下 / 顶部 / 底部 / 无"，默认上滑图标位置右上、下滑图标位置左上。默认：a、z 的快捷键图标在左上角，@、「，」在右上角；s 只有右上角的 *；退格上滑的清除在右上、下滑的恢复在左上，空格的编辑菜单图标在右上。下滑图标位置选左下：快捷键都在左下，退格的清除在右上、恢复在左下；选右下：快捷键在右下，退格清除右上、恢复右下；选底部：快捷键在键下边中间，退格的清除在右上、恢复在下边中间；选无：快捷键都不画，下滑照样执行。上滑图标位置选左上、左下：小字和退格的清除在那个角；选底部：在字母下面；选无：不画，上滑照样打出。一项的列表里，另一项占着的位置是灰的，后面注「下滑图标在这里」/「上滑图标在这里」，点了没反应；两项都能选无。点 **翻转上下滑** 后小字和快捷键都不动（两个图标位置跟着一起交换）。数字键盘和符号面板的字符格子不画键角标记；面板上的 ⌫、空格、，。照常画（PAN-25）。每次改完，和改成这个设置后重新打开键盘一模一样；改回默认后和第一次打开时一样。设了快捷键的 s 多一个标记。q 关掉、恢复长按时，键盘不收起看到的 q 键角和收起再打开后一样。上滑图标位置选底部：小字在字母下面，退格的清除在下边中间、恢复照下滑图标位置。紧凑时「底部」画在角上，按右上、右下、左上、左下取第一个另一个方向没占着的：上滑图标底部、下滑图标左上 → 小字和退格的清除右上；下滑图标改右上 → 小字和清除右下；下滑图标底部、上滑图标右上 → 快捷键和退格的恢复右下，上滑图标左上 → 快捷键和恢复右上；标记小一号，都画出来。设置页的键跟着一起变。
+- **JVM**：`KeyMarksUatTest`（`eachWhereItsSettingSays`、`onePlaceStoredInBothTheSymbolYields`、`theFirstOpenIsAsAfterAnySettingChanges`、`eitherChangedTheKeyboardIsMadeAnew`（改两项都重建键盘）、`aLongPressTurnedOffPlacesTheMarksAsAKeyboardMadeWithIt`（键盘开着时关掉 q 的长按，标记和重开键盘后一样）、`turnedTheSymbolWhereTheNewOrientationPutsIt`、`theSwipesTurnedTheMarksStay`（翻转上下滑后小字和快捷键不动））；`KeyMarkPositionSettingsTest.theTwoTogetherTheOthersPlaceGreyedOut`（两项挨着、同一组选项、另一项的位置置灰并注明、点不了）、`onePlaceStoredInBothThenTheOtherChangedTheSummaryIsTheKeyboards`（备份里两项同位置，改另一项后摘要和键盘一致）；`AppPrefsTest.theSymbolStoredInTheShortcutsPlaceStoredWhereItReads`（这种备份下次启动时存成纠正后的位置）；ime-core `KeyMarksTest`（两个设置 7×7 × 横屏 × 紧凑 × 有无小字和快捷键的全部组合；读出时同一位置的纠正）；`KeyMarksScreenshotTest`（全键盘、九键、大千每个位置的截图，全键盘紧凑）；`KeyShortcutsPageScreenshotTest.theMarksWhereTheirSettingsSay`（设置页每个位置）；设备上新装后看一遍，再切几个位置看。
+
+### KB-89 [P2] 图标位置选「顶部」：键的上边中间
+- **前提**：B0-设置，上滑、下滑、两个图标位置都是默认。
+- **操作**：**按键 → 下滑图标位置** 选「顶部」，回测试页看 z 和退格；再把 **下滑图标位置** 选「底部」、**上滑图标位置** 选「顶部」，看 z、q 和退格；横屏再看一次；都改回默认。
+- **预期**：下滑图标位置「顶部」：z 的撤销图标在键的上边中间，「，」还在右上；退格的恢复在上边中间、清除在右上。上滑「顶部」、下滑「底部」：z 的「，」在上边中间、字母 z 位置不变（不像「底部」那样把字母往上挪），撤销在下边中间；q 的 1 在上边中间；退格的清除在上边中间、恢复在下边中间。横屏键太矮：顶部的改到右上、底部的改到右下：「，」在右上，撤销在右下；退格的清除在右上、恢复在右下。再把两项对调（上滑「底部」、下滑「顶部」），横屏看 z：撤销在右上、「，」在右下，按各自的边放（和退格的规则一样）。最后上滑改回右上、下滑仍是「顶部」，横屏看 z 和退格：撤销在左上（右上有「，」，顶部按右上、左上、右下、左下挑第一个空角），退格的清除在右上、恢复在左上。没有两个标记叠在一起。
+- **JVM**：`KeyMarksUatTest.theTopIsTheTopEdgesMiddle`（六行：下滑顶部、上滑顶部、一顶一底、横屏、横屏对调、横屏单独顶部）；`KeyMarkPositionSettingsTest.theTwoTogetherTheOthersPlaceGreyedOut`（选项列表有「顶部」）；画法见 `KeyMarksTopTest.aSymbolAtTheTopIsTheTopEdgesMiddleTheLabelWhereItWas`、`KeyMarksTopTest.aTextAtTheTopIsKeptBetweenTheCornersOnItsEdge`（顶部的文字不碰右上的小字）、`KeyMarksTest.theTopIsTheTopEdgesMiddleForEitherWay`（含矮键上一顶一底：字母键和功能键一样各按自己的边放）。
 
 ### KB-67 [P1] 什么设置下键上的字、小字、快捷键图标都不叠在一起
 - **前提**：任意。
-- **操作**：上滑图标位置和下滑图标位置的每种能选的组合（6×6 去掉两项相同的，都选无可以，共 31 种），在全键盘、九键、14 键、18 键、双拼九键 / 14 / 18、英文九键、大千、注音九键、手写、五笔两行字根、五笔键名、数字键盘、符号页上看，键盘高度标准和紧凑、悬浮、单手、横屏都看。
-- **预期**：每个键上字（或图标）、键角小字、快捷键图标两两不叠。同一类东西整个键盘一样大；碰上时：标记在自己的角里挪（不换到别的角），再字那一类整个键盘一起缩小（最多 6%），再标记那一类一起缩小（最小到 0.875）；还碰上就不画这个标记（先省默认的，后省自己设过的；各按功能键下滑的、快捷键、键角小字的次序；自己设的文字放不下先画成一个字加「…」，再不行画两条横线的图标，见 KB-72），滑动照常能打出它。默认设置下角标符号一个不省（KeyMarksEverywhereUatTest 打印 left out (0)，它只数角标符号；只差不到半个像素的不算碰上）；功能键的标记照上面的次序会省：悬浮的大千、手写、注音九键的 ⌫ 省掉下滑的「恢复」（注音九键清除、恢复两个都省），大千下滑图标在底部时还省快捷键图标（keyboard-scene `BackspaceMarksTest`）。
-- **JVM**：`KeyMarksEverywhereUatTest.noKeyDrawsTwoThingsOverEachOtherUpright`、`noKeyDrawsTwoThingsOverEachOtherTurned`（上面每种键盘的每个键 × 31 种组合 × 标准 / 紧凑 / 悬浮 / 单手 / 紧凑单手 / 横屏 / 横屏紧凑，系统字号不影响，按画出来的墨迹量，两两不相交，省掉的标记打印出来）；`KeyMarksScreenshotTest.noRoomAnotherCornerOfTheKey`（紧凑单手全键盘右下、五笔左下，悬浮大千底部的图；测试名是旧规则（换到另一个角）留下的，现在图里标记只在自己的角里挪、放不下就不画，不换角）；keyboard-scene `KeyMarkYieldTest`（让的次序）。
+- **操作**：上滑图标位置和下滑图标位置的每种能选的组合（7×7 去掉两项相同的，都选无可以，共 43 种），在全键盘、九键、14 键、18 键、双拼九键 / 14 / 18、英文九键、大千、注音九键、五笔两行字根、五笔键名、数字键盘、符号页上看，键盘高度标准和紧凑、悬浮、单手、横屏都看。
+- **预期**：每个键上字（或图标）、键角小字、快捷键图标两两不叠。同一类东西整个键盘一样大；碰上时：标记在自己的角里挪（不换到别的角），再字那一类整个键盘一起缩小（最多 6%），再标记那一类一起缩小（最小到 0.875）；还碰上就不画这个标记（先省默认的，后省自己设过的；各按功能键下滑的、快捷键、键角小字的次序；自己设的文字放不下先画成一个字加「…」，再不行画两条横线的图标，见 KB-72），滑动照常能打出它。默认设置下角标符号一个不省（KeyMarksEverywhereUatTest 打印 left out (0)，它只数角标符号；只差不到半个像素的不算碰上）；功能键的标记照上面的次序会省：悬浮的大千、注音九键的 ⌫ 省掉下滑的「恢复」（注音九键清除、恢复两个都省），大千下滑图标在底部时还省快捷键图标（keyboard-scene `BackspaceMarksTest`）。
+- **JVM**：`KeyMarksEverywhereUatTest.noKeyDrawsTwoThingsOverEachOtherUpright`、`noKeyDrawsTwoThingsOverEachOtherTurned`（上面每种键盘的每个键 × 43 种组合 × 标准 / 紧凑 / 悬浮 / 单手 / 紧凑单手 / 横屏 / 横屏紧凑，系统字号不影响，按画出来的墨迹量，两两不相交，省掉的标记打印出来）；`KeyMarksScreenshotTest.noRoomAnotherCornerOfTheKey`（紧凑单手全键盘右下、五笔左下，悬浮大千底部的图；测试名是旧规则（换到另一个角）留下的，现在图里标记只在自己的角里挪、放不下就不画，不换角）；keyboard-scene `KeyMarkYieldTest`（让的次序）。
 
 ### KB-68 [P2] 拼音键字母大小写三档
 - **前提**：拼音（全键盘）、英文都已启用。
@@ -426,21 +479,21 @@
 
 ### KB-73 [P0] 所有键盘的 ， 长按相同
 - **前提**：B0（新装或恢复默认），中文标点。
-- **操作**：依次在全键盘、14 键、18 键、注音全键盘、注音九键（底行 ， 和 ㄖㄥㄩ 右边的键）、手写上长按 ，。再切到英文标点各长按一次。
+- **操作**：依次在全键盘、14 键、18 键、注音全键盘、注音九键（底行 ， 和 ㄖㄥㄩ 右边的键）上长按 ，。再切到英文标点各长按一次。
 - **预期**：每个弹窗都是 `。？！：；“‘（）～`，焦点在 `。`；英文标点时都是 `. ? ! : ; " ' ( ) ~`。
 - **JVM**：app `KeysEverywhereUatTest.commaIsOneKey`。
 
 ### KB-74 [P0] 改一次 ，，所有键盘都变
 - **前提**：同 KB-73。
-- **操作**：**设置 → 按键 → 按键字符和快捷键 → 功能键**，点 ，：删掉 `~`，添加 `…`；回到 KB-73 的各键盘长按 ，；再回功能键页点 ， 的 **恢复此键默认**，各键盘再长按一次。
+- **操作**：**设置 → 按键 → 按键字符和快捷键 → 功能键**，点 ，：删掉 `~`，添加 `…`；回到 KB-73 的各键盘长按 ，；再回功能键里点 ， 的 **恢复此键默认**，各键盘再长按一次。
 - **预期**：改后每个键盘的 ， 都没有 `～`、最后一项是 `…`；恢复后都回到 KB-73 的列表。
 - **JVM**：app `KeysEverywhereUatTest.commaEditedOnceEverywhere`。
 
 ### KB-75 [P0] ，。 的"长按首选"在所有键盘都画、都打
 - **前提**：同 KB-73；**上滑** 开。
-- **操作**：功能键页把 ， 的上滑设成 **长按首选**；在全键盘、手写、注音九键 ㄖㄥㄩ 右边的键上看 ， 的键角，各上滑一次 ，；切英文标点再看、再滑。
+- **操作**：功能键里把 ， 的上滑设成 **长按首选**；在全键盘、注音九键 ㄖㄥㄩ 右边的键上看 ， 的键角，各上滑一次 ，；切英文标点再看、再滑。
 - **预期**：中文标点时键角画 `。`，上滑打出 `。`；英文标点时画 `.`、打出 `.`。
-- **操作（续）**：功能键页把 ， 的首选设成 `！`，九键页给 5 添加 `/` 再把它设成首选，全键盘页把 q 的首选设成 `Q`；分别长按 ，、九键 5、全键盘 q，不动，松手。
+- **操作（续）**：功能键里把 ， 的首选设成 `！`，九键里给 5 添加 `/` 再把它设成首选，全键盘里把 q 的首选设成 `Q`；分别长按 ，、九键 5、全键盘 q，不动，松手。
 - **预期（续）**：弹窗一打开焦点就在首选上（`！`、`/`、`Q`，首选在行上面的符号层里或键没有行也一样）；不动松手打出首选。
 - **JVM**：app `KeysEverywhereUatTest.commaFirstDrawnAndTyped`（英文标点下键角 `.`、上滑打 `.`；中文标点下的 `。` 由 `DisplayIsTypedUatTest` 管）、`.heldAndLetGoTypesTheFirst`、`.heldAndLetGoTypesTheFirstOnANarrowKeyboard`（九键 5、全键盘 q 的首选；， 的首选 `！` 手工看）。
 
@@ -467,14 +520,14 @@
 - **JVM**：app `KeysEverywhereUatTest.nineKeysFiveSymbolsSharedLettersByInputMethod`。
 
 ### KB-78 [P1] 注音九键 ㄖㄥㄩ 右边的键就是 ，：长按、滑动、分词
-- **前提**：注音九键；功能键页 ， 的上滑是 **长按首选**，下滑是空。
+- **前提**：注音九键；功能键里 ， 的上滑是 **长按首选**，下滑是空。
 - **操作**：不打字时长按这个键；上滑它；打两个注音符号后下滑它；再打两个注音符号后上滑它。
 - **预期**：长按与底行 ， 是同一列表；不打字时上滑打出 `。`；打字中下滑（空槽）等于点这个键，就是分词；打字中上滑先上屏首选再打出 `。`。打字中键面显示「分词」，键角画 `。`。
 - **JVM**：app `KeysEverywhereUatTest.zhuyinNinesToneAndSlot`、`.zhuyinNinesToneOff`。
 
 ### KB-79 [P1] 14 键 QW 的长按首选改了，按下气泡和键角一起变
 - **前提**：拼音的键盘选 14 键。
-- **操作**：**按键字符和快捷键 → 14 键** 页把 QW 的 `!` 设为首选；回键盘按住 QW 不放，看气泡；松开；上滑 QW。再在全键盘页改 q 的长按，回 14 键看 QW。
+- **操作**：**按键字符和快捷键 → 14 键** 页把 QW 的 `!` 设为首选；回键盘按住 QW 不放，看气泡；松开；上滑 QW。再在全键盘里改 q 的长按，回 14 键看 QW。
 - **预期**：键角和按下气泡的角都显示 `！`（中文标点）；上滑打出 `！`。改全键盘 q 不影响 QW。
 - **JVM**：app `KeysEverywhereUatTest.fourteenKeysQwFirstDrawnAndTyped`。
 
@@ -485,21 +538,21 @@
 - **JVM**：暂无（ime-core `KeyResolverTest` 管 resolver 一半），设备上跑。
 
 ### KB-81 [P2] `"` 显示 “，上屏由引擎交替
-- **前提**：中文拼音，中文标点；功能键页 ， 的上滑是 **长按首选**，并把 `"` 设为首选。
+- **前提**：中文拼音，中文标点；功能键里 ， 的上滑是 **长按首选**，并把 `"` 设为首选。
 - **操作**：长按 ， 看 `"` 那一项；上滑 ， 两次。
 - **预期**：弹窗和键角都显示 `“`；两次上滑依次打出 `“`、`”`（引擎交替），第二次与键角显示的不同，这是已知的。成对符号开着（默认）时第一次上滑打出 `“”`、光标在中间，第二次的 `”` 跨过已有的 `”`，框里仍是 `“”`。
 - **JVM**：暂无，设备上跑。
 
 ### KB-82 [P2] 16 项的长按都在屏幕里，能选到最后一项；第 17 项加不上
 - **前提**：B0；**设置 → 按键 → 按键字符和快捷键 → 功能键**，点 ，，在它自带的 10 项后面添加 `Ａ Ｂ Ｃ Ｄ Ｅ Ｆ`，列表到 16 项（上限），再添加一个 `Ｇ`，确定（对话框不关、提示出现、输入框已清空），再点确定。， 没有手指下那一行，每行最多 5 项，16 项是 4 行。
-- **操作**：1. 竖屏最窄的机型（320 dp 宽）开右手单手模式，长按 ，，不松手滑到最后一项再松手。2. **横屏**同样做一次（键盘矮，最容易放不下）。
+- **操作**：1. 竖屏最窄的机型（320 dp 宽）在 ⋯ 里开单手模式（靠右），长按 ，，不松手滑到最后一项再松手。2. **横屏**同样做一次（键盘矮，最容易放不下）。
 - **预期**：添加 `Ｇ` 时输入框下提示「一个键最多 16 个字符，多出的没有加上」，列表仍是 16 项。16 项全部显示，没有一项伸出屏幕（上下左右都不出屏）；松手打出最后一项。
 - **JVM**：app `PanelKeysUatTest.aLayerOf16OnTheNarrowestOneHanded`、`.aLayerOf16Landscape`；加不上第 17 项 ime-core `PopupEditorTest.addStopsAtSixteen`。
 
 ### KB-83 [P0] 显示即所打：弹窗、角标、上滑气泡显示的就是打出的字符
 - **前提**：B0；上滑、下滑都开；中文拼音，中文标点。
 - **操作**：
-  1. 在全键盘、14 键、18 键、九键、注音全键盘、注音九键、手写、颜文字上长按 ，（九键再长按 1），表情上长按 。，看弹窗各项和焦点项；看 ，（表情上 。）的键角；上滑它，看气泡和打出的字。数字键盘、符号面板、展开候选、表情搜索没有 ，，只看 ⌫、空格等功能键的键角标记。
+  1. 在全键盘、14 键、18 键、九键、注音全键盘、注音九键、颜文字上长按 ，（九键再长按 1），表情上长按 。，看弹窗各项和焦点项；看 ，（表情上 。）的键角；上滑它，看气泡和打出的字。数字键盘、符号面板、展开候选、表情搜索没有 ，，只看 ⌫、空格等功能键的键角标记。
   2. 键盘开着，切到英文标点（点工具栏的标点状态或 Ctrl+.），不收键盘，再看 ， 的键角、再长按 ，。在拼音九键上也切一次：看左边一列，点左列的 ？，再切回中文标点看。
   3. 切到英文输入法，在全键盘和九键上重复 1。
 - **预期**：
@@ -528,3 +581,87 @@
 - **操作**：看页面上的 q；回测试页看 q 的键角，上滑 q。
 - **预期**：页面上和键盘上 q 的键角都画「13…」，在自己的键面里，不伸到旁边的键上；上滑 q 打出整串 `13895801474`。
 - **JVM**：ime-core `KeyResolverTest.aLongFirstIsMarkedAsASetTextIs`（键角按设的文字的规则截成前两个字加「…」，`5%葡萄糖注射液100ml` 画「5%…」，首选和读屏仍是整串）；画出来比键面宽的角标不画由 keyboard-scene `LongMarksStayOnTheirKeyTest` 查（不在 `uat.py jvm` 的结果里）；设备上看键角、打出整串。
+
+### KB-88 [P2] 光标前读不到的应用里退格上滑清除、下滑恢复
+- **前提**：B0；装了输入测试台（uat/TESTBED.md），打开它的 `behavior`（模拟应用行为）页，点 `null_before` 框（应用不给光标前的字：`getTextBeforeCursor` 这些都返回 null）。
+- **操作**：切到英文，在框里打 `hello world`（不打 `abc` 这类不是单词的字母：英文按空格时会把它改成词库里的写法 `ABC`），把光标点到 `hello` 后面（`o` 和空格之间）；退格上滑；再退格下滑。
+- **预期**：上滑清掉光标后的 ` world`，框里剩 `hello`，提示"已清除"带撤销；下滑放回，框里是 `hello world`，光标仍在 `hello` 后（不跳到开头或末尾）。
+- **JVM**：`KeyShortcutsHostTest.whereNothingBeforeTheCursorIsGivenWhatIsAfterItIsClearedAndPutBackAtTheCursor`（真键盘、输入框的 `getTextBeforeCursor` 返回 null：上滑清掉光标后的、提示"已清除"，下滑放回、光标在原处）、`KeyShortcutsHostTest.whereNothingBeforeTheCursorIsGivenAFieldWithNothingAfterItIsNotTakenForAnEmptyOne`（光标后也没字时不清除，复制不当成空框）、`KeyShortcutsHostTest.whereNothingAfterTheCursorIsGivenWhatIsBeforeItIsClearedAndPutBack`（反过来，光标后读不到的应用：清掉光标前的、放回）、`KeyShortcutsHostTest.whereNothingBeforeTheCursorIsGivenWhatIsTypedIsPutBackUnlessSomethingWasCommittedSince`（清掉正在打的拼音能放回；之后上屏过字就不放回，提示"没有可恢复的内容"）；ime-core `EditPlanTest.nothingReadBeforeAReportedCursorPutsWhatIsAfterBackAtThatCursor`（光标前读不到时清除光标后的部分，放回后光标在原处）、`EditPlanTest.aLongFieldAfterACursorWithTextBeforeItNotReadKeepsThatText`（光标后超过一万字时只删读到的那部分，不全选，光标前没读到的字留着）、`EditPlanTest.aClearWithASideNotGivenIsNotPutBackOnceSomethingIsTyped`（有一边读不到的清除，之后打过字就不放回）、`EditPlanTest.whatIsAfterACursorWhoseReportLaggedIsPutBackWithTheCursorWhereTheEditorHasIt`（R25 F7834：光标刚挪、报告还没跟上时，放回后的光标按输入框里的位置）（前一条也记在 KB-62）。这一条还没写进脚本，在模拟器上手工跑。
+
+### KB-90 [P1] 九键点 123：数字键盘和九键是同一副格子，键都在原位
+- **前提**：B0-九键。
+- **操作**：记下九键上 1–9、⌫、回车、**符**、**123** 的位置；点 **123**；再点 **返回**。
+- **预期**：数字键盘上 1–9、⌫（右上角）、回车、**符**（底排第一格，灰底、字同九键）都和九键上同一个位置、同样大小；**返回** 正好在刚才 **123** 的位置（0.6.1，用户 2026-11-14，dev/design/061-layout-survey.md Q1-A、Q3-1）。点 **返回** 回到九键，各键位置不变。
+- **JVM**：`T9UatTest.going123FromTheNineKeysMovesNoKey`（九键的 1–9、⌫、回车、符 和数字键盘的同名键位置相同，返回在 123 的位置，键上写「符」和「返回」，返回后九键不变）；keyboard-scene `NumberPadsTest.everyPadSitsOnTheNineKeysFrame`（七种数字键盘 × 各种形态都和九键同格子，0 在 8 正下方；不在 `uat.py jvm` 的结果里）；设备上比较两块键盘的键位。
+
+### KB-91 [P1] 符号面板底排：返回、123、锁
+- **前提**：B0。
+- **操作**：点 **符**，看底排；点底排第二格的 **123**；在数字键盘上点 **符**；再点符号面板的 **返回**。
+- **预期**：符号面板底排从左到右是 **返回**、**123**、锁、空格、⌫、回车：**返回** 在字母键盘 **符** 的那一格，**123** 是第二格，写「123」、灰底，和字母键盘上的 **123** 一样（0.6.1，Q4-a）。点 **123** 打开数字键盘；数字键盘上点 **符** 又是符号面板，点 **返回** 回到数字键盘（回到来的那块键盘）。
+- **JVM**：`KeyboardUatTest.theSymbolPanelsRowIsBackThen123ThenTheLock`（底排次序、返回 和 123 的字、123 打开数字键盘）；keyboard-scene `NumberPadsTest.theSymbolPanelsBottomRowIsBackThen123ThenTheLock`（各种形态的次序，123 的字、键类和读屏同字母键盘；不在 `uat.py jvm` 的结果里）；设备上看底排、走一遍。
+
+### KB-92 [P1] 返回键都写「返回」
+- **前提**：B0，测试页的「电话」框（`tel`）。
+- **操作**：看弹出的数字键盘底排第二格；点它；点工具栏的表情，看面板底排第一格；点 `:-)` 进颜文字，再看底排第一格。
+- **预期**：电话框的数字键盘、表情面板、颜文字面板上回到字母键盘的键都写「返回」，不再写 ABC（和符号面板一样，0.6.1，Q2）；读屏也念「返回」。点电话框数字键盘的 **返回** 回到字母键盘。
+- **JVM**：`PanelUatTest.everyWayBackSaysBack`（数字框、电话框、123 进的数字键盘、表情、颜文字、符号面板的返回键都是 `picker_back`，没有 ABC）；keyboard-scene `NumberPadsTest.everyWayBackSays返回`、`SceneBuilderTest.keysAreReadAsTheyWere`（读屏念「返回」）；设备上看一遍。
+
+### KB-93 [P1] 长按列表里「使用变量」的一项显示并打出今天的日期
+- **前提**：B0-设置；**按键 → 按键字符和快捷键 → 全键盘**，点 q，勾输入框旁的 **使用变量**，点 **插入变量**，选 `${weekday_cn}`（框里是 `${weekday_cn}`，下面写「现在打出：」和今天星期几），点 **添加**，确定。
+- **操作**：看页面上 q 键帽上的「变量」小标记；回测试页长按 q，看弹出；选那一项。
+- **预期**：键帽下边写「变量」，读屏念「…，变量」；弹出里那一项是今天的值（如「六」），不是 `${weekday_cn}`；选了打出今天的值（061-text-variables §2.3）。值太长时弹出里先缩小字号，到最小还放不下就截断加「…」，读屏念整段；键角是前两个字加「…」。
+- **JVM**：`TextVariablesUatTest.anItemOfVariablesShowsAndTypesToday`（`$month月$day日`：键角「前两个字…」，弹出今天的值，选了打出）、`TextVariablesUatTest.aLongValueIsCutInItsCellAndSaidWhole`（长的值截断加「…」、读屏念整段）；ime-core `KeyResolverMarksTest`、keyboard-scene `PopupsTest.aLabelTooWideIsShrunkThenCutAndSaidWhole`（不在 `uat.py jvm` 的结果里）；设备上走设置页和长按。
+
+### KB-94 [P1] 上下滑的文字槽「使用变量」：滑出那一刻的时间
+- **前提**：B0-设置；**按键 → 按键字符和快捷键 → 全键盘**，点 w，**下滑** 选 **文字**，填 `${fullhour}:${minute}`，勾它下面的 **使用变量**（下面写「现在打出：」和现在的时间），确定；**上下滑** 开着。
+- **操作**：回测试页看 w 的键角；在 w 上向下滑。
+- **预期**：键角和滑动气泡是现在的时间（如 `23:16`）；滑出打出 **滑的那一刻** 的时间。不勾 **使用变量** 时原样打出 `${fullhour}:${minute}`。
+- **JVM**：`TextVariablesUatTest.aSwipesTextOfVariablesTypesTheTimeItIsSwiped`、ime-core `SwipeSlotVariablesTest`（存法 `vtext:`、勾不勾两样、键角和气泡是现在的值、填出空的槽当作点按）；设备上手工滑一次。
+
+### KB-95 [P2] 不勾「使用变量」原样打出；带变量的项不变大写、不转中文标点
+- **前提**：B0；q 的长按列表里有不勾的 `$year` 和勾了 **使用变量** 的 `x$month.$day`；拼音、中文标点开着。
+- **操作**：长按 q 选 `$year`；清空；按 Shift，长按 Q，看弹出，选 `x…` 那一项。
+- **预期**：`$year` 原样打出；Shift 下 `$year` 变成 `$YEAR`，带变量的那项还是 `x11.14` 这样（小写 x，`.` 不转成 `。`），选了原样打出。
+- **JVM**：`TextVariablesUatTest.withoutTheMarkAsWrittenWithItAsFilledIn`；ime-core `KeyResolverMarksTest.anItemOfVariablesIsFilledInTypedAsItIsAndNotInCapitals`。
+
+### KB-96 [P2] 键盘开着过了一分钟再选：打出的是新时间
+- **前提**：KB-94 的 w，或长按列表里勾了 **使用变量** 的 `${minute}`。
+- **操作**：打开键盘，等到下一分钟，不收起键盘长按选它（或滑 w）。
+- **预期**：打出的是选的那一刻的分钟；键角在下一次画键盘时更新（再长按、换一下键盘都会更新）。
+- **JVM**：ime-core `KeyResolverMarksTest.outputFillsInAgainAsPicked`（选的时候按那一刻再填一次）、`KeyResolverMarksTest.aNewMinuteIsMadeAnewTheSameOneKept`（新的一分钟重做、同一分钟不重做）；app `TextVariablesUatTest.rowsCountedInANewMinuteLeaveTheCatchUpToDrawIt`（过了一分钟时先量键盘行高，键角照样按新的一分钟重画）；设备上等一分钟手工看。
+
+### KB-97 [P2] 长按首选设到带变量的项：上滑打出填好的值
+- **前提**：q 的长按列表里有勾了 **使用变量** 的 `$month月$day日`，设为首选；**上下滑** 开着。
+- **操作**：在 q 上向上滑。
+- **预期**：打出今天的日期（如 `11月14日`），不是 `$month月$day日`。
+- **JVM**：`TextVariablesUatTest.anItemOfVariablesFirstIsTypedBySwipingUp`。
+
+### KB-98 [P1] 「不转中文标点」的 `.`：中文标点下长按打出 `.`
+- **前提**：B0-设置；**按键 → 按键字符和快捷键 → 功能键**，点 **，键**，选列表里的 `.`，点按钮排的 **不转中文标点**（读屏念「不转中文标点，已开」），确定。
+- **操作**：回测试页（拼音、中文标点开着），长按，键，看弹出；选 `.`。
+- **预期**：页面上 `.` 的键帽下边写「原样」；弹出里那一项画 `.`（别的项照旧画 `，` `？` 这些）；选了打出 `.`，不是 `。`（061-no-cn-punct）。
+- **JVM**：`AsIsPunctuationTypedTest.aMarkedDotIsTypedAsItIsUnderChinesePunctuation`（真引擎、中文标点表：弹出画 `.`，打出 `.`）；ime-core `KeyResolverMarksTest.anItemAsIsIsTypedAsItIs`；设备上走设置页和长按。
+
+### KB-99 [P1] 打着拼音时选「不转中文标点」的 `.`：先上屏候选再打 `.`
+- **前提**：KB-98 的 `.`。
+- **操作**：打 `ni`，长按，键选 `.`；清空；把 `.` 设为首选，打 `ni`，在，键上向上滑。
+- **预期**：两次都是先上屏第一个候选，再打出 `.`（如 `你.`）。
+- **JVM**：`AsIsPunctuationTypedTest.whilePinyinIsTypedTheCandidateGoesFirst`、`AsIsPunctuationTypedTest.aMarkedFirstIsTypedBySwipingUp`；设备上打一次长按的。
+
+### KB-100 [P2] 没开的项照旧转中文标点；英文下开不开一样
+- **前提**：KB-98 的 `.`；，键列表里的 `?` 没开。
+- **操作**：拼音下长按，键选 `?`；切到英文，打 `hello`，长按，键选 `.`；把 `.` 的 **不转中文标点** 关掉再做一次。
+- **预期**：拼音下 `?` 打出 `？`；英文下开不开都一样（刚打完一个词时也一样，比如句号后照旧自动加的空格），这个开关只在中文标点会转的时候起作用（061-no-cn-punct S4）。
+- **JVM**：`AsIsPunctuationTypedTest.notMarkedItIsChinesePunctuationAsEver`、`AsIsPunctuationTypedTest.englishTypesTheSameMarkedOrNot`（英文、刚打完 `hello` 和没打字两种，开不开打出的完全一样）；ime-core `KeyResolverMarksTest.anItemAsIsIsTheKeyWhereNothingIsConverted`。
+
+### KB-110 [P1] 「不转中文标点」的 `(`：成对，先上屏候选
+- **前提**：B0-设置；**按键 → 按键字符和快捷键 → 功能键**，点 **，键**，在列表里加 `(` 并点按钮排的 **不转中文标点**，确定。
+- **操作**：回测试页（拼音），打 n i，长按，键选 `(`；再点 ⌫。
+- **预期**：框里是「你()」，光标在两个括号中间（先上屏首选，再成对打出半角括号，和打出的括号一样）；⌫ 把 `()` 一起删掉，剩「你」。
+- **JVM**：`AsIsPunctuationTypedTest.aMarkedBracketGoesInPairedAfterTheCandidate`（真引擎：「你(|)」，⌫ 后「你|」）；设备上不跑。
+
+### KB-111 [P2] 英文下长按选的括号成对，开不开「不转中文标点」都一样
+- **前提**：KB-110 的 `(`。
+- **操作**：切到英文，长按，键选 `(`；把 `(` 的 **不转中文标点** 关掉再做一次。
+- **预期**：两次框里都是 `()`，光标在中间。
+- **JVM**：`AsIsPunctuationTypedTest.englishPairsTheBracketMarkedOrNot`；设备上不跑。

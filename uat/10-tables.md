@@ -93,7 +93,7 @@
 
 ### TBL-12d [P1] 从 0.3.2 升级后，五笔的码按新词库重新编
 - **前提**：装着 v0.3.2 正式版（不是要测的这一版），在它里面按 WD-14d 把雾凇拼音并入基础词库，等合好；添加五笔，回测试页切到五笔，等约半分钟，打 j b y s 看到只有雾凇里有的词。
-- **操作**：不卸载，直接安装要测的这一版正式版（`adb install -r`）；回测试页切到五笔，马上点 j b y s，看候选，删光；等到提示「词库格式已升级」（最多三分钟），再等约半分钟；再点 j b y s。
+- **操作**：不卸载，直接安装要测的这一版正式版（`adb install -r`）；在「资源包」导入文字包（0.6.0 起安装包不带词库和码表）；回测试页切到五笔，马上点 j b y s，看候选，删光；等到提示「词库格式已升级」（最多三分钟），再等约半分钟；再点 j b y s。
 - **预期**：不崩、不卡；两次 j b y s 都是码表自己的「临阵磨枪」「电子文档」「电子计算机」在前；第一次（词库格式升级、五笔的码重新编好以前）只有码表自己的词，第二次只有雾凇里有的词又出现在它们后面。这一条在发版时用正式版跑。
 
 ### TBL-14 [P1] 新装默认不调频，码表原有的顺序不变
@@ -225,3 +225,27 @@
 - **操作**：**键盘 → 键盘高度** 选 **紧凑**，回测试页看键盘（截图），长按 G（王），A 上滑；再选 **标准**，看键盘。
 - **预期**：紧凑时键上是键名（G 王、F 土……），和选「键名」时一样：字母在右上角，快捷键标记也照键名的规则画；长按 G 弹出的是平常的字符，不是字根大图；A 上滑照样全选。改回标准后又是全部字根，设置里一直是「全部字根」。设置里「全部字根」这一项写着紧凑时显示键名。
 - **JVM**：`TablesKeysUatTest.wubisAllRootsAreItsNamesAtCompact`（紧凑时和键名一样、长按不是字根、回到标准是全部字根，Roborazzi 金图）+ ime-core `TableRootsTest.atCompactAllTheRootsAreShownAsTheirNames`；设备上不跑。
+
+### TBL-53 [P1] 五笔、仓颉候选长按：读音按词典最常见读法，仓颉繁体字按简体读，候选旁的编码提示不变
+- **前提**：B0，五笔。
+- **操作**：打 tadd，长按「长大」，点读音行；切到仓颉，打一个繁体字，长按。
+- **预期**：读音行「长大　zhǎng dà」，词卡照常；仓颉的繁体字按简体字的读音；候选旁的编码提示和长按前一样。
+- **JVM**：ime-core `EnginesWordCardTest`（五笔 好）；`WordCardUatTest.theExamplesReadAsTheDesignHasThem`（五笔 长大，真数据）；设备上不跑。
+
+### TBL-54 [P1] 仓颉按偏成空码时按旁边的键读
+- **前提**：B0-仓颉，**纠正错拼和按偏的键** 开（默认）。
+- **操作**：打 h d（禾），再按 `e`，手指落在 `e` 靠 `r` 的右边上；按空格。再打 y y m，同样按偏 `e`；再按 `x`。
+- **预期**：`hde` 是空码，按偏读成 `hdr`：编码栏是 竹木口，第一个候选「和」，空格上屏「和」。`yyme` 也是空码，读成 `yymr`：只有一个候选「这」，按原样它会自己上屏，这时先不上屏；按 `x`（接不上 `yymr`）时「这」上屏，`x`（難）开始新的编码。点在 `e` 的中间时照旧是空码，空格丢掉。
+- **JVM**：`TableSlipUatTest.cangjiesEmptyCodeIsReadAsTheKeyTheTapLeansTo`、`cangjiesLoneCodeReadFromASlipWaitsForTheNextKey`（:lib:ime-eval:uatTest，真数据）+ ime-core `TableSlipTest.aKeyThatMakesAnEmptyCodeIsReadAsTheOneItsTapLeansTo`、`theNearestKeyThatLeadsOnIsTaken`、`aCodeReadFromASlipWithOneCandidateIsCommittedByAKeyThatCannotGoOn`、`aCodeReadFromASlipWaitsOnlyWhereItWouldHaveCommittedItself`、`theKeyAfterAWaitingCodeIsReadAsAToppingKeyIs`、`aWaitingCodeIsCommittedByPunctuationASpaceOrASelectionKeyAsAnyCode`、`everyKeyReadKeepsItsMarkWhenAnotherGoes`、`aKeyPutInMidCodeIsNeverReadAndMovesTheMarks`、`noKeyIsReadAsASelectionKeyNorAnEndKey`、`erbiNeverTopsAndItsPinyinKeyIsNeverRead`、`EnginesTableSlipTest.aCodeReadFromASlipWaitsThenTheNextKeyThatCannotGoOnCommitsIt`；设备上不跑（点在键边上的落点要模拟）。
+
+### TBL-55 [P1] 顶字的键只在键边上才读成邻键；读过的码先不上屏
+- **前提**：B0-五笔，**纠正错拼和按偏的键** 开（默认）。
+- **操作**：打 e t n（「乃」的整码），再按 `j`，手指落在 `j` 靠 `h` 那边、离边至少五分之一键宽（比边更靠近键的正中）；再来一次，手指落在 `j` 最靠 `h` 的边上，然后按空格；第三次同第二次，然后按 `w`。
+- **预期**：`etnj` 没有编码。离边五分之一键宽以上时照旧顶字：「乃」上屏，`j` 开始新的编码。落在边上时读成 `etnh`（首选「用」不是「乃」、也不比它少见）：什么也不上屏，第一个候选「用」，打满且只有这一个字也不马上上屏，空格上屏「用」；或者按下一个编码的 `w`，「用」上屏一次，`w` 开始新的编码。打到想要的字排第一（编码没打完）再按下一个字的键，也一样只在键边上才改读，而且邻键打出的首选是同一个字时不改读。按原样有字的编码、编码第一个键、打满后的键、万能键 `z` 都不改。
+- **JVM**：`TableSlipUatTest.wubisToppingKeyIsReadOnlyAtTheEdge`（真数据）+ ime-core `TableSlipTest.aKeyAfterAWholeCodeIsReadOnlyAtTheEdge`、`aKeyIsNeverReadAsOneLeadingToTheTextItWouldCommit`、`aWaitingCodeIsCommittedOnceWhereTheTableTops`、`ziranmaTopsAsWubiDoes`、`wubiPinyinReadsNoKeyAsOneLeadingToPinyinAlone`、`aKeyAfterAWholeCodeIsReadOnlyForACodeTheWordModelWeighsAsMuch`、`aCodeWithAKeyReadAsItsNeighbourNeverCommitsItself`、`aCodeWithEntriesIsNeverChanged`、`aCodesFirstKeyIsNeverRead`、`aFullCodesNextKeyStartsTheNextCode`、`theWildcardIsNeverReadAsAnotherKey`；设备上不跑（点在键边上的落点要模拟）。
+
+### TBL-56 [P2] 关掉纠错时码表不纠按偏
+- **前提**：B0-仓颉；**通用输入** 里关掉 **纠正错拼和按偏的键**。
+- **操作**：打 h d，再按 `e`，落点同 TBL-54；按空格。
+- **预期**：`hde` 照原样是空码，没有候选，空格丢掉，什么也不上屏。
+- **JVM**：`TableSlipUatTest.slipsOffLeaveTheEmptyCodeToBeDropped`（真数据）+ ime-core `EnginesTableSlipTest.aSlipIntoAnEmptyCodeIsReadAsTheKeyMeantUnlessSlipsAreOff`（设置接到码表）；设备上不跑。

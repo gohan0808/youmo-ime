@@ -14,6 +14,7 @@ import org.fcitx.fcitx5.android.data.pack.AppData
 import org.fcitx.fcitx5.android.data.pack.PackStore
 import org.fcitx.fcitx5.android.data.pack.PackUnavailableException
 import org.fcitx.fcitx5.android.data.pinyin.CommonWordsManager
+import org.fcitx.fcitx5.android.data.pinyin.RareCharsManager
 import org.fcitx.fcitx5.android.data.pinyin.CustomPhraseManager
 import org.fcitx.fcitx5.android.data.pinyin.ImportedDictionaries
 import org.fcitx.fcitx5.android.data.pinyin.MergedDictionary
@@ -35,18 +36,23 @@ import org.fcitx.fcitx5.android.engine.runtime.EngineEvent
 import org.fcitx.fcitx5.android.engine.runtime.EngineSettings
 import org.fcitx.fcitx5.android.engine.runtime.Engines
 import org.fcitx.fcitx5.android.engine.runtime.FieldFlags
+import org.fcitx.fcitx5.android.engine.runtime.OwnKeysTurn
 import org.fcitx.fcitx5.android.engine.session.Action
 import org.fcitx.fcitx5.android.engine.session.Choice
 import org.fcitx.fcitx5.android.engine.session.Offer
 import org.fcitx.fcitx5.android.engine.session.Snapshot
+import org.fcitx.fcitx5.android.engine.store.RecordStore
+import org.fcitx.fcitx5.android.engine.store.Unsaved
 import org.fcitx.fcitx5.android.host.ConfigHome
 import org.fcitx.fcitx5.android.host.EngineHost
 import org.fcitx.fcitx5.android.input.address.AddressStore
+import org.fcitx.fcitx5.android.input.handwriting.handwritingCannotLoad
 import org.fcitx.fcitx5.android.input.keyboard.ImKeyboards
 import org.fcitx.fcitx5.android.input.popup.EmojiModifier
 import org.fcitx.fcitx5.android.pack.PackKind
 import org.fcitx.fcitx5.android.utils.Const
 import org.fcitx.fcitx5.android.utils.appContext
+import org.fcitx.fcitx5.android.utils.causes
 import org.fcitx.fcitx5.android.utils.toast
 import timber.log.Timber
 import java.io.File
@@ -67,37 +73,22 @@ import java.util.concurrent.TimeUnit
 class EngineBridge {
 
     /**
-     * What the handwriting pad read, or a piece of it finished ([piece]), for the Ink key to carry,
-     * [send] sending it, then [Engines.inkSent] holds it if the key never reached the session; with
-     * handwriting not [current], the input method, no key, the piece only held. Whether the key was
-     * sent. On the fcitx thread.
-     *
-     * [onKeys]: written on the letter keys (键盘手写): [current]'s own handwriting's (InkOver), sent while
-     * it writes on its keys. Switched meanwhile, the piece goes to the input method now current: dropped
+     * What was written on [current]'s letter keys (the toolbar's 手写), or a piece of it finished ([piece]), for
+     * the Ink key to carry: [current]'s own handwriting's (InkOver). [send] sends it, then [Engines.inkSent]
+     * holds it if the key never reached the session. Whether the key was sent: not where [current] writes on
+     * no keys or cannot load. Switched meanwhile, the piece goes to the input method now current: dropped
      * where that writes on no keys, else read there (piece numbers are global; a rare slip, not worth
-     * carrying the input method written on with every reading).
+     * carrying the input method written on with every reading). On the fcitx thread.
      */
-    fun sendInk(piece: Action.Ink, current: String, onKeys: Boolean = false, send: () -> Unit): Boolean {
-        if (onKeys) {
-            // an input method that cannot load writes on no keys: its session's failure is not handwriting's
-            if (!InputMethodCatalog.writesOnKeys(current) || current in unloadable) return false
-            // current's own session made first, under its own latch: a code table that cannot be read fails
-            // as current, not as handwriting (whose pad would then load nowhere)
-            if (!madeOnKeys(current)) return false
-            if (!handwriting(current, onKeys = true) { engines.ink(piece, shown = true, im = current) }) return false
-            send()
-            engines.inkSent(piece, current)
-            return true
-        }
-        if (current != InputMethodCatalog.HANDWRITING) {
-            handwriting(current) { engines.ink(piece, shown = false) }
-            return false
-        }
-        // only the session's making caught as handwriting's: a slip of the key sent after it is the key's,
-        // not a read untaken (else the pad would type it again as its character)
-        if (!handwriting(current) { engines.ink(piece, shown = true) }) return false
+    fun sendInk(piece: Action.Ink, current: String, send: () -> Unit): Boolean {
+        // an input method that cannot load writes on no keys: its session's failure is not handwriting's
+        if (!InputMethodCatalog.writesOnKeys(current) || current in unloadable) return false
+        // current's own session made first, under its own latch: a code table that cannot be read fails
+        // as current, not as handwriting (whose recognizer's readings would then load nowhere)
+        if (!madeOnKeys(current)) return false
+        if (!handwriting { engines.ink(piece, shown = true, im = current) }) return false
         send()
-        engines.inkSent(piece)
+        engines.inkSent(piece, current)
         return true
     }
 
@@ -138,16 +129,14 @@ class EngineBridge {
         }
     }
 
-    // these make the handwriting session, whose pinyin data may not load: as its keys, latched once
-    // and skipped after, the pad drawing on with nothing taken (not a load tried at every character).
-    // Whether it was taken: not, no Ink key is sent, which unanswered would be typed as its character.
-    // Handwriting's only: a piece finished as the pad leaves for English ([current]) is told the engine,
-    // but is not a key typed into keyboard-us
-    internal fun handwriting(current: String, onKeys: Boolean = false, call: () -> Unit): Boolean {
-        if (InputMethodCatalog.HANDWRITING in unloadable) return false
+    // these make the handwriting session, whose pinyin data may not load: latched once ([HANDWRITING]) and
+    // skipped after, the ink drawn on with nothing taken (not a load tried at every character). Whether
+    // it was taken: not, no Ink key is sent
+    internal fun handwriting(call: () -> Unit): Boolean {
+        if (HANDWRITING in unloadable) return false
         try {
-            unloadable.call(InputMethodCatalog.HANDWRITING, call)
-            return onKeys || current == InputMethodCatalog.HANDWRITING
+            unloadable.call(HANDWRITING, call)
+            return true
         } catch (e: IOException) {
             Timber.w(e, "handwriting engine")
         } catch (e: DataFormatException) {
@@ -167,7 +156,7 @@ class EngineBridge {
         get() = made ?: Engines(
             blobs = ::asset,
             userDir = userDir()?.let(::restored)?.let(::JvmFiles),
-            onError = { Timber.w(it, "engine user data") },
+            onError = ::userDataFailed,
             additions = { data().let { additions(pinyinDir(it), it.writable) } },
             kernel = NativeMatrixKernel.loaded,
             emojiShows = EmojiModifier.validator(),
@@ -186,6 +175,7 @@ class EngineBridge {
             putAddresses = AddressStore::put,
             // logged rather than thrown, as EditingSession's: a debug build is also someone's daily keyboard
             offHostThread = if (BuildConfig.DEBUG) ({ Timber.e(IllegalStateException(it)) }) else null,
+            unkept = ::learningUnkept,
         ).also {
             it.useHabits = AppPrefs.getInstance().internal.useHabits.getValue()
             it.learning(null, BackupOp.SetAuto(AppPrefs.getInstance().internal.learningAutoBackup.getValue()))
@@ -193,8 +183,8 @@ class EngineBridge {
         }
 
     // OpenCC's character tables, as the app ships them: the app's traditional text read simplified by
-    // learning. Read from the APK's assets, never from the data directory DataManager syncs: no
-    // copy there to go stale or missing
+    // learning. Read from the APK's assets, never from a copy on disk: none there to go stale or
+    // missing
     private fun simplifier(): Simplifier = try {
         val assets = appContext.assets
         Simplifier.read(assets.open(TRADITIONAL_TABLE).use { it.readBytes() }, assets.open(SIMPLIFIED_TABLE).use { it.readBytes() })
@@ -202,6 +192,37 @@ class EngineBridge {
         Timber.w(e, "no traditional-to-simplified table: text read as it is")
         Simplifier.NONE
     }
+
+    /**
+     * What the engine could not read or write of the user's data ([Engines]' onError): logged, and what the user
+     * is to know of it said on the keyboard.
+     */
+    @VisibleForTesting
+    internal fun userDataFailed(e: IOException) {
+        Timber.w(e, "engine user data")
+        // the learning record, or part of it, did not read and was kept aside: from what read, or empty (decode-1)
+        if (e is RecordStore.KeptAside) EngineNotices.failedOnce(R.string.learning_kept_aside)
+        // a word added or blocked by hand not written: in memory alone, as what is learned and not kept (decode-2)
+        if (e is Unsaved) learningUnkept()
+    }
+
+    /**
+     * What is learned not kept on the disk, whatever the cause (no [userDir], the record not opened,
+     * a write of it refused): told once a process, on the keyboard. 0.5.2's fresh installs learned in
+     * memory alone for days and lost it all with the process, nothing said (061-userdict-loss).
+     */
+    private fun learningUnkept() {
+        Timber.w("what is learned is not kept on the disk this run")
+        sayUnkept(FcitxApplication.getInstance().isDirectBootMode)
+    }
+
+    /**
+     * In [directBoot] mode, as meant till the app restarts at the first unlock (unlocked already, in
+     * the moment before it exits, too): news that it is so. Otherwise a failure, what to do.
+     */
+    @VisibleForTesting
+    internal fun sayUnkept(directBoot: Boolean) =
+        if (directBoot) EngineNotices.toldOnce(R.string.learning_unkept_locked) else EngineNotices.failedOnce(R.string.learning_unkept)
 
     // credential-encrypted, unlike fcitx's home: what the user typed is not kept where it can be read
     // before the phone is first unlocked. Till then the engine learns in memory; the app restarts at unlock.
@@ -249,7 +270,8 @@ class EngineBridge {
         Timber.e("%s cannot load (%s): not called again till the engine is reloaded", im, e.javaClass.name)
         // said on the keyboard (§3: not a toast, which Android 13 drops); a pack missing is told as such,
         // one damaged since it was last read through too (read through now, on this thread: review M-2)
-        val pack = generateSequence(e) { it.cause }.take(MAX_CAUSES).filterIsInstance<PackUnavailableException>().firstOrNull()
+        val pack = e.causes().filterIsInstance<PackUnavailableException>().firstOrNull()
+        if (im == HANDWRITING) handwritingCannotLoad()
         EngineNotices.failed(
             when {
                 pack != null -> R.string.pack_text_needed_short
@@ -292,13 +314,7 @@ class EngineBridge {
         // an asset or table that cannot be opened or is none; not memory run out mapping one,
         // FileChannel.map's IOException "Map failed", even as a cause
         private fun cannotLoad(e: Throwable) =
-            (e is IOException || e is DataFormatException) && chain(e).none { it is VirtualMachineError }
-
-        // [e] and its causes, each once: initCause refuses only a throwable itself, so a chain may loop back
-        private fun chain(e: Throwable): Sequence<Throwable> {
-            val seen = HashSet<Throwable>()
-            return generateSequence(e) { it.cause }.takeWhile(seen::add)
-        }
+            (e is IOException || e is DataFormatException) && e.causes().none { it is VirtualMachineError }
     }
 
     /**
@@ -344,6 +360,14 @@ class EngineBridge {
             wordsRead = false
             ""
         }
+        // 生僻字屏蔽's choice: one not read is off, never the default written over it (design §4.2, DECISIONS A4)
+        val rareChars = try {
+            File(dir, RareCharsManager.FILE.substringAfter('/')).takeIf { it.isFile }?.readText().orEmpty()
+        } catch (e: IOException) {
+            Timber.e(e, "rare characters: off this run")
+            unreadable()
+            ""
+        }
         val dictionaryDir = File(dir, "dictionaries")
         // where the data is not settled, nothing written: no libime file converted, no file compiled,
         // what is there read as it is (where that is, the next start may not read)
@@ -353,7 +377,7 @@ class EngineBridge {
             !writable -> "where fcitx's data is, is not settled"
             else -> null
         }
-        val save = PhraseFile(phraseFile, phrases, refused == null, refused.orEmpty(), phraseSaves)::save
+        val save = PhraseFile(phraseFile, phrases, refused == null, refused.orEmpty(), saves = phraseSaves)::save
         // the compiled file, never the texts (0.3.1 read them whole here and ran the heap out at
         // every focus): one not made yet, or stale, is compiled off this thread, the engine reloaded then
         val seen = MergedDictionary.current(dictionaryDir, compiles = writable)
@@ -368,7 +392,8 @@ class EngineBridge {
             dictionaryStale = seen.stale,
             dictionaryPending = { MergedDictionary.pending(dictionaryDir) },
             commonWords = commonWords,
-            saveCommonWords = WordsFile(wordsFile, commonWords, wordsRead && writable, phraseSaves)::save,
+            saveCommonWords = WordsFile(wordsFile, commonWords, wordsRead && writable, saves = phraseSaves)::save,
+            rareChars = rareChars,
         )
     }
 
@@ -377,7 +402,14 @@ class EngineBridge {
      * one ([Engines.Additions.saveCommonWords]), on [saves], as [PhraseFile] saves the phrases; not
      * where the file was not read or the data is not settled ([writable] false).
      */
-    internal class WordsFile(private val file: File, private val text: String, private val writable: Boolean, private val saves: Executor) {
+    internal class WordsFile(
+        private val file: File,
+        private val text: String,
+        private val writable: Boolean,
+        // a save that failed: the user's change lives in memory alone, which they are told (0.6.1 audit decode-2)
+        private val unsaved: () -> Unit = ::toldUnsaved,
+        private val saves: Executor,
+    ) {
         private var base: CommonWords? = null
 
         fun save(words: CommonWords) {
@@ -389,6 +421,7 @@ class EngineBridge {
                     base = words
                 } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
                     Timber.w(e, "common words")
+                    unsaved()
                 }
             }
         }
@@ -411,6 +444,8 @@ class EngineBridge {
         private val text: String,
         private val read: Boolean,
         private val refused: String = "custom phrases were not read",
+        // as WordsFile's
+        private val unsaved: () -> Unit = ::toldUnsaved,
         private val saves: Executor,
     ) {
         private var base: CustomPhrases? = null
@@ -426,6 +461,7 @@ class EngineBridge {
                 } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
                     // on that thread, it would end the process: kept in memory, as the engine does
                     Timber.w(e, "custom phrases")
+                    unsaved()
                 }
             }
         }
@@ -496,10 +532,13 @@ class EngineBridge {
 
     /**
      * The host's config ([org.fcitx.fcitx5.android.host.EngineOptions.toSettings]), with the nine keys'
-     * letters the keyboard draws (the app's preference, read again by [reload]); on the fcitx thread too.
+     * letters the keyboard draws (the app's preference, read again by [reload]) and the groups of its own the
+     * codes are read by: the ones [syncOwnKeys] told, else (none told yet) the keyboard's. Not the keyboard's
+     * where others are told while the ones before are typed on ([turnAt] waiting): their session, made anew,
+     * would drop what was typed (review L4 S3). On the fcitx thread too.
      */
     fun configure(settings: EngineSettings) {
-        engines.settings = settings.copy(nineKeys = nineKeys(), ownKeys = EngineState.ownKeys)
+        engines.settings = settings.copy(nineKeys = nineKeys(), ownKeys = inUseOf ?: EngineState.ownKeys)
         EngineState.shuangpinScheme = engines.settings.scheme
         EngineState.englishSuggests = engines.settings.englishSuggest
         EngineState.candidateReadingState.value = engines.settings.candidateReading
@@ -508,7 +547,9 @@ class EngineBridge {
         // Written here, on the fcitx thread: its listeners (the service's, which makes the input view anew) still run on
         // the main thread, as SharedPreferences hands its change listeners there; a change told another way must post
         val keyboards = AppPrefs.getInstance().keyboard
-        ImKeyboards.fallback(InputMethodCatalog.SHUANGPIN, keyboards.shuangpinKeyboard.getValue().keyboard, engines.settings.scheme)
+        // a layout of the user's of the 14 keys' groups alike (061-custom-layout §5.1); one not drawn left chosen
+        val chosen = keyboards.imKeyboards()
+        ImKeyboards.fallback(InputMethodCatalog.SHUANGPIN, chosen.shuangpin, engines.settings.scheme, chosen.customOf(InputMethodCatalog.SHUANGPIN))
             ?.let { keyboards.setImKeyboard(InputMethodCatalog.SHUANGPIN, it) }
     }
 
@@ -539,7 +580,7 @@ class EngineBridge {
         is LearningOp.Undo, is LearningOp.UseHabits, is LearningOp.ClearRecent, is LearningOp.ClearLearned,
         is LearningOp.NoPredict, is LearningOp.RemoveItems, is LearningOp.RemoveWords -> true
         is LearningOp.Menu, is LearningOp.Delete, is LearningOp.Block, is LearningOp.Pin, is LearningOp.Unpin,
-        is LearningOp.Report, LearningOp.Overview, is LearningOp.ListItems, is LearningOp.RestoreCorrection,
+        is LearningOp.Report, LearningOp.Overview, LearningOp.Saving, is LearningOp.ListItems, is LearningOp.RestoreCorrection,
         is LearningOp.ResetTableOrder -> false
         // a restore or 退回恢复前 changes what was learned; the rest only read or keep files
         is BackupOp.Restore, is BackupOp.RestoreKept, BackupOp.Revert -> true
@@ -552,10 +593,12 @@ class EngineBridge {
     private var inUseOf: List<String>? = null
 
     /**
-     * Whether [own] replaces other own groups [syncOwnKeys] told, whose session may be typing: none told before
-     * (the first own keyboard, a glide or ink before any key) is no change of what anything was typed on.
+     * What a key of [codePoint] does with [own], the groups the keyboard shown told ([OwnKeysTurn]): other own groups
+     * than the ones [syncOwnKeys] told, whose session may be typing, take over at their first code, what was typed
+     * committed then; none told before (the first own keyboard, a glide or ink before any key) is no change of what
+     * anything was typed on.
      */
-    fun replaces(own: List<String>?): Boolean = inUseOf != null && own != inUseOf
+    fun turnAt(own: List<String>?, codePoint: Int): OwnKeysTurn.Step = OwnKeysTurn.at(inUseOf, own, codePoint)
 
     /**
      * The groups of the layout of its own a keyboard shows ([EngineState.ownKeys], 060-render-p3 T9b) told
@@ -563,12 +606,12 @@ class EngineBridge {
      * letters too, no engine needed), and the engine's settings, its sessions made anew with them (an engine
      * made again after [close] too). Before each key, on the fcitx thread: the keyboard wrote them before any
      * of its keys could be tapped. The same ones (the same list, as a rule): nothing to do. [own] read once
-     * by the caller, [replaces] asked of the same.
+     * by the caller, [turnAt] asked of the same.
      */
     fun syncOwnKeys(own: List<String>? = EngineState.ownKeys) {
         if (own != inUseOf) {
             inUseOf = own
-            own?.takeIf { NineKeyLetters.problem(it) == null }?.let(NineKeyLetters::custom)?.let(NineKeyLetters::inUse) ?: NineKeyLetters.clearInUse()
+            own?.let(NineKeyLetters::ownOf)?.let(NineKeyLetters::inUse) ?: NineKeyLetters.clearInUse()
         }
         made?.let { if (it.settings.ownKeys != own) it.settings = it.settings.copy(ownKeys = own) }
     }
@@ -612,15 +655,8 @@ class EngineBridge {
     // what the app keeps of an input method's session, after any call of it: one place as input methods come.
     // [engines] asked only for one followed: a call answered elsewhere (a test's) makes none
     private inline fun followed(im: String, engines: () -> Engines) {
-        if (im == InputMethodCatalog.HANDWRITING) EngineState.inkEnded.value = engines().inkEnded
-        // written on the keys (InkOver): its pieces ended, and whether its own input is typed, after every
-        // answer (KeyInkGesture.engineTyped: a tap's mark replaced each time, not only as it changes)
-        if (InputMethodCatalog.writesOnKeys(im) && im !in unloadable) {
-            val e = engines()
-            EngineState.inkEnded.value = e.inkEnded
-            // with the number of the last key sent the fcitx thread took (EngineState.keyTaken): which tap it is about
-            EngineState.answerKeysTyped(e.typedOnKeys(im), EngineState.keysHeard)
-        }
+        // written on the keys (InkOver): its pieces ended, after every answer
+        if (InputMethodCatalog.writesOnKeys(im) && im !in unloadable) EngineState.inkEnded.value = engines().inkEnded
         // a table's keyboard: its 拼 key turned, its settings changed (a field's context comes as it
         // shows); none of one that could not be read, whose keys say nothing
         if (im in InputMethodCatalog.TABLES && im !in unloadable) EngineState.tableKeyboardState.value = engines().tableKeyboard(im)
@@ -630,6 +666,16 @@ class EngineBridge {
     fun tableKeys(im: String): Set<Char> = made?.tableKeys(im).orEmpty()
 
     companion object {
+        // the latch of handwriting's session over the keys, whichever input method is written on: its
+        // recognizer's readings are pinyin's data, not that input method's
+        private const val HANDWRITING = "handwriting"
+
+        // what the user changed on the keyboard (a common word deleted, a phrase pinned or deleted) not saved: said
+        // as what is learned and not kept is, in words of its own (WordsFile, PhraseFile). Not learning_unkept: that
+        // says the words learned are not saved, which is not so here, and its once a process would be spent on
+        // this, the learning's own failure then never said (R25r2 F7881)
+        private fun toldUnsaved() = EngineNotices.failedOnce(R.string.user_lists_unkept)
+
         /**
          * Saves [phrases], the engine's, as what it changed since [base] (those it read or last saved)
          * applied to [file] as it is now: the editor may have saved since, its reload of the engine
@@ -639,13 +685,9 @@ class EngineBridge {
             CustomPhraseManager.saveKeysOver(CustomPhraseManager.items(base), CustomPhraseManager.items(phrases), file)
         }
 
-        /** Whether [im] is one of the engine's input methods, whose long press the app words (U-82). */
-        fun isEngines(im: String) = im.startsWith(ENGINE) || im == InputMethodCatalog.ENGLISH
+        /** Whether [im] is one of the engine's input methods (those the host lists), whose long press the app words (U-82). */
+        fun isEngines(im: String) = InputMethodCatalog.listed(im) != null
 
-        // the host's input methods (the native androidengine's), but English, which is keyboard-us's
-        private const val ENGINE = "engine-"
-        // a chain of causes looked down this far for a pack missing (initCause may loop one back)
-        private const val MAX_CAUSES = 16
         private const val MS_PER_MINUTE = 60_000L
         private const val IDLE_SECONDS = 30L
         private const val LIBIME_DICTIONARY = "user.dict"

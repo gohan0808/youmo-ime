@@ -4,6 +4,7 @@
  */
 package org.fcitx.fcitx5.android.ui.main.settings
 
+import android.content.Context
 import android.net.Uri
 import android.os.Bundle
 import android.text.InputFilter
@@ -28,6 +29,10 @@ import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.findNavController
+import java.io.File
+import java.io.IOException
+import kotlin.math.absoluteValue
+import kotlin.math.min
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -44,6 +49,8 @@ import org.fcitx.fcitx5.android.ui.common.OnItemChangedListener
 import org.fcitx.fcitx5.android.ui.main.EditDeleteMenuProvider
 import org.fcitx.fcitx5.android.ui.main.MainViewModel
 import org.fcitx.fcitx5.android.ui.main.MainViewModel.ButtonMode
+import org.fcitx.fcitx5.android.ui.main.settings.search.PageEntry
+import org.fcitx.fcitx5.android.ui.main.settings.search.SearchablePage
 import org.fcitx.fcitx5.android.utils.NaiveDustman
 import org.fcitx.fcitx5.android.utils.appContext
 import org.fcitx.fcitx5.android.utils.materialTextInput
@@ -56,10 +63,6 @@ import splitties.views.dsl.core.matchParent
 import splitties.views.dsl.core.verticalLayout
 import splitties.views.setPaddingDp
 import timber.log.Timber
-import java.io.File
-import java.io.IOException
-import kotlin.math.absoluteValue
-import kotlin.math.min
 
 class PinyinCustomPhraseFragment : Fragment(), OnItemChangedListener<PinyinCustomPhrase> {
 
@@ -250,7 +253,8 @@ class PinyinCustomPhraseFragment : Fragment(), OnItemChangedListener<PinyinCusto
                 return@launch
             }
             loaded = items
-            ui.addItems(items)
+            // shown, not added: an add offered its undo, which deleted the phrases read (UAT 0.6.1)
+            ui.showAll(items)
             // what was read is not a change to save
             dustman.reset(items.associateBy { it.serialize() })
             readable = true
@@ -305,8 +309,14 @@ class PinyinCustomPhraseFragment : Fragment(), OnItemChangedListener<PinyinCusto
                 val phrases = withContext(Dispatchers.Default) {
                     CustomPhraseManager.items(CustomPhrases.parse(WordLists.decode(bytes))).filter { have.add(it.serialize()) }
                 }
-                ui.addItems(phrases)
-                ctx.toast(getString(R.string.import_phrases_done, phrases.size))
+                // up to the limit: the whole list is written at each save and read by the engine at each start
+                val kept = phrases.take((MAX_PHRASES - ui.entries.size).coerceAtLeast(0))
+                val done = getString(R.string.import_phrases_done, kept.size)
+                val over = phrases.size - kept.size
+                val said = if (over == 0) done else getString(R.string.import_over_limit, done, over, MAX_PHRASES)
+                // one bar, the count with the undo of this import's rows: a toast besides went unseen under it (WD-37);
+                // none added, no bar, so the toast
+                if (kept.isEmpty()) ctx.toast(said) else ui.addItems(kept, said)
             }
         }
     }
@@ -394,10 +404,19 @@ class PinyinCustomPhraseFragment : Fragment(), OnItemChangedListener<PinyinCusto
         super.onDestroy()
     }
 
-    companion object {
+    companion object : SearchablePage {
+        // ⋮'s items: no View to point at, said where they are
+        override fun searchEntries(context: Context) = listOf(
+            PageEntry(context.getString(R.string.import_file), "view:phrases/import", where = R.string.search_where_menu),
+            PageEntry(context.getString(R.string.export_file), "view:phrases/export", where = R.string.search_where_menu),
+        )
+
         // the file's read; a test holds it to see the page while it waits
         @VisibleForTesting
         internal var load: () -> List<PinyinCustomPhrase> = { CustomPhraseManager.load() }
+
+        /** The most phrases an import fills the list to (a file of 8 MB holds hundreds of thousands). */
+        const val MAX_PHRASES = 5000
     }
 
 }

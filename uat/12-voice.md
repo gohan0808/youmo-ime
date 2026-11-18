@@ -100,9 +100,9 @@
 
 ### VO-15 [P1] 关于页列出语音模型用到的数据
 - **前提**：B0-设置（导入了语音包），**⋮ → 关于**。
-- **操作**：点"第三方库许可证"，找 LibriSpeech。
-- **预期**：列着 LibriSpeech，许可是 CC BY 4.0（CC-BY-4.0），链接到 openslr.org/12。没导入语音包时也列着（许可跟着应用，不看有没有包）。
-- **JVM**：`SettingsPagesUatTest.theVoiceModelsDataIsCredited`（列着 LibriSpeech、CC-BY-4.0、点开 openslr.org/12）；设备上不跑。
+- **操作**：点"第三方库许可证"，找 LibriSpeech、语音整理、MagicData-RAMC、RealTalk-CN、CS2W、FineWeb-2、Chinese ELECTRA。
+- **预期**：列着 LibriSpeech，许可是 CC BY 4.0（CC-BY-4.0），链接到 openslr.org/12；「语音整理（口头禅、标点、数字）：本项目训练的模型……语音包单独授权，仅供非商业使用（CC BY-NC-SA 4.0）；应用的代码仍按它自己的许可（LGPL-2.1-or-later）」许可是 CC-BY-NC-SA-4.0，链接到 creativecommons.org 的 by-nc-sa/4.0；「MagicData-RAMC (Magic Data Technology)」CC-BY-NC-ND-4.0，链接到 openslr.org/123；「RealTalk-CN (BAAI)」CC-BY-NC-SA-4.0，链接到 huggingface.co 的数据集页；「CS2W (…; sentences from MagicData-RAMC)」CC-BY-SA-4.0，链接到 github.com/guozishan/CS2W；「……和语音整理的合成口语用的网页文本：FineWeb-2」ODC-By-1.0，链接到 huggingface.co 的 fineweb-2；Chinese ELECTRA 是 Apache-2.0。没导入语音包时也列着（许可跟着应用，不看有没有包）。
+- **JVM**：`LicensePageUatTest.theVoiceModelsDataIsCredited`（七行的许可和点开的链接）；设备上不跑。
 
 ### VO-17 [P1] 加了自己的词，平常的话照样听对
 - **前提**：B0-设置（导入了语音包），按 VO-14 加了「澜境花园」。
@@ -233,8 +233,8 @@
 ### VO-34 [P0] 没有语音包时麦克风提示导入
 - **前提**：B0，导入了文字包、没导入语音包。
 - **操作**：点工具栏上的麦克风；再长按空格。
-- **预期**：键盘照常能打字。点麦克风时提示「语音输入需要导入语音包：设置 → 资源包」并打开资源包页，不问录音权限；语音包版本太旧时提示要更新到哪一版；语音包比应用新（格式更新）时提示「语音包 vN 是给更新版应用的：请更新幽默输入法」；语音包已损坏时提示重新导入。长按空格什么都不做（和 0.5.x 文字版一样）：没有提示、不打开页面，空格上没有麦克风角标，按住后照样能左右慢拖移动光标。导入语音包后空格上出现麦克风角标，长按就能说话。
-- **JVM**：`PacksUatTest.withoutTheVoicePackTheMicrophoneAsksForItAndTheSpaceDoesNothing`、`aVoicePackForANewerAppAsksForTheAppsUpdate`、`KeyboardUatTest.withoutTheVoicePackTheDefaultHoldLeavesTheSlowDragItsCursor`（`:app:testDebugUnitTest`）。
+- **预期**：键盘照常能打字。点麦克风时提示「语音输入需要导入语音包：设置 → 资源包」并打开资源包页，不问录音权限；语音包版本太旧时（如装着 0.6.0 测试版 1 的语音包 v1，这一版要 v2）提示「语音输入需要把语音包更新到 v2：设置 → 资源包」并打开资源包页，资源包页写「需要更新到 v2（现在是 v1）」，长按空格同样什么都不做，导入 v2 后恢复；语音包比应用新（格式更新）时提示「语音包 vN 是给更新版应用的：请更新幽默输入法」；语音包已损坏时提示重新导入。长按空格什么都不做（和 0.5.x 文字版一样）：没有提示、不打开页面，松手时照常打一个空格，空格上没有麦克风角标，按住后照样能左右慢拖移动光标。导入语音包后空格上出现麦克风角标，长按就能说话。
+- **JVM**：`PacksUatTest.withoutTheVoicePackTheMicrophoneAsksForItAndTheSpaceDoesNothing`、`aVoicePackForANewerAppAsksForTheAppsUpdate`、`aVoicePackOlderThanTheAppTakesAsksForTheNewOneAndVoiceStaysOff`、`KeyboardUatTest.withoutTheVoicePackTheDefaultHoldLeavesTheSlowDragItsCursor`（`:app:testDebugUnitTest`）。
 
 ### VO-35 [P1] 句末句号按输入框，语音整理去掉口头禅
 - **前提**：B0-语音（**按键 → 语音句末句号** 是默认的"按输入框"）。
@@ -255,3 +255,119 @@
 - **预期**：第一次框里是「麻烦你去找一下徐婧」（没加时是「徐静」；说的时候显示的也已是「徐婧」）；第二次仍是「许静来了」（声调不同不换）；第三次是「这个公式」（常用词不换成你的「攻势」）。
 - **JVM**：`VoiceHomophonesTest`（读音带声调逐字相同、学到的词打过 3 次以上、自己的词和常用词不换、更长的词里不换（`lib/ime-core` 的确定链））；模拟器上（导入了语音包）也跑一遍。
 
+### VO-39 [P1] 语音出错时的提示
+<!-- R25 voice-3/voice-5：识别出错不再报成模型或麦克风的问题 -->
+- **前提**：无（JVM；真机上造不出这三种错）。
+- **操作**：按住空格说话，分别遇到：语音模型载入失败（还没听到什么）；说了「今天天气」后麦克风出错；说了「今天天气」后识别出错。每次出错后再松开手指。
+- **预期**：卡片上分别提示「语音模型载入失败」「无法使用麦克风」「语音识别出错」，「松开上屏」的提示收起；框里是出错前已经听到的（第一种是空的，后两种是「今天天气」），松开后不再上屏一遍。松开手指以后（收尾时）麦克风才出错的，不算出错：不提示，麦克风照常关掉，听到的照常上屏。
+- **JVM**：`VoiceFailureUatTest.eachFailureSaysItsOwnMessageAndWhatWasHeardIsTyped`（一张表三行，即上面三种错：假识别器 `FakeRecognizer.fail` 报出错，其后是真的 VoiceSession 和卡片）、`VoiceListenerMicrophoneTest.aReadThrowingIsTheMicrophonesFailure`（真的 VoiceListener，读麦克风时抛异常报的是「无法使用麦克风」，不是「语音识别出错」）、`VoiceListenerMicrophoneTest.aReadThrowingOnceLiftedIsNoFailure`（松开手指以后读麦克风才抛异常：不报失败，麦克风停下），都在 `:app:testDebugUnitTest`；设备上不跑。
+
+### VO-40 [P1] 模型还在载入时结束说话，麦克风随即关掉
+<!-- R25r2 F7829 (voice-7)：载入模型时关掉，麦克风一直开着 -->
+- **前提**：B0-语音，Android 12 起的设备（状态栏有麦克风使用指示；更早的系统看不到，记为阻塞）：root 过的真机，或 API 31 起的模拟器（`adb root`，多数手机没有 root）；以 root 杀掉输入法进程（同 LC-11 的做法，不要用强行停止），让语音模型不在内存里。
+- **操作**：点「普通文本」框，按住空格，还没出现「正在听…」（模型还在载入）就上滑松开取消；看状态栏右上角的麦克风指示。再杀一次进程，按住空格，还没出现「正在听…」就用另一只手指点系统的主屏幕键（或从底边上滑回桌面）；再看指示。
+- **预期**：两次都在几秒内麦克风指示消失（下拉通知栏也不再说本应用在用麦克风），不一直亮着；回到测试页再按住空格照常能说。
+- **JVM**：`VoiceListenerMicrophoneTest.closedWhileTheModelsLoadTheMicrophoneIsStopped`（真的 VoiceListener，读麦克风卡住不返回时关掉它，`AudioRecord` 在 `close()` 里就停下，不等读返回；`:app:testDebugUnitTest`）；系统的麦克风指示在设备上手工看（`needs="manual:…"`，发版时排进手工那一批）。
+
+### VO-41 [P1] 改对语音的词后问要不要记住，点「记住」才加
+<!-- learning: 061-voice-learn-from-edits.md 第 3 版；用户 2026-11-14 答 Q1–Q6（DECISIONS.md） -->
+- **前提**：B0-语音；用户词库里没有「徐婧」。
+- **操作**：在「普通文本」框按住空格说"麻烦你去找一下徐婧"，松开（框里是「…徐静」，见 VO-38）。按 ⌫ 删掉句末标点和「徐静」，用拼音打 x u j i n g，选「徐婧」（一个字一个字选也行）。看键盘上方；点 **记住**；再点 **撤销**。再点一次 **记住** 后打开 **用户词库 → 手动添加的词**。
+- **预期**：重打以后键盘上方问「让语音记住『徐婧』？」，带 **记住** 按钮；点了提示变成「语音记住了『徐婧』」带 **撤销**，候选栏清空（不留重打前的联想），手动添加的词里有「徐婧」（拼音 xu jing）；点 **撤销** 又拿掉（学到的不动，不算删过）；再记住后再说"麻烦你去找一下徐婧"直接是「徐婧」。
+- **JVM**：`VoiceAskFieldTest.aFieldLeftBeforeTheEngineAnswersIsNotReadNorAskedOver`（提交后、问之前离开输入框：不读新框、不问）、`VoiceAskFieldTest.theCodeInTheFieldIsNotReadAsItsText`（引擎回答前又打了一个键、编码写在框里（编码行：输入框里）：交给引擎的是「我找徐婧」，不带框里的编码，照样问）、`VoiceAskUatTest.aWordTypedAgainIsAskedAboutAndRememberedOnATap`（整段说完、全部进框后才把这段字和光标前的字交给引擎；之后上屏的报给引擎，弹提示前读框；提示、**记住**、加词后复位清掉候选栏、撤销、开发者页的两个计数）、ime-core `EnginesVoiceEditsTest.a word typed again is asked about, added on 记住 and taken off on its 撤销`（真的 Engines：⌫ 两次、拼音重打，问「徐婧 / xu jing」；记住进手动添加的词；撤销不在学习记录里写「忘掉」）、`VoiceEditsTest.a word deleted and typed again, read the same, is asked about`；模拟器上（导入了语音包）留作冒烟：真的语音片段、真拼音、真提示。
+
+### VO-42 [P1] 不点就什么都不记，下次再这样改还问
+- **前提**：B0-语音。
+- **操作**：照 VO-41 改出「徐婧」，问的时候不点，接着打一个字；再照样改一次，等 6 秒。
+- **预期**：提示随打字消失；3 秒后也自己消失；都没有加词。同一次说的里面只问一次，下次说、再这样改还会问。
+- **JVM**：`VoiceAskUatTest.notTappedNothingIsAdded`（打字收起、3 秒收起、不加词）、ime-core `VoiceEditsTest.asked once in a window, again in the next (Q6)`；设备上不跑。
+
+### VO-43 [P1] 这些改法不问
+- **前提**：B0-语音。
+- **操作**：语音打出「徐静」后分别：重打成「许静」（声调不同）、「徐婧婧」（字数不同）、词库里的常见词（「公式」改「攻势」）；用码表（五笔）、联想、粘贴打进去；打进标点或数字；只删不打。
+- **预期**：都不问。只问点了以后语音真会换的词：读音（连声调）逐字一样、两个字以上、加了以后语音真会把听到的那段换成它（常见词不换，见 VO-38）。打进来的不是汉字（标点、数字）就不再跟着看。
+- **JVM**：ime-core `VoiceEditsTest.what is not asked about`（声调不同、字数不同、听到的就是你的词、只删不打、打的不是汉字……一张表）、`VoiceEditsTest.the word to ask about`（问的词和拼音按每个字共有的带调读音）、`VoiceEditsTest.typed by what is no word typed, the window ends (Q5)`（码表、联想、粘贴打的不算，窗口结束）、`EnginesVoiceEditsTest.nothing is followed where nothing would be learned`（真数据的声调不同不问）；设备上不跑。
+
+### VO-44 [P2] 同一处改两次：点了记住换掉上一次加的
+- **前提**：B0-语音。
+- **操作**：照 VO-41 改成「徐婧」点 **记住**，再把「徐婧」删掉重打成「徐靖」，点 **记住**。
+- **预期**：第二次照样问（判断时不算上一次加的「徐婧」）；手动添加的词里只有「徐靖」，上一次加的「徐婧」拿掉（本来就有的词不动）；第二个词加不上时，第一个留着。
+- **JVM**：ime-core `EnginesVoiceEditsTest.asked again at the place, the first word added gives way (review M4)`（真的 Engines：记住、删掉重打「徐靖」、问且换掉「徐婧」）、`EnginesVoiceEditsTest.a word that does not add leaves the first be (review S8)`、`VoiceEditsTest.asked again at the same place, the word it adds takes the first's place (review M4)`；设备上不跑。
+
+### VO-45 [P1] 打开手写改字也问
+- **前提**：B0-语音。
+- **操作**：照 VO-41 说话，删掉「徐静」，点工具栏的 **手写**，在字母区写「徐」「婧」上屏。
+- **预期**：照样问「让语音记住『徐婧』？」；拼音按两个字和语音听到的共有的读音（xu jing）。
+- **JVM**：ime-core `EnginesVoiceEditsTest.a word written again on the pad is asked about, read as the characters are`（真的 Engines、拼音键盘上手写）；设备上不跑。
+
+### VO-46 [P1] 不记录的框里、不用我的输入习惯时不问
+- **前提**：B0-语音。
+- **操作**：在要求不记录的框（`IME_FLAG_NO_PERSONALIZED_LEARNING`：输入测试台 `types` 页的 `no_learning` 框，「不要个性化学习」）照 VO-41 改；再在 **⋯ → 不用我的输入习惯** 时照样改；再在改到一半（删掉了「徐静」）时切到不用我的输入习惯，打「徐婧」。
+- **预期**：都不问；不记录的框里语音打的字也不交给引擎。
+- **JVM**：`VoiceAskUatTest.aFieldThatLearnsNothingIsNotFollowed`（不交给引擎，只告诉它结束）、ime-core `EnginesVoiceEditsTest.nothing is followed where nothing would be learned`（不用输入习惯、改到一半关掉输入习惯、这次不学、框被清空、离开输入框）；设备上不跑。
+
+### VO-47 [P1] 点麦克风说话也问；说话中途改不问；没出字的一段不挡
+- **前提**：B0-语音。
+- **操作**：点麦克风说「我找徐静」，点停；照 VO-41 改。再点麦克风说话，说的时候用拼音打字，再点停。另说一段「我找徐静」，再按住空格什么都不说（或没听清）松开，然后照 VO-41 改。
+- **预期**：说完以后改照样问；说话中途打了字，上一段就不再跟着、也不报给引擎，这一段说完以后才交给引擎；中途没打字，上一段照样跟着。一段没上屏任何字的说话（没听清、没权限、识别出错）不影响上一段：之后改照样问。
+- **JVM**：`VoiceAskUatTest.aWordTypedAgainIsAskedAboutAndRememberedOnATap`（点麦克风说的）、`VoiceAskUatTest.whatGoesInWhileTalkingIsNotReported`、`VoiceAskUatTest.aTalkThatPutsNothingInLeavesTheLastFollowed`；ime-core `VoiceEditsTest.a gap filled and not reported, voice going on after it, the next change is asked about`。设备上跑「按住空格没说话之后照样问」。
+
+### VO-48 [P1] 屏蔽过的词、已经手动加过的词不问
+- **前提**：B0-语音。
+- **操作**：先手动加「徐婧」，照 VO-41 改；再拿掉它、屏蔽「婧」，照样改。
+- **预期**：都不问。
+- **JVM**：ime-core `VoiceEditsTest.what is not asked about`（「已手动加」「含屏蔽的字」两行）；设备上不跑。
+
+### VO-49 [P2] 别的改法：在中间改、选中改、移开光标、表情、不报告选区的框
+- **前提**：B0-语音。
+- **操作**：语音打出「我找徐静了」后，把光标移到「徐静」后面删掉重打「徐婧」；或选中「徐静」直接打「徐婧」；或在中间打字后把光标移到别处再回来；删一个表情；语音打出「😀我找徐静」后在末尾删掉「徐静」重打「徐婧」；在不报告选区的框里点到中间改字。
+- **预期**：看得准是删掉「徐静」重打成「徐婧」的（光标在那一段后面删、选中替换）照样问；弄不清删的是哪一段、光标去了别处、框没报告光标在哪，就不再跟着，不问（宁可不问，不问错）。前面有表情的「😀我找徐静」删掉「徐静」重打「徐婧」照样问「让语音记住『徐婧』？」：表情在别处不碍事，只有删的是表情本身才不再跟着。
+- **JVM**：ime-core `VoiceEditsTest.edits made other ways than Backspace at the end`（中间删掉重打照样问）、`VoiceEditsTest.the window ends where what happened is not sure`（框不报告选区：读到的上下文对不上就不问）、`VoiceEditsTest.the anchor not read as voice's text waits for a context (review R6)`、`VoiceEditsTest.an emoji's Backspace is not counted`（删的是表情本身不再跟着；「😀我找徐静」删「徐静」重打「徐婧」照样问）、`VoiceEditsTest.only the last characters are kept`、`VoiceEditsTest.what the host read is cut at its length`；设备上不跑。
+
+### VO-50 [P0] 别的应用里也问：Chrome（模拟器）；微信、备忘录（真机）
+- **前提**：B0-语音；模拟器装了 Chrome（没有就用系统的 WebView Browser Tester）。
+- **操作**：在网页输入框里照 VO-41 说话、删掉「徐静」、重打「徐婧」。
+- **预期**：问「让语音记住『徐婧』？」（读光标前的字的时机对不对只有在别的应用里看得出）。微信、备忘录要在 6T 上各跑一遍，三处都出提示才发版。
+- **设备**：`uat/scripts/12-voice.py` 的 `vo50`（模拟器上的浏览器）；6T 上的微信、备忘录待做。
+
+### VO-51 [P1] 只改一个字不问，第一次说一句怎么让语音记住
+- **前提**：B0-语音；这台手机上还没出过这句提示。
+- **操作**：语音打出「徐静」后只删「静」、打「婧」。以后再这样只改一个字。把「她」改成「他」。
+- **预期**：第一次键盘上方说「把整个词删掉重打，语音才能记住」（没有按钮，不算问过）；以后不再说，引擎也不再找；「她」改「他」不说。
+- **JVM**：`VoiceAskUatTest.howToHaveAWordRememberedIsSaidOnce`、ime-core `VoiceEditsTest.one character typed again is told once how to have it remembered (Q3)`、`EnginesVoiceEditsTest.the once-only hint is not looked for once said`；设备上不跑。
+
+### VO-52 [P1] 没点的下次还问；记住再撤销，打字学到的还在
+- **前提**：B0-语音。
+- **操作**：照 VO-41 改出「徐婧」不点；再说一次照样改；点 **记住** 再点 **撤销**；之后用拼音再打几次「徐婧」。
+- **预期**：第二次照样问；撤销以后，打「徐婧」学到的和从没点过记住时一样（学到的词、次数都一样）。
+- **JVM**：ime-core `VoiceEditsTest.asked once in a window, again in the next (Q6)`、`EnginesVoiceEditsTest.undone, what typing the word learned stays (review S3)`；设备上不跑。
+
+### VO-53 [P2] 编码行在输入框里：语音的待定文字在框里时打拼音
+- **前提**：B-IF，B0-语音的语音包。
+- **操作**：按住空格说「今天天气」，还在说时（待定文字在框里）点 n i；说完。
+- **预期**：拼音在键盘上方的小条里，不写进框里；说完上屏后框里是说的话，没有多出拼音字母。
+- **JVM**：`CodeInFieldTest`「voice composing in the field: the strip」（打拼音时框里有别的待定文字就走小条）；`CodeInFieldUatTest.voiceTypedOverTheCodeTakesItAwayAndTheCodeFloatsOn`（框里是拼音时语音上屏：拼音拿走、浮到小条）；设备上手工看。
+
+### VO-54 [P1] 生僻字屏蔽：语音结果里没有挡掉的字，含挡掉的字的你的词不替换
+<!-- 061-rare-char-block.md §5.3：默认（只挡扩展区）下语音不受影响，要自己造条件 -->
+- **前提**：B0-设置（导入了语音包）；在 **用户词库 → 手动添加的词** 里加「徐竫」（xu jing；竫 读 jìng，是三级字，和「静」同音）。
+- **操作**：回测试页，按住空格说"麻烦你去找一下徐婧"（VO-38 的片段），松开；删光。**词库与短语 → 生僻字屏蔽** 打开开关，勾上「三级字」，返回；再说一遍。
+- **预期**：第一次框里是「麻烦你去找一下徐竫」（同音换成你的词，同 VO-38）；屏蔽三级字以后是「徐静」（或别的说法），没有「竫」：含挡掉的字的词不当热词，也不当同音替换的目标。识别结果本身含挡掉的字时换成识别器的下一个说法（几个说法都有它时照识别器写的给），这一项片段里造不出，只由下面的 JVM 行查。
+- **JVM**：ime-core `VoiceChoiceTest.aHypothesisWithACharacterHeldBackIsPassedOver`（先挑不含挡掉的字的说法，都含时取第一个）、`VoiceHotwordsTest.aWordWithACharacterHeldBackIsNoHotwordAndTheCharactersAreNeverCompleted`（含挡掉的字的词不当热词、不给同音替换，挡掉的字里识别器有的告诉识别器不补全）、`RareCharContractTest.voiceAsksWhichOfItsTextsAreHeld`（引擎答哪些文本含挡掉的字）；模拟器上（导入了语音包）跑同音替换这一半。
+
+### VO-55 [P1] 松开后很快出字
+<!-- 061-voice-960-impl-report.md：松开到出字的时间（1920 ms 分块、补零 2.42 s；960 ms 分块量过没采用） -->
+- **前提**：B0-语音（语音包 v2）。
+- **操作**：长按空格说"今天天气很好"，说完就松开；再用"我们走吧"做一遍。
+- **预期**：松开后很快（真机约 1.4 秒）框里是「今天天气很好」「我们走吧」。
+- **JVM**：无（时间只在设备上量）。
+- **模拟器**：播 `jintian`、`zouba`，抬起定在语音结束时（同 VO-23 的计时，偏移在 [−100, +100] ms 的才算），每段数 3 次：字要对，调试日志 `voice timing:` 的 `stopToSaidMs`（松开到上屏）中位数 ≤ 1500 ms（粗线：2026-11-14 同一台模拟器两次的中位数 1029 和 509 ms，差一倍；真机那条才是门槛）。字对、只是时间超了，先在只开一台模拟器时重跑，重跑还超才算变慢。
+- **真机（发版时）**：OnePlus 6T 上同样做 30 句以上，长短都有，`stopToSaidMs` 平均 ≤ 1.45 s、九成 ≤ 1.85 s（2026-11-14 实测 40 句：1920 ms 分块 1.38 s、1.74 s；量过没采用的 960 ms 分块 1.24 s、1.37 s）。
+
+### VO-56 [P2] 用户词以「酒店」开头时，说「九键」不被听成酒店
+<!-- 20bbb03e0：热词只开了个头就到了一段的末尾，不再加分（n-best 按 FinalizedLogProb 排） -->
+- **前提**：B0-设置（导入了语音包），在 **词库与短语 → 用户词库** 里手动加「酒店式公寓」（拼音 jiu dian shi gong yu）。
+- **操作**：回测试页，按住空格说"九键输入法"，松开。
+- **预期**：框里是「九键输入法」，不是「酒店…」开头的（以前用户词或语音包的热词以「酒店」开头时，没说完的热词也加分，「九键」常被听成「酒店」）。
+- **JVM**：无（在语音识别的原生代码里，`~/voice-eval` 的九键片段集量过：手动加词后 396 段里对的从 283 到 306）。
+- **模拟器**：播 `jiujian`（`uat/tools/voice-clips.py` 生成，要 `~/voice-eval` 的模型），同 VO-14。

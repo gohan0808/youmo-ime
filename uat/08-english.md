@@ -121,3 +121,21 @@
 - **操作**：九键按 8 4 3，长按候选「the」选 **屏蔽**；清空再按 8 4 3。全键盘划 h-e-l-o（上屏「hello 」），长按候选里的「help」选 **屏蔽**，再点剩下的另一个词；再划一次，长按第一个候选「hello」。
 - **预期**：843 的「the」能屏蔽，之后 843 不再给「the」；「help」从候选里消失，其余还在，点的词替换掉「hello 」；滑行已上屏的那个词（第一个候选）长按没有 **屏蔽**。
 - **JVM**：`EnglishBlockOffersTest`；设备上不跑。
+
+### EN-29 [P2] 英文候选长按：没有读音行，菜单和以前一样
+- **前提**：B0，英文。
+- **操作**：打 hello，长按「hello」。
+- **预期**：第一行是「hello」本身，没有读音、没有 ›；菜单项和以前一样。
+- **JVM**：ime-core `EnginesWordCardTest`（英文没有卡）；app `CandidateMenuUatTest.noReadingLineWhereTheEngineHasNoCard`；设备上不跑。
+
+### EN-30 [P1] 全键盘英文：按偏的键看落点，点在边上改成旁边的键，点在正中不改
+- **前提**：B0-英文。
+- **操作**：在「普通文本」框打 hi、空格，点一下 Shift，再打 s t e b e，其中 `b` 点在键的左边缘（离 `v` 近的那一侧，从左边量键宽的 5% 处），按空格；删光，照样打 hi、空格、Shift、s t e b e，每个键都点在正中，按空格。
+- **预期**：第一次上屏「hi Steve 」：点在边上的 `b` 按 `v` 读。第二次上屏「hi Stebe 」：自己打了大写的词当名字看，只有按到旁边键时才改，点在正中的 `b` 不算按偏，照打的留着。落点没传到时两次都会改成 Steve，所以两次结果不同才说明落点读到了。全键盘英文以前按一张固定的相邻键表算按偏，现在看落点。
+- **JVM**：`EnglishTouchTest.aNameTypedWithAKeyBesideIsCorrectedByWhereItWasTapped`（本例的步骤：Stebe 的 b 靠 v 点改成 Steve，正中点留 Stebe，没有落点也改成 Steve）、`EnglishTouchTest.whereAKeyWasTappedSaysWhetherItWasTheOneBeside`（`maxCorrection` 收紧时的同一规则：点在边上改成 hello，点在正中不改，没有落点时照旧按相邻键改）、`EnglishDecoderTest.aTapsPlaceSetsWhatTheKeyBesideItCosts`；设备上照跑（落点要真的点出来）。
+
+### EN-31 [P1] 九键英文：数字键贴着旁边键的边点，也按那个键猜词
+- **前提**：B0-英文；在 **输入法 → 英文** 里把 **键盘** 选成「九键」（九键英文打法是预测），回到「普通文本」框切到英文。
+- **操作**：按 9，再点 5 键贴着左边缘（靠 4 的那一侧，离边不到键宽的 1/10，越贴边越好），再按 3 6，看框里正在打的词和候选；删光，9 5 3 6 都点在正中，再看框里。
+- **预期**：第一次框里正在打的是「when」（9436，4 按成了 5），首选是 when；第二次是每个键的第一个字母「wjdm」（9536 对不上任何词）。点得离边超过 1/10 键宽就不再当成按偏。按原样就对得上词的（比如 4356 是 helm），按偏读出的词通常不给。
+- **JVM**：`EnglishUatTest.aNineKeyTappedAtTheEdgeOfTheNextIsReadAsIt`（:lib:ime-eval:uatTest，真数据：贴边 when，正中和离边 1/10 键宽之外 wjdm），`EnglishNineKeysTest.aDigitTappedAtTheEdgeOfTheNextIsReadAsThatOneToo`、`EnglishDecoderTest.onTheNineKeysADigitTappedByTheNextIsItsLettersToo`、`EnglishDecoderTest.aSlipOnTheNineKeysCostsMoreWhereTheKeysAsTypedSpellAWord`，app `NeighbourTouchTest.englishsNineKeysDigitsGoWithTheirPlace`（九键英文的数字键带着落点交给引擎）；设备上照跑（落点要真的点出来）。

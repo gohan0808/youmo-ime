@@ -16,15 +16,15 @@ import org.fcitx.fcitx5.android.core.InputMethodNames
 import org.fcitx.fcitx5.android.daemon.HostConnection
 import org.fcitx.fcitx5.android.daemon.launchOnReady
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
-import org.fcitx.fcitx5.android.data.theme.ThemeManager
 import org.fcitx.fcitx5.android.engine.learn.control.LearningOp
-import org.fcitx.fcitx5.android.engine.learn.control.LearningResult
 import org.fcitx.fcitx5.android.host.StatusEntry
 import org.fcitx.fcitx5.android.input.FcitxInputMethodService
+import org.fcitx.fcitx5.android.input.bar.ToolbarButton
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardArea
 import org.fcitx.fcitx5.android.input.keyboard.KeyboardPicker
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardStyles
 import org.fcitx.fcitx5.android.input.keyboard.KeyboardWindow
-import org.fcitx.fcitx5.android.input.keyboard.OneHanded
-import org.fcitx.fcitx5.android.input.keyboard.TextKeyboard
+import org.fcitx.fcitx5.android.input.learning.clearAndTell
 import org.fcitx.fcitx5.android.input.wm.InputWindowManager
 import org.fcitx.fcitx5.android.utils.AppUtil
 
@@ -44,12 +44,16 @@ class PanelActions(
 
     val habitsOn get() = useHabits.getValue()
 
-    val floating get() = ThemeManager.prefs.floatingKeyboard.getValue()
+    // the shape the keyboard was made on: each its own 键盘样式, the toggles that one's (not the screen there is
+    // now, a turn's view not yet made)
+    private val screen get() = service.screenBuilt ?: KeyboardArea.screen(context)
 
-    val oneHanded get() = ThemeManager.prefs.oneHanded.getValue() != OneHanded.Off
+    val floating get() = KeyboardStyles.of(screen).floating
 
-    // floating or the letters split, one-handed mode is of no use: not offered
-    val oneHandedOffered get() = !floating && !TextKeyboard.splits(context)
+    val oneHanded get() = KeyboardStyles.of(screen).oneHanded
+
+    // floating, one-handed mode is of no use: not offered. Split, one-handed over it, and off is split again
+    val oneHandedOffered get() = !floating
 
     private var popupMenu: PopupMenu? = null
 
@@ -57,7 +61,7 @@ class PanelActions(
     private val keyboardPicker by lazy { KeyboardPicker(context) { fcitx.runImmediately { inputMethodEntryCached }.uniqueName } }
 
     /** Whether the input method on has keyboards to choose from (I1 Q1). */
-    val keyboardsOffered get() = keyboardPicker.offered() != null
+    val keyboardsOffered get() = keyboardPicker.offers()
 
     fun activate(action: StatusEntry) {
         fcitx.launchOnReady { it.activateAction(action.id) }
@@ -71,16 +75,24 @@ class PanelActions(
 
     fun themes() = AppUtil.launchMainToThemeList(context)
 
-    // on, at the side it was last at, or off; then, from the panel, the keyboard as it now goes
-    fun toggleOneHanded(reattach: Boolean = true) {
-        val oneHanded = ThemeManager.prefs.oneHanded
-        val side = ThemeManager.prefs.oneHandedSide
-        oneHanded.setValue(if (oneHanded.getValue() == OneHanded.Off) side.getValue() else OneHanded.Off)
-        if (reattach) windowManager.attachWindow(KeyboardWindow)
+    // on, at the side it was last at, or off; then, from the panel, the keyboard as it now goes. Split to or from
+    // it the input view is made anew (the service), on its letters already: this one, gone, attaches nothing; from
+    // the bar TalkBack's focus goes back to the new view's button (§3.6)
+    fun toggleOneHanded(fromBar: Boolean = false) {
+        val s = screen
+        val splitBefore = KeyboardStyles.of(s).splits
+        if (fromBar) service.focusAfterStyleRebuild = ToolbarButton.OneHanded
+        try {
+            KeyboardStyles.toggleOneHanded(s)
+        } finally {
+            service.focusAfterStyleRebuild = null
+        }
+        val rebuilt = KeyboardStyles.of(s).splits != splitBefore
+        if (!fromBar && !rebuilt) windowManager.attachWindow(KeyboardWindow)
     }
 
     // the input view is made anew for it, on the letters
-    fun toggleFloating() = ThemeManager.prefs.floatingKeyboard.run { setValue(!getValue()) }
+    fun toggleFloating() = KeyboardStyles.toggleFloating(screen)
 
     // the app's preference (read when the engine is made), and the engine told now
     fun toggleHabits() {
@@ -127,15 +139,9 @@ class PanelActions(
             .setMessage(R.string.learning_clear_recent_message)
             .setPositiveButton(R.string.learning_clear) { _, _ ->
                 scope.launch {
-                    val cleared = fcitx.runOnReady { learning(LearningOp.ClearRecent(span)) }
-                    // not on disk (the phone locked since it started) is not now; a disk that failed, again (review-E-ui S6)
-                    service.say(
-                        when (cleared) {
-                            is LearningResult.Cleared -> R.string.learning_cleared
-                            LearningResult.Failed -> R.string.learning_clear_failed
-                            else -> R.string.learning_not_now
-                        }
-                    )
+                    // not on disk (the phone locked since it started) is not now; a disk that failed, again, or a
+                    // restart first while learning is not saving (review-E-ui S6, F8022)
+                    service.say(fcitx.runOnReady { clearAndTell(LearningOp.ClearRecent(span)) })
                 }
             }
             .setNegativeButton(android.R.string.cancel, null)
@@ -146,5 +152,11 @@ class PanelActions(
     companion object {
         /** fcitx's 简繁 action (chttrans), by the name it gives it */
         const val TRAD_SIMP = "chttrans"
+
+        /** The bar's buttons that are the panel's own entries too: one with no slot on the bar is there already */
+        val OWN = setOf(
+            ToolbarButton.TradSimp, ToolbarButton.Floating, ToolbarButton.OneHanded, ToolbarButton.Habits, ToolbarButton.ClearRecent,
+            ToolbarButton.Theme, ToolbarButton.InputMethodSettings, ToolbarButton.Keyboard,
+        )
     }
 }

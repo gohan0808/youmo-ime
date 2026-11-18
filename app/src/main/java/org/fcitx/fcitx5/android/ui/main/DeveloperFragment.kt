@@ -12,6 +12,8 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts.CreateDocument
 import androidx.appcompat.app.AlertDialog
 import androidx.lifecycle.lifecycleScope
+import androidx.preference.Preference
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
@@ -22,13 +24,15 @@ import org.fcitx.fcitx5.android.data.clipboard.ClipboardManager
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
 import org.fcitx.fcitx5.android.ui.common.PaddingPreferenceFragment
 import org.fcitx.fcitx5.android.ui.main.modified.MySwitchPreference
+import org.fcitx.fcitx5.android.ui.main.settings.search.PageEntry
+import org.fcitx.fcitx5.android.ui.main.settings.search.SearchHighlight
+import org.fcitx.fcitx5.android.ui.main.settings.search.SearchablePage
 import org.fcitx.fcitx5.android.utils.addPreference
 import org.fcitx.fcitx5.android.utils.iso8601UTCDateTime
 import org.fcitx.fcitx5.android.utils.setupForest
 import org.fcitx.fcitx5.android.utils.startActivity
 import org.fcitx.fcitx5.android.utils.toast
 import timber.log.Timber
-import java.io.File
 
 class DeveloperFragment : PaddingPreferenceFragment() {
 
@@ -77,7 +81,7 @@ class DeveloperFragment : PaddingPreferenceFragment() {
 
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         preferenceScreen = preferenceManager.createPreferenceScreen(requireContext()).apply {
-            addPreference(R.string.real_time_logs) {
+            addPreference(R.string.real_time_logs, key = LOGS_KEY) {
                 startActivity<LogActivity>()
             }
             addPreference(MySwitchPreference(context).apply {
@@ -99,20 +103,22 @@ class DeveloperFragment : PaddingPreferenceFragment() {
                 isIconSpaceReserved = false
                 isSingleLineTitle = false
             })
-            addPreference(R.string.restart_fcitx_instance) {
+            addPreference(R.string.restart_fcitx_instance, key = RESTART_KEY) {
                 AlertDialog.Builder(context)
                     .setTitle(R.string.restart_fcitx_instance)
                     .setMessage(R.string.restart_fcitx_instance_confirm)
                     .setNegativeButton(android.R.string.cancel, null)
                     .setPositiveButton(android.R.string.ok) { _, _ ->
                         lifecycleScope.launch {
-                            HostDaemon.restartFcitx()
-                            context.toast(R.string.done)
+                            // waits for a host still starting: off the main thread
+                            val restarted = withContext(Dispatchers.IO) { HostDaemon.restartFcitx() }
+                            // one that stayed starting was not restarted, or was and the new one is starting still: not said done (R25r2 F7883)
+                            context.toast(if (restarted) R.string.done else R.string.restart_fcitx_still_starting)
                         }
                     }
                     .show()
             }
-            addPreference(R.string.clear_clb_db) {
+            addPreference(R.string.clear_clb_db, key = CLEAR_CLIPBOARD_KEY) {
                 AlertDialog.Builder(context)
                     .setTitle(R.string.clear_clb_db)
                     .setMessage(R.string.clear_clp_db_confirm)
@@ -127,7 +133,15 @@ class DeveloperFragment : PaddingPreferenceFragment() {
                     .setNegativeButton(android.R.string.cancel, null)
                     .show()
             }
-            addPreference(R.string.capture_heap_dump) {
+            // 语音先问再记's counts, for the owner to see whether it asks too often (061-voice-learn-from-edits.md §6)
+            addPreference(Preference(context).apply {
+                val internal = AppPrefs.getInstance().internal
+                title = getString(R.string.voice_ask_counts, internal.voiceAskShown.getValue(), internal.voiceAskTaken.getValue())
+                isSelectable = false
+                isIconSpaceReserved = false
+                isSingleLineTitle = false
+            })
+            addPreference(R.string.capture_heap_dump, key = HEAP_DUMP_KEY) {
                 val fileName = "${context.packageName}_${iso8601UTCDateTime()}.hprof"
                 val file = context.cacheDir.resolve(fileName)
                 hprofFile = file
@@ -139,8 +153,26 @@ class DeveloperFragment : PaddingPreferenceFragment() {
         }
     }
 
-    companion object {
+    // found by the search a step lower than the rest (dev/design/061-settings-search.md §8 Q6); the counts are
+    // no setting, said only
+    companion object : SearchablePage {
         private const val HPROF_FILE = "hprof_file"
+        private const val LOGS_KEY = "real_time_logs"
+        private const val RESTART_KEY = "restart_fcitx"
+        private const val CLEAR_CLIPBOARD_KEY = "clear_clipboard_db"
+        private const val HEAP_DUMP_KEY = "capture_heap_dump"
+
+        override fun searchEntries(context: Context): List<PageEntry> {
+            val internal = AppPrefs.getInstance().internal
+            return listOf(
+                R.string.real_time_logs to LOGS_KEY,
+                R.string.verbose_log to internal.verboseLog.key,
+                R.string.editor_info_inspector to internal.editorInfoInspector.key,
+                R.string.restart_fcitx_instance to RESTART_KEY,
+                R.string.clear_clb_db to CLEAR_CLIPBOARD_KEY,
+                R.string.capture_heap_dump to HEAP_DUMP_KEY,
+            ).map { (title, key) -> PageEntry(context.getString(title), SearchHighlight.PREF + key) }
+        }
     }
 
 }

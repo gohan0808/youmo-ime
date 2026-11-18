@@ -176,6 +176,56 @@ class ScreenTest(unittest.TestCase):
         self.assertEqual(new["1"], clash["1"])
         self.assertEqual(new["q"], clash["q"])
 
+    def test_the_way_back_is_tapped_by_its_id_until_the_letters_are_up(self):
+        # what a case leaves up, as Dumper writes the canvas: its way back is the scene's id back
+        # (返回, ABC before 0.6.1), the letters have the globe; the nine keys' 2 says ABC and is no way back
+        def screen(*keys):
+            nodes = "".join(f'<node clickable="true" package="{uat.PKG}" text="{t}" key="{k}" resource-id="{r}" '
+                            f'bounds="[{i * 10},0][{i * 10 + 10},10]"/>' for i, (t, k, r) in enumerate(keys))
+            return uat.Screen(f'<hierarchy><window type="2">{nodes}</window></hierarchy>')
+        letters = screen(("ABC", "2", ""), ("", "language", f"{uat.PKG}:id/button_lang"))
+        pad = screen(("符", "symbols", ""), ("返回", "back", ""))
+        panel = screen(("返回", "back", ""), ("123", "numbers", ""))
+        # four reads of the same screen, each its own object: the one returned is the one read after the third tap
+        stuck = [screen(("返回", "back", "")) for _ in range(4)]
+        for name, shown, taps in (("the letters: nothing tapped, not their ABC", [letters], 0),
+                                  ("a number pad", [pad, letters], 1),
+                                  ("the symbol panel over a number pad", [panel, pad, letters], 2),
+                                  ("a way back that does not go: three taps, then left", stuck, 3)):
+            with self.subTest(name):
+                d = uat.Device("5556")
+                tapped, screens = [], iter(shown[1:])
+                d.tap = lambda xy, after=None: tapped.append(xy)
+                d.screen = lambda: next(screens)
+                last = d.to_letters(shown[0])
+                self.assertEqual(taps, len(tapped))
+                self.assertIs(shown[taps], last)
+
+    def test_the_pickers_roots_drawer_is_found_by_its_name_or_blocks(self):
+        # the ☰ where this AVD does not have it: tapped where it is; 下载 listed with no ☰ (a wide window's roots):
+        # tapped as it is (review R26 F8494); neither on screen blocks, no blind tap
+        def screen(desc, text=""):
+            node = f'<node package="com.android.documentsui" content-desc="{desc}" bounds="[10,300][110,400]"/>' if desc else ""
+            if text:
+                node += f'<node package="com.google.android.documentsui" text="{text}" bounds="[0,500][400,600]"/>'
+            return uat.Screen(f'<hierarchy><window type="1">{node}</window></hierarchy>')
+        d = uat.Device("5556")
+        tapped, texts = [], []
+        d.tap = lambda xy, after=None: tapped.append(xy)
+        d.tap_text = lambda t, **kw: texts.append(t)
+        uat.to_downloads(d, screen("显示根目录"))
+        self.assertEqual([(60, 350)], tapped)
+        self.assertEqual(["下载"], texts)
+        tapped.clear()
+        texts.clear()
+        uat.to_downloads(d, screen(None, "下载"))
+        self.assertEqual([(200, 550)], tapped)
+        self.assertEqual([], texts)
+        tapped.clear()
+        with self.assertRaises(uat.Blocked):
+            uat.to_downloads(d, screen(None))
+        self.assertEqual([], tapped)
+
     def test_the_input_methods_touchable_region_is_read_from_dumpsys_input(self):
         # InputDispatcher's window line as redroid 14 printed it; the strip's band and the keyboard's
         # joined by |, an empty one as <empty>, the list ended by a comma
@@ -461,6 +511,20 @@ class JvmTest(unittest.TestCase):
         self.assertEqual(["WD-35: needs= names LexiconUatTest.aPhrase, whose @Uat is WD-19's",
                           "WD-35: needs= names LexiconUatTest.gone, which has no @Uat"],
                          uat.needs_problems(cases, found))
+
+    def test_a_multiplatform_jvm_tests_name_is_its_method(self):
+        # keyboard-scene's jvmTest names a method "name[jvm]": read as is, its case would have no result
+        self.write("k/TEST-org.x.PopupsTest.xml", '<testsuite name="org.x.PopupsTest">'
+                   '<testcase name="menu[jvm]" classname="org.x.PopupsTest" time="0.1"/></testsuite>')
+        results = uat.junit_results([os.path.join(self.tmp.name, "k")])
+        self.assertEqual("通过", uat.jvm_record({"KB-105": [("org.x.PopupsTest", "menu")]}, results)["KB-105"][0])
+
+    def test_a_testcase_with_no_name_is_read_not_raised(self):
+        # JUnit XML always names a testcase; one without is read under "" rather than raising TypeError
+        self.write("n/TEST-org.x.KeysTest.xml", '<testsuite name="org.x.KeysTest">'
+                   '<testcase classname="org.x.KeysTest" time="0.1"/></testsuite>')
+        results = uat.junit_results([os.path.join(self.tmp.name, "n")])
+        self.assertEqual("通过", results[("org.x.KeysTest", "")][0])
 
     def test_a_case_fails_with_any_of_its_tests_and_is_blocked_without_a_result(self):
         self.write("r/TEST-org.x.KeysTest.xml", '<testsuite name="org.x.KeysTest">'
@@ -960,12 +1024,73 @@ class ClearAndPacksTest(unittest.TestCase):
         dev.assert_not_called()
 
     def test_a_pack_already_at_the_builds_version_is_not_copied_again(self):
-        d = self.device(lambda cmd: "Result: Bundle[{text=v2}]")
+        sha = uat.file_sha256(__file__)
+        d = self.device(lambda cmd: f"{sha} g1-1\n" if cmd.startswith("cat ")
+                        else "g1-1\n" if cmd.startswith("run-as ") else "Result: Bundle[{text=v2}]")
         with mock.patch.object(uat, "BUILD", "debug"), \
                 mock.patch.object(uat, "pack_files", return_value={"text": (__file__, 2)}), \
                 mock.patch.object(uat.subprocess, "run") as run:
             uat.import_packs(d, voice=False)
         run.assert_not_called()
+
+    def test_a_pack_imported_by_hand_since_the_mark_is_imported_again(self):
+        # the app reports the build's version and the mark names the build's file, but another file of that
+        # version was imported in Settings since (a new generation); kept, the run would test that other pack
+        sha = uat.file_sha256(__file__)
+        rows = ((f"{sha} g1-1", "g2-1", "imported by hand after the runner's import: another generation"),
+                (sha, "g2-1", "a mark of the runner before generations were marked, a hand import after it"))
+        for mark, generation, why in rows:
+            with self.subTest(why):
+                d = self.device(lambda cmd: mark + "\n" if cmd.startswith("cat ")
+                                else generation + "\n" if cmd.startswith("run-as ")
+                                else "Result: Bundle[{result=imported:text:v2}]" if "--method import" in cmd
+                                else "Result: Bundle[{text=v2}]")
+                ok = SimpleNamespace(returncode=0, stdout="", stderr="")
+                with mock.patch.object(uat, "BUILD", "debug"), \
+                        mock.patch.object(uat, "pack_files", return_value={"text": (__file__, 2)}), \
+                        mock.patch.object(uat.subprocess, "run", return_value=ok) as run:
+                    uat.import_packs(d, voice=False)
+                run.assert_called_once()
+
+    def test_a_generation_not_readable_after_an_import_is_said(self):
+        # the mark is then "<sha> ", which never matches: each run copies the pack over adb again, said once a run
+        d = self.device(lambda cmd: "" if cmd.startswith(("cat ", "run-as "))
+                        else "Result: Bundle[{result=imported:text:v2}]" if "--method import" in cmd
+                        else "Result: Bundle[{text=v2}]")
+        ok = SimpleNamespace(returncode=0, stdout="", stderr="")
+        out = io.StringIO()
+        with mock.patch.object(uat, "BUILD", "debug"), \
+                mock.patch.object(uat, "pack_files", return_value={"text": (__file__, 2)}), \
+                mock.patch.object(uat.subprocess, "run", return_value=ok), contextlib.redirect_stdout(out):
+            uat.import_packs(d, voice=False)
+        self.assertIn("text pack's generation not readable", out.getvalue())
+
+    def test_a_run_takes_a_gates_emulator_dropping_its_mark(self):
+        # gates.py --keep leaves 5560 up and marked; a run on it (--devices 5560) makes it the run's, so a later
+        # gate refuses it instead of killing it under the run
+        d = self.device(lambda cmd: "1\n" if cmd.startswith("getprop") else "")
+        stop = RuntimeError("past the devices")
+        with mock.patch.object(uat, "BUILD", "debug"), mock.patch.object(uat, "Device", return_value=d), \
+                mock.patch.object(uat, "ours"), mock.patch.object(uat, "need_root"), mock.patch.object(uat, "install"), \
+                mock.patch.object(uat, "version", side_effect=stop), mock.patch.object(uat, "HTTP_PORT", 8000):
+            d.adb = lambda *a, **k: None
+            with self.assertRaises(RuntimeError):
+                uat.run_on(SimpleNamespace(no_voice=True), [], ["5560"])
+        self.assertIn(f"rm -f {uat.GATE_MARK}", d.calls)
+
+    def test_a_pack_rebuilt_at_the_same_version_is_imported_and_marked(self):
+        # the build's pack has another file than the one last imported: same version, new content
+        d = self.device(lambda cmd: "0" * 64 + " g1-1\n" if cmd.startswith("cat ")
+                        else "g3-1\n" if cmd.startswith("run-as ")
+                        else "Result: Bundle[{result=imported:text:v2}]" if "--method import" in cmd
+                        else "Result: Bundle[{text=v2}]")
+        ok = SimpleNamespace(returncode=0, stdout="", stderr="")
+        with mock.patch.object(uat, "BUILD", "debug"), \
+                mock.patch.object(uat, "pack_files", return_value={"text": (__file__, 2)}), \
+                mock.patch.object(uat.subprocess, "run", return_value=ok) as run:
+            uat.import_packs(d, voice=False)
+        run.assert_called_once()
+        self.assertTrue(any(f"{uat.file_sha256(__file__)} g3-1" in c and "text.sha256" in c for c in d.calls))
 
 
 class PlugTest(unittest.TestCase):

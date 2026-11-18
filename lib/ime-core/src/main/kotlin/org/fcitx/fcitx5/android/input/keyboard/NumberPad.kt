@@ -15,10 +15,11 @@ import org.fcitx.fcitx5.android.input.editing.NumberKind
  * the digits stay where they are on every pad.
  *
  * @param left the column left of the digits, top to bottom
- * @param corner the key right of 3, above the space
+ * @param besideNine the key right of 9, below the space (⌫ right of 3 on every pad, as on the nine keys: 0.6.1;
+ *   before, this key was right of 3, the corner)
  * @param bottom the bottom row's: left of the symbols key, right of 0, and left of Return
  */
-enum class NumberPad(val left: List<String>, val corner: String, val bottom: List<String>) {
+enum class NumberPad(val left: List<String>, val besideNine: String, val bottom: List<String>) {
     FULL(listOf("+", "-", "*"), "/", listOf(",", "=", ".")),
 
     /** A PIN's: the digits alone. */
@@ -39,6 +40,9 @@ enum class NumberPad(val left: List<String>, val corner: String, val bottom: Lis
     /** The name of this pad's layout; [FULL]'s is the number keyboard's. */
     val layout: String get() = if (this == FULL) FULL_LAYOUT else "$FULL_LAYOUT.$name"
 
+    /** This pad as number.xml's `pad=` and a layout's `pads=` name it: `full`, `signed-decimal`… */
+    val id: String get() = name.lowercase().replace('_', '-')
+
     companion object {
         /** The number keyboard's layout name, which every 123 key names. */
         const val FULL_LAYOUT = "Number"
@@ -57,6 +61,9 @@ enum class NumberPad(val left: List<String>, val corner: String, val bottom: Lis
 
         /** Every pad's layout name. */
         val layouts: Set<String> = entries.mapTo(LinkedHashSet()) { it.layout }
+
+        /** The pad keyboard [name] shows ([KeyboardNames]: a layout of the user's drawn there too); null for none of them. */
+        fun shownBy(name: String): NumberPad? = KeyboardNames.base(name).let { base -> entries.firstOrNull { it.layout == base } }
     }
 }
 
@@ -73,8 +80,14 @@ class FieldPad {
 
     var field: NumberPad? = null
 
+    /**
+     * The user's number board ([PanelLayouts.drawn]; null: the app's): the pads it is for shown by it, each by its name
+     * with the layout's ([KeyboardNames.of]), so a file replaced is a keyboard made anew; the app's pads for the rest.
+     */
+    var numbers: CustomChoice? = null
+
     /** [current], the layout shown, as the switching knows it. */
-    fun known(current: String): String = if (current in NumberPad.layouts) NumberPad.FULL_LAYOUT else current
+    fun known(current: String): String = if (NumberPad.shownBy(current) != null) NumberPad.FULL_LAYOUT else current
 
     /**
      * What to show of [target], the switching's choice with [current] shown: the field's pad for
@@ -87,7 +100,8 @@ class FieldPad {
             LayoutSwitchPolicy.Target.Unchanged -> known(current)
             LayoutSwitchPolicy.Target.SymbolPicker -> return target
         }
-        val layout = field?.takeIf { name == NumberPad.FULL_LAYOUT }?.layout ?: name
+        val pad = field?.takeIf { name == NumberPad.FULL_LAYOUT } ?: NumberPad.shownBy(name)
+        val layout = pad?.let { KeyboardNames.of(it.layout, numbers?.takeIf { n -> PanelLayouts.draws(n, it) }) } ?: name
         return if (layout == current) LayoutSwitchPolicy.Target.Unchanged else LayoutSwitchPolicy.Target.Keyboard(layout)
     }
 }
