@@ -25,8 +25,7 @@ private const val LAYOUTS = "../keyboard-scene/src/commonMain/layouts"
 
 class ThemePackCheckTest {
 
-    // the default look as 4.0: [before] ahead of its first style (a picture, fonts), [styles] after its
-    // styles, [after] at its end (icons), [meta] before its colours, [colors] over its colours
+    // the default look: [before] ahead of its first style, [styles] after them, [after] at its end, [meta]/[colors] around its colours
     private fun theme(
         styles: String = "",
         meta: String = "",
@@ -69,6 +68,21 @@ class ThemePackCheckTest {
         assertEquals(ThemePackCheck.Files(emptySet(), null, emptySet(), emptySet(), emptySet(), null), ThemePackCheck.files(theme()))
     }
 
+    // the dark version's picture and the stickers are the pack's too: placed, checked and exported with the rest
+    @Test
+    fun theDarkPictureAndTheStickersAreListed() {
+        val t = theme(
+            styles = """<style select="qwerty/q" sticker="q.png"/><style select="qwerty/q:pressed" sticker="q-p.webp"/><style select="qwerty/w" sticker="none"/>""",
+            before = """<picture src="a.jpg"><cut orientation="portrait" file="a-p.png"/></picture><picture variant="dark" src="d.jpg"><cut orientation="portrait" file="d-p.png"/></picture>""",
+        )
+        val f = ThemePackCheck.files(t)
+        assertEquals(setOf("d.jpg", "d-p.png"), f.darkPictures)
+        assertEquals(setOf("q.png", "q-p.webp"), f.stickers)
+        assertEquals(setOf("a.jpg", "a-p.png", "d.jpg", "d-p.png", "q.png", "q-p.webp"), f.all)
+        // a pack without its sticker still lists and imports: 0.6.2 never copied a reserved one
+        assertEquals(setOf("a.jpg", "a-p.png", "d.jpg", "d-p.png"), f.required)
+    }
+
     // the app's boards, as keyboard-scene has them (the app copies the same files)
     private val boards: List<BlankKeys.Board> by lazy {
         val dir = File(LAYOUTS)
@@ -103,8 +117,7 @@ class ThemePackCheckTest {
         // an image only pressed, or on another key: blank
         assertEquals(1, found("""<style select="*/enter:pressed" fill="image(e.png, 0 0 0 0, 3x)"/>""" + hide))
         assertEquals(1, found("""<style select="*/space" fill="image(e.png, 0 0 0 0, 3x)"/>""" + hide))
-        // the image not the face that wins: a later tie, a board's own key, a scene, two scenes, a board's every
-        // key in a scene, flat, a class the key has
+        // the image not the face that wins: a later tie, a board's own key, scenes, flat, a class the key has
         for (
             over in listOf(
                 """<style select="*/enter" fill="#ffffffff"/>""",
@@ -142,8 +155,7 @@ class ThemePackCheckTest {
         assertTrue("$ms ms", ms < CHECK_BUDGET_MS)
     }
 
-    // the worst a pack can ask short of being refused: the largest built-in theme, its key styles naming scenes
-    // whose sets to try come near the most tried, within the time an import may take
+    // the worst a pack can ask short of refusal: the largest built-in theme with scene sets near the cap, within import time
     @Test
     fun theCheckTakesLittleTimeAtItsWorst() {
         val scenes = (1..4).flatMap { listOf("im=s$it", "keyboard=k$it") } + listOf("dark", "flat", "landscape", "compact", "split")

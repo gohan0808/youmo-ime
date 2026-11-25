@@ -7,7 +7,6 @@ package org.fcitx.fcitx5.android.input.keyboard
 import org.fcitx.fcitx5.android.input.keyboard.SwipeLayers.Layer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -35,9 +34,6 @@ class SwipeLayersTest {
         assertEquals(Layer.Shortcut, layers.layerOf(-1))
         assertEquals(Layer.Symbol, layers.layerOf(2))
         assertEquals(Layer.Off, layers.layerOf(0))
-        assertEquals(true, layers.wayOf(Layer.Shortcut))
-        assertEquals(false, layers.wayOf(Layer.Symbol))
-        assertNull(SwipeLayers(Layer.Off, Layer.Symbol).wayOf(Layer.Shortcut))
     }
 
     @Test

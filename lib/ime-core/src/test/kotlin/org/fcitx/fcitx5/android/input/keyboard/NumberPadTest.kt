@@ -4,42 +4,49 @@
  */
 package org.fcitx.fcitx5.android.input.keyboard
 
+import org.fcitx.fcitx5.android.assertRows
+import org.fcitx.fcitx5.android.input.editing.EditorTraits
 import org.fcitx.fcitx5.android.input.editing.NumberKind
 import org.fcitx.fcitx5.android.input.keyboard.LayoutSwitchPolicy.Target
+import org.fcitx.fcitx5.android.scene.keys.ScrollDefaults
+import org.fcitx.fcitx5.android.scene.keys.ScrollItem
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NumberPadTest {
 
-    private fun keys(pad: NumberPad) = (pad.left + pad.besideNine + pad.bottom).filter { it.isNotEmpty() }.toSet()
+    private fun list(pad: NumberPad?) = ScrollDefaults.of(pad!!.list)!!.map { (it as ScrollItem.Text).text }.toSet()
 
     @Test
-    fun eachFieldGetsThePadOfWhatItTakes() {
-        assertNull(NumberPad.of(null))
-        // a number field that says no more: the whole pad, a price's point and a minus at hand
-        assertEquals(NumberPad.FULL, NumberPad.of(NumberKind.INTEGER))
-        // a PIN: the digits alone
-        assertEquals(NumberPad.DIGITS, NumberPad.of(NumberKind.PIN))
-        assertEquals(emptySet<String>(), keys(NumberPad.DIGITS))
-        assertEquals(setOf("-"), keys(NumberPad.of(NumberKind.SIGNED)!!))
-        assertEquals(setOf("."), keys(NumberPad.of(NumberKind.DECIMAL)!!))
-        assertEquals(setOf("-", "."), keys(NumberPad.of(NumberKind.SIGNED_DECIMAL)!!))
-        assertEquals(setOf("+", "*", "#"), keys(NumberPad.of(NumberKind.PHONE)!!) - setOf("-", "(", ")", ","))
-        for (kind in listOf(NumberKind.DATE, NumberKind.TIME, NumberKind.DATETIME)) {
-            assertEquals(setOf("-", "/", ":", "."), keys(NumberPad.of(kind)!!))
-        }
-    }
+    fun eachFieldGetsThePadOfWhatItTakes() = assertRows(
+        "a text field: the letters" to { assertNull(NumberPad.of(null)) },
+        // an amount declared decimal takes a minus: what a field declares is no list of what it takes
+        "any number field, decimal, signed or a PIN: the whole pad, a point and a minus at hand" to {
+            assertEquals(NumberPad.FULL, NumberPad.of(NumberKind.NUMBER))
+            assertEquals(ScrollDefaults.NUMBER, NumberPad.FULL.list)
+            assertEquals(setOf("+", "-", "*", "/", "%", ",", ":", "(", ")", "#"), list(NumberPad.FULL))
+        },
+        // as 0.6.2's phone pad had them on three places: its left column, right of 9, its bottom row
+        "a phone field: a dialler's signs" to { assertEquals(setOf("+", "*", "#", "-", "(", ")", ","), list(NumberPad.of(NumberKind.PHONE))) },
+        "a date, a time: their separators, the point a key" to { assertEquals(setOf("-", "/", ":"), list(NumberPad.of(NumberKind.DATETIME))) },
+    )
 
     @Test
-    fun everyPadHasItsKeysInTheSamePlaces() {
-        for (pad in NumberPad.entries) {
-            assertEquals(pad.name, 3, pad.left.size)
-            assertEquals(pad.name, 3, pad.bottom.size)
-        }
-        // the point and the sign where the full pad has its point and its =
-        assertEquals(NumberPad.FULL.bottom.indexOf("."), NumberPad.DECIMAL.bottom.indexOf("."))
-        assertEquals(NumberPad.FULL.bottom.indexOf("="), NumberPad.SIGNED.bottom.indexOf("-"))
+    fun aPhonesOrADatesFieldNamesItsPadForTheScrollLists() = assertRows(
+        "a text field: none" to { assertNull(NumberPad.fieldOf(EditorTraits())) },
+        "a number field: none, its list the number pad's own" to { assertNull(NumberPad.fieldOf(EditorTraits(number = NumberKind.NUMBER))) },
+        "a phone field" to { assertEquals("phone", NumberPad.fieldOf(EditorTraits(number = NumberKind.PHONE))) },
+        "a date or time field" to { assertEquals("datetime", NumberPad.fieldOf(EditorTraits(number = NumberKind.DATETIME))) },
+    )
+
+    @Test
+    fun everyPadsListIsACategoryOfItsOwn() {
+        assertEquals(listOf("number", "phone", "datetime"), NumberPad.entries.map { it.list })
+        assertTrue(ScrollDefaults.IDS.containsAll(NumberPad.entries.map { it.list }))
+        // the field's pad names the list of the same name, which the scroll lists' rule takes for it
+        assertEquals(NumberPad.entries.drop(1).map { it.id }, NumberPad.entries.drop(1).map { it.list })
     }
 
     @Test
@@ -70,21 +77,21 @@ class NumberPadTest {
         assertEquals("T9", pad.known("T9"))
         pad.field = null
         // a text field after a number field, the switching having seen the number keyboard: the full one
-        assertEquals(Target.Keyboard("Number"), pad.shown(Target.Unchanged, "Number.DIGITS"))
+        assertEquals(Target.Keyboard("Number"), pad.shown(Target.Unchanged, "Number.DATETIME"))
     }
 
     @Test
     fun theSwitchingThroughThePadNeverRemembersOne() {
-        val pad = FieldPad().apply { field = NumberPad.DIGITS }
+        val pad = FieldPad().apply { field = NumberPad.DATETIME }
         val policy = LayoutSwitchPolicy(setOf("Text") + NumberPad.layouts, "Text", "Symbol")
         val outcome = policy.switchTo("Number", "Symbol", pad.known("Text"), remember = true)
         assertEquals("Number", outcome.remember)
-        assertEquals(Target.Keyboard("Number.DIGITS"), pad.shown(outcome.target, "Text"))
+        assertEquals(Target.Keyboard("Number.DATETIME"), pad.shown(outcome.target, "Text"))
     }
 
     @Test
     fun eachPadIsNamedAsALayoutsPadsNameIt() {
-        assertEquals(listOf("full", "digits", "signed", "decimal", "signed-decimal", "phone", "datetime"), NumberPad.entries.map { it.id })
+        assertEquals(listOf("full", "phone", "datetime"), NumberPad.entries.map { it.id })
         assertEquals(NumberPad.PHONE, NumberPad.shownBy("Number.PHONE"))
         assertEquals(NumberPad.FULL, NumberPad.shownBy("Number|my-num@1-2"))
         assertNull(NumberPad.shownBy("Text|my-num@1-2"))
@@ -92,7 +99,7 @@ class NumberPadTest {
 
     @Test
     fun theUsersNumberBoardIsShownForThePadsItIsForTheAppsForTheRest() {
-        // a board for 123's pad and the phone's (061-custom-layout §7, L5)
+        // a board for 123's pad and the phone's
         val mine = CustomChoice("my-num", "大数字", "number", "number", stamp = "1-2", pads = listOf("full", "phone"))
         val pad = FieldPad().apply { numbers = mine }
         val full = "Number|my-num@1-2"
@@ -101,11 +108,13 @@ class NumberPadTest {
         // shown already: as it is; the switching knows it as the number keyboard
         assertEquals(Target.Unchanged, pad.shown(Target.Unchanged, full))
         assertEquals("Number", pad.known(full))
-        // a phone field: the user's phone pad; a PIN's, which it is not for, the app's
+        // a phone field: the user's phone pad; a date's, which it is not for, the app's; a decimal field's, the full one: the user's
         pad.field = NumberPad.PHONE
         assertEquals(Target.Keyboard("Number.PHONE|my-num@1-2"), pad.shown(Target.Unchanged, full))
-        pad.field = NumberPad.DIGITS
-        assertEquals(Target.Keyboard("Number.DIGITS"), pad.shown(Target.Keyboard("Number"), "Text"))
+        pad.field = NumberPad.DATETIME
+        assertEquals(Target.Keyboard("Number.DATETIME"), pad.shown(Target.Keyboard("Number"), "Text"))
+        pad.field = NumberPad.of(NumberKind.NUMBER)
+        assertEquals(Target.Keyboard(full), pad.shown(Target.Keyboard("Number"), "Text"))
         // the file replaced (another stamp): shown anew; the app's again where none is chosen
         pad.field = null
         pad.numbers = mine.copy(stamp = "3-4")

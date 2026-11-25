@@ -4,6 +4,7 @@
  */
 package org.fcitx.fcitx5.android.engine.pinyin
 
+import org.fcitx.fcitx5.android.assertRows
 import org.fcitx.fcitx5.android.engine.pinyin.NineKeyLetters.Companion.G14
 import org.fcitx.fcitx5.android.engine.pinyin.NineKeyLetters.Companion.G18
 import org.fcitx.fcitx5.android.engine.pinyin.NineKeyLetters.Companion.NINE_SP
@@ -17,7 +18,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** [GroupedShuangpinSegmenter]: 双拼 on the 18 keys and the nine keys (design §1.4). */
+/** [GroupedShuangpinSegmenter]: 双拼 on the 18 keys and the nine keys. */
 class GroupedShuangpinSegmenterTest {
 
     private fun codes(keys: String, letters: NineKeyLetters) = keys.map(letters::key).joinToString("")
@@ -29,6 +30,36 @@ class GroupedShuangpinSegmenterTest {
             es.flatMap { e -> g.matches(e).let { m -> (0 until m.size).map { Syllables.spelling(m.syllable(it)) } } }.toSet()
         }
     }
+
+    // the bar with 编码行显示双拼按键: what the code row shows once taken, so a syllable its scheme code, an initial its key
+    @Test
+    fun aBarOfferedSyllableOrInitialShowsAsTheKeysTheCodeShowsTaken() = assertRows(
+        "自然码 sha" to { assertEquals("ua", GroupedShuangpinSegmenter(ZIRANMA, G14).keysOffered("sha")) },
+        "自然码 sh" to { assertEquals("u", GroupedShuangpinSegmenter(ZIRANMA, G14).keysOffered("sh")) },
+        "自然码 zh, ch" to { assertEquals(listOf("v", "i"), listOf("zh", "ch").map { GroupedShuangpinSegmenter(ZIRANMA, G18).keysOffered(it) }) },
+        "自然码 c, a plain initial" to { assertEquals("c", GroupedShuangpinSegmenter(ZIRANMA, G18).keysOffered("c")) },
+        "自然码 jing" to { assertEquals("jy", GroupedShuangpinSegmenter(ZIRANMA, NINE_SP).keysOffered("jing")) },
+        "小鹤 jing, zhong" to { assertEquals(listOf("jk", "vs"), listOf("jing", "zhong").map { GroupedShuangpinSegmenter(XIAOHE, G18).keysOffered(it) }) },
+        "自然码 ang, zero initial" to { assertEquals("ah", GroupedShuangpinSegmenter(ZIRANMA, G18).keysOffered("ang")) },
+        "小鹤 an, as it teaches" to { assertEquals("an", GroupedShuangpinSegmenter(XIAOHE, G18).keysOffered("an")) },
+        "微软 xing" to { assertEquals("x;", GroupedShuangpinSegmenter(MICROSOFT, G18).keysOffered("xing")) },
+        "neither" to { assertEquals(null, GroupedShuangpinSegmenter(ZIRANMA, G18).keysOffered("xyz")) },
+        "every scheme, every keyboard: each syllable its taught code, each initial a key taking it" to {
+            for ((name, scheme) in EngineSettings.SCHEMES) {
+                for (letters in listOf(G18, G14, NINE_SP)) {
+                    val segmenter = GroupedShuangpinSegmenter(scheme, letters)
+                    // m, n: initials too, offered as such
+                    val typed = (0 until Syllables.count).filter { Syllables.spelling(it) !in SpellingIndex.INITIALS }
+                        .mapNotNull { id -> scheme.encode(id)?.takeIf { code -> code.all { letters.isCode(letters.key(it)) } }?.let { id to it } }
+                    for ((id, code) in typed) assertEquals("$name ${Syllables.spelling(id)}", code, segmenter.keysOffered(Syllables.spelling(id)))
+                    for (initial in SpellingIndex.INITIALS) {
+                        val key = segmenter.keysOffered(initial) ?: continue
+                        assertTrue("$name $initial $key", initial in scheme.initialsOn(key.single()))
+                    }
+                }
+            }
+        },
+    )
 
     @Test
     fun everySyllableTypedInEverySchemeReadsBackOnBothKeyboards() {
@@ -48,8 +79,6 @@ class GroupedShuangpinSegmenterTest {
 
     @Test
     fun noSlipIsReadNotEvenUTypedWithTheKeyOfU() {
-        // the 18, 14 and nine keys read slipped keys by where a tap fell (061-neighbour-groups), but no ü typo
-        // (060-correction-fuzzy-report): 小鹤's jv is no ju there, as it is on 26 keys
         for ((name, scheme) in EngineSettings.SCHEMES) {
             for (letters in listOf(G18, G14, NINE_SP)) {
                 val segmenter = GroupedShuangpinSegmenter(scheme, letters)
@@ -73,10 +102,8 @@ class GroupedShuangpinSegmenterTest {
 
     @Test
     fun aGroupLeavesItsSyllablesToTheDecoder() {
-        // 小鹤 bn bn: bin, biao, nin, niao (b, n initials; n iao, b in)
         val read = GroupedShuangpinSegmenter(XIAOHE, G18).read(codes("bb", G18))
         assertTrue(read.toString(), read.getValue(Kind.SYLLABLE).containsAll(listOf("bin", "biao", "nin", "niao")))
-        // one key at the end is the start of every syllable it leads
         val lead = GroupedShuangpinSegmenter(ZIRANMA, G18).read(codes("n", G18))
         assertTrue(lead.toString(), lead.getValue(Kind.PARTIAL).containsAll(listOf("ni", "bi", "nao")))
     }
@@ -93,7 +120,6 @@ class GroupedShuangpinSegmenterTest {
 
     @Test
     fun aKeysInitialsAreTheSchemes() {
-        // 自然码: v is zh, u sh, i ch; v alone no initial
         assertEquals(listOf("zh"), GroupedShuangpinSegmenter(ZIRANMA, G18).initialsOf(G18.key('v')))
         assertEquals(listOf("t", "sh", "zh"), GroupedShuangpinSegmenter(ZIRANMA, NINE_SP).initialsOf(NINE_SP.key('t')))
         assertEquals(listOf("b", "n"), GroupedShuangpinSegmenter(ZIRANMA, G18).initialsOf(G18.key('b')))
@@ -112,8 +138,34 @@ class GroupedShuangpinSegmenterTest {
         assertEquals("b", segmenter.asTyped(codes("b", G18)))
     }
 
-    // 061-sp-abbrev §3.1: where a key and the next make a syllable, the key is also read alone, an INITIAL of the
-    // syllables it leads, each ABBREV; two keys too; and the graph without them is the one with none
+    private fun marked(on: GroupedShuangpinSegmenter, typed: String, kind: Kind): Set<String> {
+        val g = on.segment(typed)
+        return g.edges(0).filter { g.kind(it) == kind }.flatMap { g.matches(it).toString().split(' ') }.toSet()
+    }
+
+    private val ing = GroupedShuangpinSegmenter(ZIRANMA, G18, setOf(Fuzzy.IN_ING))
+
+    @Test
+    fun aTakenSyllableOrInitialReadsItsFuzzyPartner() = assertRows(
+        "a taken syllable reads its partner" to { assertEquals(setOf("jing", "jin~"), marked(ing, "jing'", Kind.SYLLABLE)) },
+        "with all off a taken syllable reads itself" to { assertEquals(setOf("jing"), marked(GroupedShuangpinSegmenter(ZIRANMA, G18), "jing'", Kind.SYLLABLE)) },
+        "a taken initial at the end reads its partner's syllables" to {
+            val n = marked(GroupedShuangpinSegmenter(ZIRANMA, G18, setOf(Fuzzy.L_N)), "n'", Kind.INITIAL)
+            assertTrue(n.toString(), "ni…" in n && "li~…" in n)
+        },
+        "with all off a taken initial reads its own" to { assertTrue(marked(GroupedShuangpinSegmenter(ZIRANMA, G18), "n'", Kind.INITIAL).none { it.startsWith("l") }) },
+    )
+
+    // shown as the keys taken, whichever is read: jing's jy, not jin's jn; n's n, not li's l; 自然码 zh's v, not zi's z
+    @Test
+    fun aTakenSyllableOrInitialShowsItsOwnKeysWhicheverIsRead() {
+        assertEquals("jy", ing.keysShown("jing'", Syllables.id("jin")))
+        assertEquals("jy", ing.keysShown("jing'", Syllables.id("jing")))
+        assertEquals("n", GroupedShuangpinSegmenter(ZIRANMA, G18, setOf(Fuzzy.L_N)).keysShown("n", Syllables.id("li")))
+        assertEquals("v", GroupedShuangpinSegmenter(ZIRANMA, G18, setOf(Fuzzy.Z_ZH)).keysShown("zh", Syllables.id("zi")))
+        assertEquals("z", GroupedShuangpinSegmenter(ZIRANMA, G18, setOf(Fuzzy.Z_ZH)).keysShown("z", Syllables.id("zhi")))
+    }
+
     @Test
     fun aKeyThatMakesASyllableWithTheNextIsReadAloneToo() {
         for (letters in listOf(G18, G14, NINE_SP)) {

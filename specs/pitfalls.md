@@ -44,9 +44,8 @@ into the APK, delete them"): delete them and build again; they are no longer in 
 `lib/handwriting` or `lib/sherpa-onnx` later: exclude it through `packaging.jniLibs.excludes`.
 
 On the phone, 0.3.x's data sync left fcitx's files in device-protected storage (`usr/`, `learn/`,
-`README.md`, listed in `descriptor.json`; 7.4 MB from 0.3.2). `FcitxApplication.deleteNativeData` removes exactly
-the listed paths at the first start after the upgrade, the descriptor last (no descriptor: nothing
-to do). User data was never there: fcitx's config and data were in the external files dir (now `files/host-config`, `files/host-data`, A4).
+`README.md`, listed in `descriptor.json`; 7.4 MB from 0.3.2). Nothing reads or removes them since 0.6.3
+(the one-time cleanup went, 063-slim RU4); the backup rules exclude them. User data was never there: fcitx's config and data were in the external files dir (now `files/host-config`, `files/host-data`, A4).
 
 ## Android behaviour
 
@@ -246,6 +245,15 @@ pause apart, sends a refused one again after a pause, and stops (predicting noth
 pauses are spent. Waiting on a read instead blocks the main thread as long as the editor lays the
 text out, up to 2 s a read.
 
+### A hidden keyboard is told GONE by hand
+
+From Android 11 `InputMethodService.hideWindow` calls `dispatchWindowVisibilityChanged(GONE)` on the input view
+and leaves the window alone; `showWindow` tells nothing back. The view hears VISIBLE again only from the window
+itself, when it really went away in between. The app's screen remade (the system's dark mode switched)
+hides and shows the keyboard at once with the window staying, and a view that stops on GONE (the theme's pet)
+stayed stopped till the process died. `FcitxInputMethodService.onWindowShown` tells VISIBLE where the window
+stayed since `onWindowHidden` (`InputViewShown`). `View.getWindowVisibility()` reads the window, not this.
+
 ### Direct boot
 
 Before the first unlock there is no credential-protected storage: `EngineBridge.userDir()` is null,
@@ -301,6 +309,9 @@ foreground app. What the keyboard says goes in its notice instead, `FcitxInputMe
 - A downgrade to 0.3.2 lists no `.txt.gz`: imported base dictionaries are hidden there (the files
   stay; 0.3.2 deletes `merged.ymd` v2 and the `.ymc`s) and come back on re-upgrade; a same-name
   import made in 0.3.2 wins then (its `.txt` is converted over the `.gz`).
+- The clipboard's `pinned` column holds 收藏 (the property is `favorite`). Renaming the column or bumping
+  `clbdb`'s version makes 0.6.2 and before, restoring a newer backup, drop the whole clipboard: they
+  fall back destructively on a downgrade.
 - Data releases are pinned by SHA-256; a re-uploaded asset with the same name fails the build. Make
   a new release instead.
 

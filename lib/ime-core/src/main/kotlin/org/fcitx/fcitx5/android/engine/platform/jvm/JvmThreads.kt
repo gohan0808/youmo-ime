@@ -5,9 +5,18 @@
 package org.fcitx.fcitx5.android.engine.platform.jvm
 
 import java.util.concurrent.Executor
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 
-/** The JVM's threads, as the engine's work off the input thread runs on them unless a test gives its own. */
 object JvmThreads {
-    /** Each piece of work on a daemon thread of its own named [name]: none kept, so an engines closed and made anew still has one. */
+    private const val IDLE_SECONDS = 30L
+
+    /** A fresh daemon thread per task: none kept, so engines closed and remade still have one. */
     fun each(name: String) = Executor { Thread(it, name).apply { isDaemon = true }.start() }
+
+    /** One daemon thread, tasks in order: kept while busy so what it allocates per thread is reused, gone once idle. */
+    fun single(name: String): Executor = ThreadPoolExecutor(1, 1, IDLE_SECONDS, TimeUnit.SECONDS, LinkedBlockingQueue()) {
+        Thread(it, name).apply { isDaemon = true }
+    }.apply { allowCoreThreadTimeOut(true) }
 }

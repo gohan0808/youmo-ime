@@ -9,8 +9,11 @@ import org.fcitx.fcitx5.android.assertRows
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog.PINYIN
 import org.fcitx.fcitx5.android.engine.data.PinyinDataBuilder
 import org.fcitx.fcitx5.android.engine.data.ReadingSource
+import org.fcitx.fcitx5.android.engine.data.syl
 import org.fcitx.fcitx5.android.engine.handwriting.InkReading
 import org.fcitx.fcitx5.android.engine.learn.LearnRecord
+import org.fcitx.fcitx5.android.engine.learn.control.LearningOp
+import org.fcitx.fcitx5.android.engine.learn.control.LearningResult
 import org.fcitx.fcitx5.android.engine.pinyin.Syllables
 import org.fcitx.fcitx5.android.engine.platform.MemoryFiles
 import org.fcitx.fcitx5.android.engine.session.Action
@@ -33,12 +36,16 @@ class EnginesVoiceEditsTest : EnginesFixture() {
             .unigram("徐", -4f, 0f).entry("徐", syl("xu"))
             .unigram("婧", -4f, 0f).entry("婧", syl("jing"))
             .unigram("靖", -4.5f, 0f).entry("靖", syl("jing"))
-            // 单, read dan, and shan as a surname: what is added is read as typed (review S2)
+            // 单, read dan, and shan as a surname: what is added is read as typed
             .unigram("单", -4f, 0f).entry("单", syl("dan")).entry("单", syl("shan"))
+            // 攻势 far less likely than 公式: the word model never takes it after 这个
+            .unigram("公式", -4.7f, 0f).entry("公式", syl("gong", "shi"))
+            .unigram("攻势", -9f, 0f).entry("攻势", syl("gong", "shi"))
             .apply {
                 for ((c, s, t) in listOf(
                     Triple('我', "wo", 3), Triple('找', "zhao", 3), Triple('徐', "xu", 2), Triple('许', "xu", 3),
                     Triple('静', "jing", 4), Triple('婧', "jing", 4), Triple('靖', "jing", 4), Triple('单', "dan", 1), Triple('单', "shan", 4),
+                    Triple('公', "gong", 1), Triple('攻', "gong", 1), Triple('式', "shi", 4), Triple('势', "shi", 4),
                 )) {
                     charTone(c.code, Syllables.id(s), t)
                     charReading(ReadingSource.MANDARIN, c.code, Syllables.id(s), t)
@@ -48,8 +55,7 @@ class EnginesVoiceEditsTest : EnginesFixture() {
             .toByteArray()
     }
 
-    // voice's [said] in an empty field, its last two deleted with Backspace, [keys] typed in pinyin and [word] picked:
-    // what is asked
+    // voice's [said], its last two deleted, [keys] typed in pinyin and [word] picked: what is asked
     private fun Engines.retyped(
         said: String = "我找徐静",
         learning: Boolean = true,
@@ -66,7 +72,6 @@ class EnginesVoiceEditsTest : EnginesFixture() {
     // [keys] typed in pinyin after [kept], [word] picked a candidate at a time: what is asked
     private fun Engines.typedAgain(kept: String, keys: String, word: String, learning: Boolean = true): VoiceEdits.Ask? {
         type(PINYIN, keys)
-        // a part picked commits nothing till the whole is
         var picked = ""
         var commit = ""
         while (commit.isEmpty()) {
@@ -94,17 +99,16 @@ class EnginesVoiceEditsTest : EnginesFixture() {
         val dir = MemoryFiles()
         Engines(::load, dir, warmUps = inPlace).use { e ->
             e.context(PINYIN, "", said = true)
-            // the steps of one scenario, in order: each needs the one before (review F8112)
+            // the steps of one scenario, in order: each needs the one before
             val ask = e.retyped()
             // asked, read as typed: voice's rules with it added would put it in
             assertEquals("徐婧", ask?.word)
             assertEquals("xu jing", ask?.pinyin)
-            // 记住: added by hand
             assertNotNull(ask)
             assertTrue(e.voiceRemember(ask!!))
             assertEquals(listOf("徐婧"), added(e))
-            // 撤销: off the added words, nothing forgotten in the learning record (review R1)
-            e.voiceForget("徐婧")
+            // 撤销: off the added words, nothing forgotten in the learning record
+            e.voiceForget(ask)
             assertEquals(emptyList<String>(), added(e))
             assertFalse(records(dir).any { it is LearnRecord.Forget && it.text == "徐婧" })
         }
@@ -119,7 +123,6 @@ class EnginesVoiceEditsTest : EnginesFixture() {
             // 单 typed shan: asked, read shan jing (its readings, dan and shan, leave it open)
             assertEquals("单婧", ask?.word)
             assertEquals("shan jing", ask?.pinyin)
-            // then 记住: added so
             assertTrue(e.voiceRemember(ask!!))
             assertEquals(listOf("shan jing"), e.userWords(UserWord.Kind.ADDED).map { it.pinyin })
         }
@@ -135,10 +138,8 @@ class EnginesVoiceEditsTest : EnginesFixture() {
             // the word deleted again and another of the same reading typed: voice judged without the first, ranked first
             repeat(2) { e.onEvent(PINYIN, EngineEvent.BACKSPACE, 0) }
             val second = e.typedAgain("我找", "xujing", "徐靖")
-            // asked as replacing the first
             assertEquals("徐靖", second?.word)
             assertEquals("徐婧", second?.replaces)
-            // 记住: the second added, the first taken off
             assertTrue(e.voiceRemember(second!!))
             assertEquals(listOf("徐靖"), added(e))
         }
@@ -154,10 +155,8 @@ class EnginesVoiceEditsTest : EnginesFixture() {
             e.addedUnrelated()
             e.context(PINYIN, "", said = true)
             val ask = e.retyped()
-            // asked, read as typed
             assertEquals("徐婧", ask?.word)
             assertEquals("xu jing", ask?.pinyin)
-            // 记住: added after it
             assertTrue(e.voiceRemember(ask!!))
             assertEquals(listOf("许静", "徐婧"), added(e))
         }
@@ -172,10 +171,8 @@ class EnginesVoiceEditsTest : EnginesFixture() {
             assertTrue(e.voiceRemember(e.retyped()!!))
             repeat(2) { e.onEvent(PINYIN, EngineEvent.BACKSPACE, 0) }
             val second = e.typedAgain("我找", "xujing", "徐靖")
-            // asked as replacing the first
             assertEquals("徐靖", second?.word)
             assertEquals("徐婧", second?.replaces)
-            // 记住: the second in the first's stead, the unrelated one kept
             assertTrue(e.voiceRemember(second!!))
             assertEquals(listOf("许静", "徐靖"), added(e))
         }
@@ -187,9 +184,7 @@ class EnginesVoiceEditsTest : EnginesFixture() {
         Engines(::load, MemoryFiles(), warmUps = inPlace).use { e ->
             e.context(PINYIN, "", said = true)
             assertTrue(e.voiceRemember(e.retyped()!!))
-            // read as nothing spells: not added
             val bad = VoiceEdits.Ask("徐靖", "xu", "徐静", replaces = "徐婧", hint = false, cells = emptySet())
-            // not added, and so the first still added
             assertFalse(e.voiceRemember(bad))
             assertEquals(listOf("徐婧"), added(e))
         }
@@ -234,6 +229,101 @@ class EnginesVoiceEditsTest : EnginesFixture() {
     )
 
     @Test
+    @Uat("VO-59")
+    fun `corrected where the word model would not put it in, asked whether always to, judged at that place`() {
+        val dir = MemoryFiles()
+        Engines(::load, dir, warmUps = inPlace).use { e ->
+            e.context(PINYIN, "", said = true)
+            // 攻势 heard already in the first clause: no reason to ask 「记住」 about the second
+            val said = "敌人的攻势很猛，推导这个公式"
+            val ask = e.retyped(said = said, keys = "gongshi", word = "攻势")
+            assertRows(
+                "asked whether always to" to { assertEquals(true, ask?.always) },
+                "of what voice heard there" to { assertEquals("公式", ask?.heard) },
+                "not added before" to { assertEquals(false, ask?.added) },
+            )
+            assertTrue(e.voiceRemember(ask!!))
+            assertRows(
+                "taken: added and always put in" to {
+                    assertEquals(listOf("攻势" to true), e.userWords(UserWord.Kind.ADDED).map { it.text to it.voiceAlways })
+                },
+                "voice now puts it in where the model alone would not" to {
+                    val h = e.voiceHomophones(e.userWords())
+                    assertEquals("推导这个攻势", e.voicePick(h, "推导这个公式", "", emptyList()))
+                },
+            )
+            // 撤销: off the added words and no longer always
+            e.voiceForget(ask)
+            assertEquals(emptyList<UserWord>(), e.userWords(UserWord.Kind.ADDED))
+        }
+    }
+
+    @Test
+    @Uat("VO-59")
+    fun `an added word corrected again where the model left it is asked about always, and taking that back keeps it added`() {
+        Engines(::load, MemoryFiles(), warmUps = inPlace).use { e ->
+            assertTrue(e.addWord("攻势", "gong shi"))
+            e.context(PINYIN, "", said = true)
+            val ask = e.retyped(said = "推导这个公式", keys = "gongshi", word = "攻势")
+            assertRows(
+                "asked whether always to" to { assertEquals(true, ask?.always) },
+                "added before" to { assertEquals(true, ask?.added) },
+            )
+            val h = e.voiceHomophones(e.userWords())
+            assertEquals("added alone: the model leaves 公式", "推导这个公式", e.voicePick(h, "推导这个公式", "", emptyList()))
+            assertTrue(e.voiceRemember(ask!!))
+            assertEquals(listOf(true), e.userWords(UserWord.Kind.ADDED).map { it.voiceAlways })
+            e.voiceForget(ask)
+            assertEquals(listOf("攻势" to false), e.userWords(UserWord.Kind.ADDED).map { it.text to it.voiceAlways })
+        }
+    }
+
+    @Test
+    @Uat("VO-59")
+    fun `总是换 marked on the word list while asked, 记住 still done`() {
+        Engines(::load, MemoryFiles(), warmUps = inPlace).use { e ->
+            assertTrue(e.addWord("攻势", "gong shi"))
+            e.context(PINYIN, "", said = true)
+            val ask = e.retyped(said = "推导这个公式", keys = "gongshi", word = "攻势")!!
+            assertEquals(true, ask.always)
+            e.learning(null, LearningOp.VoiceAlways("攻势", true))
+            assertTrue(e.voiceRemember(ask))
+            assertEquals(listOf("攻势" to true), e.userWords(UserWord.Kind.ADDED).map { it.text to it.voiceAlways })
+        }
+    }
+
+    @Test
+    @Uat("VO-59")
+    fun `总是换 goes with a deleted word and comes back with its undo, on the word list and from a candidate`() {
+        fun marked(delete: Engines.() -> LearningResult) = Engines(::load, MemoryFiles(), warmUps = inPlace).use { e ->
+            assertTrue(e.addWord("攻势", "gong shi"))
+            assertTrue(e.addWord("徐婧", "xu jing"))
+            e.learning(null, LearningOp.VoiceAlways("攻势", true))
+            e.learning(null, LearningOp.VoiceAlways("徐婧", true))
+            val done = e.delete() as LearningResult.Done
+            assertEquals(listOf("徐婧" to true), e.userWords(UserWord.Kind.ADDED).map { it.text to it.voiceAlways })
+            // one unmarked meanwhile stays so: only the deleted word's comes back
+            e.learning(null, LearningOp.VoiceAlways("徐婧", false))
+            e.learning(PINYIN, LearningOp.Undo(done.undo))
+            e.userWords(UserWord.Kind.ADDED).map { it.text to it.voiceAlways }.toSet()
+        }
+        val back = setOf("攻势" to true, "徐婧" to false)
+        assertRows(
+            "deleted on the word list" to {
+                assertEquals(back, marked { learning(null, LearningOp.RemoveWords(listOf(UserWord("攻势", "gong shi", UserWord.Kind.ADDED)))) })
+            },
+            "deleted from a candidate" to {
+                assertEquals(back, marked {
+                    context(PINYIN, "", cleared = true)
+                    type(PINYIN, "gongshi")
+                    val at = candidates(PINYIN, 0, 20).indexOfFirst { it.text == "攻势" }
+                    learning(PINYIN, LearningOp.Delete(at, "攻势"))
+                })
+            },
+        )
+    }
+
+    @Test
     @Uat("VO-52")
     fun `undone, what typing the word learned stays (review S3)`() {
         // the word retyped, then typed [more] times: what the user's words learned say of it
@@ -242,7 +332,7 @@ class EnginesVoiceEditsTest : EnginesFixture() {
             val ask = e.retyped()!!
             if (undone) {
                 assertTrue(e.voiceRemember(ask))
-                e.voiceForget(ask.word)
+                e.voiceForget(ask)
             }
             repeat(more) {
                 e.onEvent(PINYIN, EngineEvent.RESET, 0)
@@ -252,6 +342,31 @@ class EnginesVoiceEditsTest : EnginesFixture() {
             e.userWords(UserWord.Kind.LEARNED).map { "${it.text}:${it.count}" }
         }
         assertRows(*(0..3).map { n -> "typed $n more: learned as never 记住'd" to { assertEquals(learned(false, n), learned(true, n)) } }.toTypedArray())
+    }
+
+    @Test
+    fun `a word a table remembered is not asked about, yet voice keeps it as the user's own`() {
+        // Engines over a record holding [text] remembered by 五笔
+        fun remembering(text: String, test: (Engines) -> Unit) {
+            val dir = MemoryFiles().also { olderPhrases(it, "ttpp" to text) }
+            Engines(::load, dir, warmUps = inPlace).use { e ->
+                assertTrue(e.userWords(UserWord.Kind.LEARNED).any { it.text == text && it.table.isNotEmpty() })
+                e.context(PINYIN, "", said = true)
+                test(e)
+            }
+        }
+        assertRows(
+            "one character typed again into it: only the hint, as for a word not the user's" to {
+                remembering("徐婧") { e ->
+                    val ask = e.retyped(n = 1, keys = "jing", word = "婧")
+                    assertEquals(true, ask?.hint)
+                    assertEquals("", ask?.word)
+                }
+            },
+            "it heard and corrected: voice would keep it, so nothing is asked" to {
+                remembering("徐静") { e -> assertNull(e.retyped()) }
+            },
+        )
     }
 
     @Test
@@ -293,8 +408,7 @@ class EnginesVoiceEditsTest : EnginesFixture() {
         },
     )
 
-    // a word asked about (the user's words read for it, voice's tables made), then the window closed by [closing]:
-    // what was read let go, not kept with the engines till the next window's (review F8342, R26 F8435/F8442)
+    // what was read for the question is let go when the window closes, not kept till the next
     private fun letGo(closing: Engines.() -> Unit) = Engines(::load, MemoryFiles(), warmUps = inPlace).use { e ->
         e.addedUnrelated()
         e.context(PINYIN, "", said = true)

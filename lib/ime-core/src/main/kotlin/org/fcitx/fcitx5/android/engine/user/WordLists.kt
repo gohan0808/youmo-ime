@@ -22,25 +22,50 @@ import java.nio.charset.CharsetDecoder
 import java.nio.charset.CodingErrorAction
 
 /**
- * The words the user added by hand and the words they blocked, as they edit them in the settings
- * or block one from the keyboard. Each list is a file in [dir], a word a line as libime's text
- * dictionaries have it (`你好 ni'hao`), written whole on each change: they are lists a user keeps
- * by hand, short, and unlike the learning record not counts. With no [dir], kept in memory.
+ * The words added by hand and the words blocked, a file per list in [dir] (`你好 ni'hao` a line), written whole on each
+ * change; in memory without [dir]. Beside them the added words voice always puts in ([voiceAlways]), a text a line.
  */
 class WordLists(private val dir: UserFiles?, private val onError: (IOException) -> Unit = {}) {
-    // the lists whose file did not read: what is in memory is not all of them, so not written over them
+    // a list whose file did not read is not written over
     private val unread = HashSet<String>()
-    // each list's lines this build does not read (a later build's, say), written back as they were: not lost
-    // to the next change (0.6.1 audit decode-9), as the learning record keeps a record it does not know
+    // lines this build does not read are written back as they were, not lost to the next change
     private val unknown = HashMap<String, List<String>>()
     private val added = read(ADDED)
-    // an emoji blocked in its word's reading has as many syllables as that word, not as its code points (blockedEntry)
+    // an emoji blocked in its word's reading has that word's syllables, not one per code point
     private val blocked = read(BLOCKED) { line -> splitValues(line).takeIf { it.size == 2 || it.size == 3 && it[2].toFloatOrNull() != null }?.let { blockedEntry(it[0], it[1]) } }
 
+    // a file of its own: an older build reads the added list as it was, and drops none of it. One deleted by an older
+    // build goes here, or adding it again would bring its mark back
+    private val always: LinkedHashSet<String> = readTexts(ALWAYS).also { marked ->
+        if (ADDED !in unread && marked.retainAll(addedTexts())) writeTexts(ALWAYS, marked)
+    }
+
     val addedWords: List<Entry> get() = added.toList()
+
+    /** Of the added words' texts. */
+    val voiceAlways: Set<String> get() = addedTexts().let { texts -> always.filterTo(LinkedHashSet()) { it in texts } }
+
+    /** Whether it changed: only an added word's is set. */
+    fun setVoiceAlways(text: String, on: Boolean): Boolean {
+        val changed = if (on) added.any { it.text == text } && always.add(text) else always.remove(text)
+        if (changed) writeTexts(ALWAYS, always)
+        return changed
+    }
+
+    /** Marks the added ones of [texts], beside those marked ([merge]) or as the only ones. */
+    fun putVoiceAlways(texts: Collection<String>, merge: Boolean) {
+        val next = LinkedHashSet<String>()
+        if (merge) next += always
+        addedTexts().let { all -> texts.filterTo(next) { it in all } }
+        if (next == always) return
+        always.clear()
+        always += next
+        writeTexts(ALWAYS, always)
+    }
+
+    private fun addedTexts() = added.mapTo(HashSet()) { it.text }
     val blockedWords: List<Entry> get() = blocked.toList()
 
-    /** Adds [entry]; whether it was not there already. */
     fun add(entry: Entry): Boolean = addAll(listOf(entry)).isNotEmpty()
 
     fun remove(entry: Entry): Boolean = removeAll(listOf(entry)).isNotEmpty()
@@ -49,14 +74,16 @@ class WordLists(private val dir: UserFiles?, private val onError: (IOException) 
 
     fun unblock(entry: Entry): Boolean = unblockAll(listOf(entry)).isNotEmpty()
 
-    // a list written once however many change: a thousand words imported are one write, not a thousand
+    // a list written once however many change: a thousand words imported are one write
 
-    /** Adds [entries]; those that were not there already. */
     fun addAll(entries: Collection<Entry>): List<Entry> = change(ADDED, added, entries) { added.add(it) }
 
-    fun removeAll(entries: Collection<Entry>): List<Entry> = change(ADDED, added, entries) { added.remove(it) }
+    fun removeAll(entries: Collection<Entry>): List<Entry> = change(ADDED, added, entries) { added.remove(it) }.also { removed ->
+        // a word deleted is no longer always put in, nor is it again once added anew
+        if (always.removeAll(removed.map { it.text }.filterTo(HashSet()) { t -> added.none { it.text == t } })) writeTexts(ALWAYS, always)
+    }
 
-    /** Puts [entries] back on the added words, each at its index then (a delete taken back): those that were not there. */
+    /** Puts [entries] back at their indexes (a delete taken back); those that were not there. */
     fun putBack(entries: List<IndexedValue<Entry>>): List<Entry> {
         val back = entries.filter { it.value !in added }.sortedBy { it.index }
         if (back.isEmpty()) return emptyList()
@@ -72,17 +99,10 @@ class WordLists(private val dir: UserFiles?, private val onError: (IOException) 
 
     fun unblockAll(entries: Collection<Entry>): List<Entry> = change(BLOCKED, blocked, entries) { blocked.remove(it) }
 
-    /**
-     * U-86 「全部清空」: both lists emptied, the lines this build does not read with them. Those are kept
-     * through a change so that it loses nothing (decode-9); a clear of everything means gone, or a later
-     * build's block would be back with that build (R25 F7821). A list whose file did not read is deleted
-     * unread, for the same: left, its words were back at the next start that reads it, the user told all
-     * was cleared (R25 F7961); one that cannot be deleted is told as not kept.
-     */
+    /** 「全部清空」: both lists emptied, unknown lines too, or a later build's block would come back; a list whose file did not read is deleted unread, or its words return at the next start. */
     fun clear() {
         for ((name, list) in listOf(ADDED to added, BLOCKED to blocked)) {
             if (name in unread) {
-                // what was added since is in memory alone
                 list.clear()
                 val file = dir?.file(name)
                 if (file != null && file.taken() && !file.delete()) onError(Unsaved("$file did not read: not cleared")) else unread -= name
@@ -92,12 +112,15 @@ class WordLists(private val dir: UserFiles?, private val onError: (IOException) 
                 write(name, list)
             }
         }
+        if (always.isNotEmpty()) {
+            always.clear()
+            writeTexts(ALWAYS, always)
+        }
     }
 
     private inline fun change(name: String, list: Set<Entry>, entries: Collection<Entry>, op: (Entry) -> Boolean) =
         entries.filter(op).also { if (it.isNotEmpty()) write(name, list) }
 
-    /** Lists the added words in [model], and blocks the blocked ones there. */
     fun applyTo(model: UserModel) {
         added.forEach { model.listByHand(it) }
         blocked.forEach { model.block(it) }
@@ -128,7 +151,7 @@ class WordLists(private val dir: UserFiles?, private val onError: (IOException) 
         }
         try {
             dir.mkdirs()
-            // a whole list or the one before it, never half of one, nor an empty one after a power cut
+            // a whole list or the one before it, never half, nor an empty one after a power cut
             replaceFile(file, dir.file("$name.new")) { temp ->
                 val lines = entries.map { "${escapeValue(it.text)} ${it.apostrophed()}" } + unknown[name].orEmpty()
                 temp.write(lines.joinToString("") { "$it\n" }.toByteArray())
@@ -139,15 +162,31 @@ class WordLists(private val dir: UserFiles?, private val onError: (IOException) 
         }
     }
 
-    /**
-     * A line of a word list the user imports, as other input methods export them too: a word
-     * and its pinyin either way round (`幽默 you'mo`, `you mo 幽默`), a count after them left
-     * out; a word alone, its [pinyin] null, for the dictionary to read. `!` before the word
-     * blocks it, as [Engines][org.fcitx.fcitx5.android.engine.runtime.Engines] exports the blocked.
-     */
+    private fun readTexts(name: String): LinkedHashSet<String> {
+        val file = dir?.file(name) ?: return LinkedHashSet()
+        return try {
+            if (!file.taken()) LinkedHashSet() else file.input().bufferedReader().useLines { lines -> lines.map { it.trim() }.filterTo(LinkedHashSet()) { it.isNotEmpty() } }
+        } catch (e: IOException) {
+            onError(e)
+            unread += name
+            LinkedHashSet()
+        }
+    }
+
+    private fun writeTexts(name: String, texts: Collection<String>) {
+        val dir = dir ?: return
+        if (name in unread) return onError(Unsaved("${dir.file(name)} did not read: not written over"))
+        try {
+            dir.mkdirs()
+            replaceFile(dir.file(name), dir.file("$name.new")) { temp -> temp.write(texts.joinToString("") { "$it\n" }.toByteArray()) }
+        } catch (e: IOException) {
+            onError(Unsaved("${dir.file(name)} not written", e))
+        }
+    }
+
+    /** An imported word list line: a word and its pinyin either way round, a count after them ignored, or a word alone ([pinyin] null); `!` blocks it. */
     data class Line(val text: String, val pinyin: String?, val blocked: Boolean) {
         companion object {
-            /** A line with no word in it this reads: counted, so a file read as nothing does not say so silently. */
             val UNREAD = Line("", null, false)
         }
     }
@@ -155,12 +194,9 @@ class WordLists(private val dir: UserFiles?, private val onError: (IOException) 
     companion object {
         const val ADDED = "words.added"
         const val BLOCKED = "words.blocked"
+        const val ALWAYS = "words.voice-always"
 
-        /**
-         * Whether [text] is a word as the block lists take one: it has Han, or an ASCII letter or
-         * digit, and is no keycap emoji (1️⃣ is a digit and U+20E3, an emoji). Not a word, a text
-         * blocked is an emoji in its word's reading ([blockedEntry]), which no table hides.
-         */
+        /** Whether [text] is a word as block lists take one: Han, or an ASCII letter or digit, and no keycap emoji (1️⃣); else a blocked text is an emoji in its word's reading. */
         fun isWordly(text: String): Boolean = KEYCAP !in text && text.codePoints().anyMatch(::wordly)
 
         // not toFloat's: 3D and NaN are words
@@ -168,10 +204,7 @@ class WordLists(private val dir: UserFiles?, private val onError: (IOException) 
         private val SPACES = Regex("\\s+")
         private val APART = Regex("[\\s']+")
 
-        /**
-         * A word list as other input methods write theirs: UTF-8, or UTF-16 with its byte order
-         * mark (Sogou's export), or else GB18030 (older Windows ones).
-         */
+        /** A word list as others write theirs: UTF-8, UTF-16 by BOM (Sogou), else GB18030 (older Windows). */
         fun decode(bytes: ByteArray): String {
             val marked = bomCharset(bytes, bytes.size)
             return when {
@@ -184,7 +217,6 @@ class WordLists(private val dir: UserFiles?, private val onError: (IOException) 
             }
         }
 
-        /** UTF-16LE or BE by the byte order mark in the first [size] bytes of [head]; null for none. */
         internal fun bomCharset(head: ByteArray, size: Int): Charset? {
             fun bom(a: Int, b: Int) = size >= 2 && head[0] == a.toByte() && head[1] == b.toByte()
             return when {
@@ -194,14 +226,12 @@ class WordLists(private val dir: UserFiles?, private val onError: (IOException) 
             }
         }
 
-        /** A UTF-8 decoder that fails on bytes UTF-8 has not: the list is then GB18030's. */
         internal fun strictUtf8(): CharsetDecoder = Charsets.UTF_8.newDecoder()
             .onMalformedInput(CodingErrorAction.REPORT)
             .onUnmappableCharacter(CodingErrorAction.REPORT)
 
         internal val GB18030: Charset = Charset.forName("GB18030")
 
-        /** [line] as a word to import; null for a blank line or a `#` comment, [Line.UNREAD] for one with no word in it. */
         fun line(line: String): Line? {
             var rest = line.trim().removePrefix("\uFEFF")
             if (rest.isEmpty() || rest.startsWith("#")) return null
@@ -210,28 +240,22 @@ class WordLists(private val dir: UserFiles?, private val onError: (IOException) 
             var text: String? = null
             val pinyin = ArrayList<String>()
             for (token in rest.split(SPACES)) when {
-                // a count, a cost, or a word pack's score (-5.6)
                 token.isEmpty() || NUMBER.matches(token) -> {}
                 token.all { it in 'a'..'z' || it in 'A'..'Z' || it == '\'' || it == 'ü' } -> pinyin += token
                 text == null -> text = token
-                // a second word: not a line this reads
                 else -> return Line.UNREAD
             }
             text ?: return Line.UNREAD
             return Line(text, pinyin.joinToString(" ").ifEmpty { null }, blocked)
         }
 
-        /**
-         * [text] read as [pinyin], as a user types it in: syllables apart by spaces or `'`, or run
-         * together (`nihao`) where they split one way into a syllable a character; ü as v or ü.
-         * Null where it does not read so.
-         */
+        /** [text] read as [pinyin] as a user types it: syllables apart by spaces or `'`, or run together where it splits one way; ü as v or ü. */
         fun entry(text: String, pinyin: String): Entry? {
             val word = text.trim()
             val chars = word.codePointCount(0, word.length)
-            // as spelled first: a letter is a syllable of its own (A股 A'gu), lowercased a vowel or none
+            // as spelled first: a letter is a syllable of its own (A股 A'gu)
             val given = pieces(pinyin)
-            // only where the word has that letter: 啊 A is the syllable a, not the letter
+            // only where the word has that letter: 啊 A is the syllable a
             val letters = given.size == chars && word.isNotEmpty() && given.withIndex().all { (i, part) ->
                 part.none { it.isUpperCase() } || part == String(Character.toChars(word.codePointAt(word.offsetByCodePoints(0, i))))
             }
@@ -242,30 +266,23 @@ class WordLists(private val dir: UserFiles?, private val onError: (IOException) 
             return WordText.entry(word, syllables.joinToString("'"))
         }
 
-        /**
-         * A blocked [text] read as [pinyin]: as [entry], but a text with no Han in it (an emoji
-         * blocked in its word's reading, U-82: 👍🏻 hao, 😃 ha'ha) read as the syllables given,
-         * whatever its code points: [entry] would take none, or split the reading among them.
-         */
+        /** A blocked [text] read as [pinyin]: as [entry], but a text with no Han (an emoji: 👍🏻 hao) takes the syllables given whatever its code points. */
         fun blockedEntry(text: String, pinyin: String): Entry? {
             val word = text.trim()
             val chars = word.codePointCount(0, word.length)
-            // only a text of no Han nor ASCII letter or digit (an emoji, ℹ️ too): a word's are a syllable each
-            // a Latin candidate blocked in pinyin is its letters as spelled (hello H'E'L'L'O, iPhone I'P'H'O'N'E): as written first
+            // only a text with no Han, ASCII letter or digit; a Latin candidate blocked in pinyin is its letters (hello H'E'L'L'O)
             if (word.isNotEmpty() && word.codePoints().noneMatch(Han::isHan)) WordText.entry(word, pieces(pinyin).joinToString("'"))?.let { return it }
             if (word.isEmpty() || isWordly(word)) return entry(text, pinyin)
             val ids = pieces(pinyin.lowercase()).map { Syllables.id(WordText.spelling(it)) }
             return if (ids.isNotEmpty() && ids.none { it < 0 } && ids.size != chars) Entry(word, ids.toIntArray()) else entry(text, pinyin)
         }
 
-        // [pinyin]'s syllables, or runs of them, ü as v
         private fun pieces(pinyin: String) = pinyin.trim().replace('ü', 'v').split(APART).filter { it.isNotEmpty() }
 
-        // spelling as [count] syllables, if one way only does it
         private fun split(spelling: String, count: Int): List<String>? {
             // the tables below are (n+1)×(count+1): a line of an imported file can be any length
             if (count > MAX_SPLIT || spelling.length > count * MAX_SPELLING) return null
-            // ways[i][k]: the splits of spelling[i:] into k syllables, up to 2 (more is as bad as 2)
+            // ways[i][k]: splits of spelling[i:] into k syllables, capped at 2
             val n = spelling.length
             val ways = Array(n + 1) { IntArray(count + 1) }
             val next = Array(n + 1) { IntArray(count + 1) { -1 } }
@@ -288,16 +305,12 @@ class WordLists(private val dir: UserFiles?, private val onError: (IOException) 
 
         private const val MAX_SPELLING = 6
 
-        // characters of a word whose pinyin is run together: a word, not a sentence
         private const val MAX_SPLIT = 32
     }
 }
 
-// below it, ASCII
 private const val ASCII_END = 0x80
 
-// what closes a keycap emoji (1️⃣, #️⃣)
 private const val KEYCAP = '\u20E3'
 
-// what makes a text a word: Han, an ASCII letter or digit
 private fun wordly(c: Int) = Han.isHan(c) || c < ASCII_END && Character.isLetterOrDigit(c)

@@ -11,12 +11,7 @@ import org.junit.Test
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-/**
- * The app's kernel takes an int8 matrix only where the model file is mapped: a direct buffer it can
- * find the address of, holding the matrix and no more. Every other test reads a model from a heap
- * buffer, which a kernel in Java reads all the same; if the weights were copied again, they would
- * pass, and on the phone every rerank would throw.
- */
+/** The app's kernel takes an int8 matrix only from the mapped file, so a copied weight would throw on the phone. */
 class SafetensorsTest {
 
     // a 2 × 3 int8 matrix "w" with its scales, after [before] bytes that are no part of the file
@@ -28,16 +23,19 @@ class SafetensorsTest {
             .put(byteArrayOf(1, 2, 3, 4, 5, 6)).putFloat(0.5f).putFloat(2f)
         file.flip()
         file.position(before)
-        // as FileChannel.map(READ_ONLY) gives it
         return file.asReadOnlyBuffer()
     }
 
     @Test
     fun anInt8MatrixIsHandedToTheKernelWhereItLiesInTheMappedFile() {
         var given: ByteBuffer? = null
-        val kernel = MatrixKernel { q, scales, rows, columns, x, y ->
-            given = q
-            MatrixKernel.JVM.times(q, scales, rows, columns, x, y)
+        val kernel = object : MatrixKernel {
+            override fun times(q: ByteBuffer, scales: FloatArray, rows: Int, columns: Int, x: FloatArray, y: FloatArray) = error("floats")
+
+            override fun timesManyQ8(q: ByteBuffer, scales: FloatArray, rows: Int, columns: Int, x: FloatArray, m: Int, y: FloatArray) {
+                given = q
+                MatrixKernel.JVM.timesManyQ8(q, scales, rows, columns, x, m, y)
+            }
         }
         val y = FloatArray(2)
         Safetensors(mapped(before = 5)).matrix("w", 2, 3, kernel).times(floatArrayOf(1f, 1f, 1f), y)
@@ -47,6 +45,7 @@ class SafetensorsTest {
         assertTrue(q.isReadOnly)
         assertEquals(6, q.capacity())
         assertEquals(listOf<Byte>(1, 2, 3, 4, 5, 6), (0 until 6).map { q[it] })
-        assertArrayEquals(floatArrayOf(6 * 0.5f, 15 * 2f), y, 0f)
+        // the ones are rounded to int8 as 127 times 1/127, not quite 1
+        assertArrayEquals(floatArrayOf(6 * 0.5f, 15 * 2f), y, 1e-5f)
     }
 }

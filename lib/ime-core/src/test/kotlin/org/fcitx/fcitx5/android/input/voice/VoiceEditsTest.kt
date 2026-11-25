@@ -15,7 +15,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** 语音先问再记's following of voice's text (061-voice-learn-from-edits.md §2–§3). */
+/** 语音先问再记's following of voice's text. */
 class VoiceEditsTest {
 
     private class Words : VoiceEdits.Words {
@@ -23,23 +23,29 @@ class VoiceEditsTest {
         var added = emptySet<String>()
         var learned = emptySet<String>()
         var blocked = emptySet<String>()
+        var always = emptySet<String>()
         val dictionary = HashMap<String, String>()
 
-        // what voice would not put in: VoiceHomophones' rules (a common word left, say), faked
+        // what voice would not put in: VoiceHomophones' rules (inside a longer dictionary word, say), faked; and
+        // what the word model would not, which only 「总是换」 would
         var refused = emptySet<String>()
+        var doubted = emptySet<String>()
         val taken = ArrayList<String>()
 
         override fun readings(c: Char) = chars[c]
-        override fun mine() = VoiceEdits.Mine(added, learned, blocked)
+        override fun mine() = VoiceEdits.Mine(added, learned, blocked, always)
         override fun pinyinOf(text: String) = dictionary[text]
-        override fun takes(text: String, at: Int, heard: String, word: String, pinyin: String, replacing: String?): Boolean {
+        override fun takes(text: String, at: Int, heard: String, word: String, pinyin: String, replacing: String?): VoiceEdits.Takes {
             taken += "$text@$at:$heard>$word($pinyin)" + (replacing?.let { "-$it" } ?: "")
-            return word !in refused
+            return when (word) {
+                in refused -> VoiceEdits.Takes.NO
+                in doubted -> VoiceEdits.Takes.IF_ALWAYS
+                else -> VoiceEdits.Takes.YES
+            }
         }
     }
 
-    // the characters' readings, and what [set] sets: a row that sets the user's words has its own (R26 F8147: rows set
-    // and reset one shared, and a row failed before its reset left them set for the rows after it)
+    // the characters' readings, and what [set] sets; each row its own, so a failed row leaves no state behind
     private fun words(set: Words.() -> Unit = {}) = Words().apply {
         for ((c, readings) in listOf(
             '我' to listOf("wo" to 3), '找' to listOf("zhao" to 3), '了' to listOf("le" to 0, "liao" to 3),
@@ -56,8 +62,7 @@ class VoiceEditsTest {
     private val traditional = mapOf('靜' to '静', '許' to '许')
     private fun edits(words: Words = this.words) = VoiceEdits(words) { s -> s.map { traditional[it] ?: it }.joinToString("") }
 
-    // voice's [said] in an empty field, its last [n] deleted by Backspace, [typed] typed into the gap by pinyin:
-    // what is asked once the field reads as followed
+    // voice's [said] in an empty field, its last [n] backspaced, [typed] by pinyin: what is asked once followed
     private fun VoiceEdits.retype(said: String, n: Int, typed: String, after: String = ""): VoiceEdits.Ask? {
         said(said, said)
         repeat(n) { backspace() }
@@ -134,17 +139,35 @@ class VoiceEditsTest {
         "one character typed again (Q3), with no word around it voice would take" to {
             assertNull(edits(words { refused = setOf("徐婧", "找徐婧", "婧了") }).retype("我找徐静", 1, "婧"))
         },
-        "a word added by hand already" to {
-            assertNull(edits(words { added = setOf("徐婧") }).retype("我找徐静", 2, "徐婧"))
+        "a word always put in already" to {
+            assertNull(edits(words { added = setOf("徐婧"); always = setOf("徐婧"); doubted = setOf("徐婧") }).retype("我找徐静", 2, "徐婧"))
         },
         "a word blocked in it" to {
             assertNull(edits(words { blocked = setOf("婧") }).retype("我找徐静", 2, "徐婧"))
         },
-        "a word voice would not put in (a common word it leaves)" to {
+        "a word voice would not put in (inside a longer dictionary word, as 徐静 of 徐静雨)" to {
             assertNull(edits(words { refused = setOf("徐婧") }).retype("我找徐静", 2, "徐婧"))
         },
         "a polyphone kept beside the changed one, the dictionary not settling it: its reading not known" to { assertNull(edits().retype("长长", 2, "掌长")) },
     )
+
+    @Test
+    @Uat("VO-43", "VO-59")
+    fun `where the word model would not put it in, asked whether always to`() {
+        fun row(why: String, mine: Words, always: Boolean?, added: Boolean = false) = why to {
+            val ask = edits(mine).retype("推导这个公式", 2, "攻势")
+            assertEquals(why, always, ask?.always)
+            if (ask != null) assertEquals(why, added, ask.added)
+        }
+        assertRows(
+            row("a new word the model takes: 「记住」", words(), always = false),
+            row("a new word it does not: 「总是换」, which adds it too", words { doubted = setOf("攻势") }, always = true),
+            row("one added already, corrected again where the model left it: 「总是换」, kept added if taken back", words { added = setOf("攻势"); doubted = setOf("攻势") }, always = true, added = true),
+            row("one added already that the model would take, corrected where voice left it: still 「总是换」, voice did not", words { added = setOf("攻势") }, always = true, added = true),
+            row("a learned one it does not take: 「总是换」", words { learned = setOf("攻势"); doubted = setOf("攻势") }, always = true),
+            row("one even always would not put in there: nothing", words { refused = setOf("攻势") }, always = null),
+        )
+    }
 
     @Test
     @Uat("VO-42", "VO-52")
@@ -168,12 +191,12 @@ class VoiceEditsTest {
         "one character typed again, a learned word over it: that word (§2.4 a)" to {
             assertEquals("徐婧", edits(words { learned = setOf("徐婧") }).retype("我找徐静", 1, "婧")?.word)
         },
-        "a learned word added since: not asked (the hint aside)" to {
+        "a learned word added since, corrected where voice left it: 「总是换」, as any added one" to {
             val mine = words {
                 learned = setOf("徐婧")
                 added = setOf("徐婧")
             }
-            assertEquals(null, edits(mine).retype("我找徐静", 1, "婧")?.word?.takeIf { it.isNotEmpty() })
+            assertEquals("徐婧" to true, edits(mine).retype("我找徐静", 1, "婧")?.let { it.word to it.always })
         },
         "two to four typed, one of them kept: all typed (§2.4 b)" to { assertEquals("zhang gui", edits().retype("找长柜", 2, "掌柜")?.pinyin) },
         "two to four typed, the changed ones first (§2.4 b)" to { assertEquals("公式", edits().retype("我找攻势", 3, "找公式")?.word) },
@@ -356,13 +379,13 @@ class VoiceEditsTest {
         "an emoji at the cursor: its Backspace waits, the next one ends the window" to {
             val e = edits()
             e.said("我找徐静😀", "我找徐静😀")
-            // the steps of one scenario, in order: each needs the one before (R26 F8499)
+            // the steps of one scenario, in order: each needs the one before
             e.backspace()
             assertTrue("still open, waiting", e.open)
             e.backspace()
             assertFalse("the next Backspace, not knowing where it is: over", e.open)
         },
-        // R26 F8293: any emoji in the window made every Backspace end it
+        // any emoji in the window made every Backspace end it
         "an emoji elsewhere in the window: a Backspace over Chinese is counted" to {
             val w = edits()
             w.said("😀我找徐静", "😀我找徐静")
@@ -370,7 +393,7 @@ class VoiceEditsTest {
             w.committed("徐婧", typed = true)
             assertEquals("徐静", w.putIn("徐婧").ask?.heard)
         },
-        // R26 F8439: the unit a Backspace takes at a gap is the one before the gap, not the cursor's
+        // the unit a Backspace takes at a gap is the one before the gap, not the cursor's
         "an emoji before a gap: its Backspace waits, the next one ends the window" to {
             val g = edits()
             g.said("我😀找", "我😀找")

@@ -15,69 +15,48 @@ import org.fcitx.fcitx5.android.engine.session.Session
 import org.fcitx.fcitx5.android.engine.session.Snapshot
 
 /**
- * 笔画筛选, as 触宝 has it: while [session] shows something typed, a stroke drawn on the keyboard
- * ([Action.Stroke]) keeps those of its candidates whose first character is written starting so
- * (as the mainland writes it where [mainland] knows it, else [Strokes.startsWith]: any of rime-stroke's
- * orders of one written two ways), in the order [session] gives them;
- * the next stroke is that character's next. A candidate whose first character is no letter (an
- * emoji, a mark) goes as the one before it went: 🐑 stays after 羊. A Latin word, a character the
- * strokes do not know, goes. The first [lookAhead] of [session]'s candidates are looked through,
- * as far as a page asks, and the first page as far as its [singles] characters are found: strokes that
- * keep many words and few characters alone look through all [lookAhead] for it, [session] asked a
- * CHUNK at a time (review F8290; cheap beside the decode, and a character found late still comes up).
+ * 笔画筛选, as 触宝 has it: while [session] shows something typed, each stroke drawn ([Action.Stroke]) keeps the
+ * candidates whose first character starts so (the mainland order where [mainland] knows it, else
+ * [Strokes.startsWith]), in [session]'s order. An emoji or mark goes as the candidate before it went; a Latin
+ * word goes. The first [lookAhead] candidates are looked through, asked a CHUNK at a time.
  *
- * Kept, the first stays first, and the first [singles] characters alone (one ideograph, 〇 too) after it come right
- * after it, wherever they were among those looked through, each with the emoji and marks that went with it; the
- * words they pass come after them as they were. A word of two or more is rarely what a stroke is drawn for:
- * the character is (dev/design/061-swipe-eval.md §二). A first that is a character alone is no one of them. 0, the order is [session]'s.
+ * The first kept stays first and the first [singles] lone characters come right after it: a stroke is rarely drawn
+ * for a word of two or more.
  *
- * The preedit is [session]'s, then the strokes ([Strokes.shown]). Backspace takes the last stroke
- * back, the pinyin once none is left; nothing found, the bar is empty and Backspace takes the
- * stroke back all the same. A candidate picked (space for the first, a digit, a tap) is [session]'s
- * at its own index, learned and followed as there, the strokes gone; one of part of the input
- * leaves the rest typed, with no strokes. A key that ends [session]'s input (a mark, the nine keys'
- * 0) commits the first candidate shown, then goes on as there; one of part of it leaves the rest typed. A long press's offers are of
- * [session]'s candidate, the strokes kept after it. Any other action (a key read, the cursor moved,
- * Enter) drops the strokes and is [session]'s, which still shows what it showed before the first stroke.
- *
- * [strokes] is asked for at the first stroke: null, there are none, and a stroke does nothing.
+ * Backspace takes the last stroke back; a pick, or a key ending the input, goes to [session] with the strokes'
+ * first candidate; any other action drops the strokes and is [session]'s. [strokes] null: a stroke does nothing.
  */
 class StrokeFilter(
-    /** What is filtered: the input method's session as made, read through for what is not this one's (a glide's readings, Engines.glide). */
+    /** The input method's session, read through for what is not this one's (a glide's readings). */
     val session: Session,
     private val strokes: () -> Strokes?,
     pageSize: Int = StrokeLookup.DEFAULT_PAGE_SIZE,
     private val lookAhead: Int = LOOK_AHEAD,
-    // how many characters alone come right after the first kept (EngineSettings.strokeSingles)
     private val singles: Int = SINGLES,
-    // whether a character's stroke order as the mainland writes it starts with these strokes (CharInfo.orderStartsWith); null where not known
+    // null where the mainland order is not known
     private val mainland: (Int, CharSequence) -> Boolean? = { _, _ -> null },
 ) : Session by session {
 
-    // the strokes drawn, 横竖撇捺折 as Strokes.KEYS
     private val drawn = StringBuilder()
 
     // what [session] showed last: what is filtered, and shown again as the last stroke goes
     private var under: Snapshot? = null
 
-    // [session]'s candidates kept so far, of the first [scanned] looked through; [done] once there are no more to look at
     private val kept = ArrayList<Kept>()
     private var scanned = 0
     private var done = false
 
-    // whether the candidate before the next to look at was kept: a mark or an emoji goes as it went
+    // a mark or an emoji goes as the candidate before it went
     private var lastKept = false
     private val pager = Pager(pageSize)
 
     private class Kept(val index: Int, val choice: Choice)
 
-    // the order shown ([singles]), as indices into [kept], so far: the first and its marks, the characters alone moved
-    // after it, then the rest from [restFrom] on, those moved passed over
+    // the order shown, as indices into [kept]: the first and its marks, the lone characters moved up, then the rest from [restFrom]
     private val order = ArrayList<Int>()
     private val moved = HashSet<Int>()
     private var restFrom = 0
 
-    /** Whether strokes are drawn: the candidates shown are those they keep. */
     val filtering: Boolean get() = drawn.isNotEmpty()
 
     override fun apply(action: Action): Snapshot {
@@ -93,7 +72,6 @@ class StrokeFilter(
             is Action.Block -> pressed(action.index) { action.copy(index = it) }
             Action.NextPage -> turn(pager.page + 1)
             Action.PreviousPage -> turn(pager.page - 1)
-            Action.Refine -> again(session.apply(action))
             is Action.Key -> if (session.endsInput(action.char)) left(action) else passed(action)
             else -> passed(action)
         }
@@ -103,15 +81,15 @@ class StrokeFilter(
         if (!filtering) session.candidates(from, count) else (from until from + count).mapNotNull { keptAt(it)?.choice }
 
     override fun offers(index: Int): Set<Offer> =
-        if (!filtering) session.offers(index) else keptAt(index)?.let { session.offers(it.index) }.orEmpty()
+        if (!filtering) session.offers(index) else at(index)?.let { session.offers(it) }.orEmpty()
 
-    override fun readingOf(index: Int): List<WordReading>? = if (!filtering) session.readingOf(index) else keptAt(index)?.let { session.readingOf(it.index) }
+    override fun readingOf(index: Int): List<WordReading>? = if (!filtering) session.readingOf(index) else at(index)?.let { session.readingOf(it) }
 
-    override fun why(index: Int): Why? = if (!filtering) session.why(index) else keptAt(index)?.let { session.why(it.index) }
+    override fun why(index: Int): Why? = if (!filtering) session.why(index) else at(index)?.let { session.why(it) }
 
-    override fun blockScope(index: Int): BlockScope? = if (!filtering) session.blockScope(index) else keptAt(index)?.let { session.blockScope(it.index) }
+    override fun blockScope(index: Int): BlockScope? = if (!filtering) session.blockScope(index) else at(index)?.let { session.blockScope(it) }
 
-    override fun lookedUp(index: Int): String? = if (!filtering) session.lookedUp(index) else keptAt(index)?.let { session.lookedUp(it.index) }
+    override fun lookedUp(index: Int): String? = if (!filtering) session.lookedUp(index) else at(index)?.let { session.lookedUp(it) }
 
     override fun reread(): Snapshot? {
         val s = session.reread() ?: return null
@@ -124,7 +102,7 @@ class StrokeFilter(
     }
 
     private fun stroke(c: Char): Snapshot {
-        // nothing typed (联想 shown, or nothing at all): no stroke to filter by, as the keyboard draws none then
+        // nothing typed: no stroke to filter by, as the keyboard draws none then
         val typed = under?.let(::typing) == true
         if (!typed || c !in Strokes.KEYS || strokes() == null) return unchanged()
         drawn.append(c)
@@ -143,10 +121,8 @@ class StrokeFilter(
         return shown(session.apply(action))
     }
 
-    // a key that ends [session]'s input (a mark, the nine keys' 0, a 双拼 `;` where no syllable
-    // starts) ends it as there, but with the first candidate shown, the strokes', not [session]'s own
-    // first: picked, then the key goes on. One that reads only the start leaves the rest typed and the
-    // key unsent, as a pick of it does: sent, [session] would commit its own guess at the rest
+    // a key ending [session]'s input commits the strokes' first candidate, then goes on; one reading only the start
+    // leaves the rest typed and the key unsent, or [session] would commit its own guess at the rest
     private fun left(key: Action.Key): Snapshot {
         if (keptAt(0) == null) return passed(key)
         val picked = pick(0)
@@ -156,17 +132,24 @@ class StrokeFilter(
     }
 
     private fun pick(index: Int): Snapshot {
-        val k = keptAt(index) ?: return snapshot()
+        val k = at(index) ?: return if (keptAt(index) != null) refilter(keepPage = true) else snapshot()
         end()
-        return shown(session.apply(Action.Pick(k.index)))
+        return shown(session.apply(Action.Pick(k)))
     }
 
-    private inline fun pressed(index: Int, at: (Int) -> Action): Snapshot {
-        val k = keptAt(index) ?: return snapshot()
-        return after(session.apply(at(k.index)))
+    private inline fun pressed(index: Int, action: (Int) -> Action): Snapshot {
+        val k = at(index) ?: return snapshot()
+        return after(session.apply(action(k)))
     }
 
-    // [s], what [session] shows after an action taken under the strokes: filtered again, or itself once nothing is typed
+    // where the [i]th shown is in [session]'s list now: the list may have moved under the strokes (a tap on 好看
+    // once committed 估计, which the strokes do not keep)
+    private fun at(i: Int): Int? {
+        val k = keptAt(i) ?: return null
+        if (session.candidates(k.index, 1).firstOrNull()?.text == k.choice.text) return k.index
+        return session.candidates(0, scanned).indexOfFirst { it.text == k.choice.text }.takeIf { it >= 0 }
+    }
+
     private fun after(s: Snapshot): Snapshot {
         shown(s)
         if (typing(s)) return refilter(keepPage = true)
@@ -174,22 +157,9 @@ class StrokeFilter(
         return s
     }
 
-    // no page to turn to: the key (a hardware - or =) is the app's where nothing is kept, as in PinyinSession
+    // no page to turn to: the key is the app's where nothing is kept, as in PinyinSession
     private fun turn(to: Int): Snapshot =
         if (pager.turn(to) { keptAt(it) != null }) snapshot() else snapshot().copy(handled = keptAt(0) != null)
-
-    // [s], what [session] shows refined under the strokes (the host sends Refine at each pause):
-    // what was kept stays where it shows as before, a pause in the sentence models' work then no look
-    // through as many as LOOK_AHEAD again; else kept again, the page as it was if it is still there.
-    // A refine moves the sentence it picks first (PinyinSession.refine), so an order it changed shows
-    // on the first page; a reread may change any, and is kept again whole
-    private fun again(s: Snapshot): Snapshot {
-        val before = under
-        val same = before != null && s.preedit == before.preedit && s.candidates == before.candidates && s.total == before.total
-        if (!same || !typing(s)) return after(s)
-        shown(s)
-        return snapshot()
-    }
 
     private fun refilter(keepPage: Boolean): Snapshot {
         val page = pager.page
@@ -214,7 +184,6 @@ class StrokeFilter(
         restFrom = 0
     }
 
-    // the [i]th candidate shown, the characters alone moved up ([singles])
     private fun keptAt(i: Int): Kept? {
         if (i < 0) return null
         if (singles <= 0) return inOrder(i)
@@ -222,7 +191,6 @@ class StrokeFilter(
         return order.getOrNull(i)?.let { kept[it] }
     }
 
-    // [order] a step longer: at first the first kept with its marks and the [singles] after it, then the next of the rest
     private fun extend(): Boolean {
         if (order.isEmpty()) {
             if (inOrder(0) == null) return false
@@ -249,7 +217,6 @@ class StrokeFilter(
         }
     }
 
-    // the kept candidate at [at] and the emoji and marks kept after it, each told [take]: where the next is
     private inline fun group(at: Int, take: (Int) -> Unit): Int {
         take(at)
         var next = at + 1
@@ -257,7 +224,6 @@ class StrokeFilter(
         return next
     }
 
-    // the [i]th candidate kept in [session]'s order, looking through [session]'s as far as needed
     private fun inOrder(i: Int): Kept? {
         if (i < 0) return null
         val table = strokes() ?: return null
@@ -278,22 +244,18 @@ class StrokeFilter(
     private fun keeps(text: String, table: Strokes): Boolean {
         if (text.isEmpty()) return false
         val first = text.codePointAt(0)
-        // an emoji, a mark: no strokes of its own, it follows the word it is offered after
-        // (〇 is no letter to Java, but written as one)
+        // an emoji, a mark: it follows the word it is offered after (〇 is no letter to Java, but written as one)
         if (mark(text)) return lastKept
-        // one the mainland's table has goes by that order alone, as its card shows it: rime-stroke's others are
-        // mostly Taiwan's, which start otherwise for 473 of its 6940 (艳 丿一一丨, 小 乛丿丶: ST-120)
+        // the mainland's order alone where known: rime-stroke's others are mostly Taiwan's (艳, 小 start otherwise)
         mainland(first, drawn)?.let { return it }
         return first <= Char.MAX_VALUE.code && table.startsWith(first.toChar(), drawn)
     }
 
-    // an emoji, a mark: no letter first
     private fun mark(text: String): Boolean {
         val first = text.codePointAt(0)
         return !Character.isLetterOrDigit(first) && !Character.isIdeographic(first)
     }
 
-    // a character alone: one ideograph (〇 too)
     private fun alone(text: String): Boolean = text.isNotEmpty() && Character.charCount(text.codePointAt(0)) == text.length &&
         Character.isIdeographic(text.codePointAt(0))
 
@@ -304,7 +266,6 @@ class StrokeFilter(
 
     private fun typing(s: Snapshot) = s.preedit.isNotEmpty() && !s.predicting
 
-    // what [session] showed, as it was: nothing committed again
     private fun unchanged(): Snapshot = under?.copy(commit = "", deleteBefore = 0, handled = true) ?: NOTHING
 
     private fun snapshot(): Snapshot {
@@ -326,23 +287,20 @@ class StrokeFilter(
             actionable = s.actionable,
             syllables = s.syllables,
             syllablesId = s.syllablesId,
-            refines = s.refines,
+            syllablesSaid = s.syllablesSaid,
             cursor = s.cursor,
         )
     }
 
     companion object {
-        /** How many of the session's candidates are looked through for those the strokes keep. */
         const val LOOK_AHEAD = 2000
 
-        /** How many characters alone come right after the first kept, unless set otherwise (首页单字, 0 to 5). */
+        /** How many lone characters come right after the first kept, unless set otherwise (首页单字, 0 to 5). */
         const val SINGLES = 2
         val SINGLES_RANGE = 0..5
 
-        // the pinyin, then the strokes
         const val SEPARATOR = " "
 
-        // how many candidates are asked for at a time
         private const val CHUNK = 32
 
         private val NOTHING = Snapshot("", "", emptyList(), 0, hasPreviousPage = false, hasNextPage = false, handled = true, predicting = false)

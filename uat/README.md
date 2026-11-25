@@ -15,7 +15,7 @@
 | [02-keyboard.md](02-keyboard.md) | 全键盘的每个键、长按、滑动、网址邮箱框、网址和邮箱建议、括号成对、滑行输入、笔画筛选 |
 | [03-t9.md](03-t9.md) | 九键键盘（拼音的九键、九键英文） |
 | [04-panels.md](04-panels.md) | 数字键盘（含日期、时间、电话这些框自带的数字键盘）、符号面板、表情面板、表情拼音搜索 |
-| [05-toolbar.md](05-toolbar.md) | 工具栏（含自选的工具栏按钮）、文本编辑、剪贴板（含切词、历史上限）、状态面板（含 ⋯ 里的「键盘」）、单手模式、悬浮键盘、计算结果 |
+| [05-toolbar.md](05-toolbar.md) | 工具栏（含自选的工具栏按钮）、文本编辑、剪贴板（含最近和收藏、切词、历史上限）、状态面板（含 ⋯ 里的「键盘」）、单手模式、悬浮键盘、计算结果 |
 | [06-pinyin.md](06-pinyin.md) | 全拼：整句、简拼、纠错、模糊音、中英混输、笔画、联想、长按候选、学词、拆字、表情候选、自带日期时间、滑行、笔画筛选；拼音 18 键和 14 键 |
 | [07-shuangpin.md](07-shuangpin.md) | 双拼 |
 | [08-english.md](08-english.md) | 英文 |
@@ -29,11 +29,11 @@
 | [16-landscape-split.md](16-landscape-split.md) | 横屏、分体键盘、分体时其他面板靠边，竖屏、横屏键盘样式 |
 | [17-hardware-keyboard.md](17-hardware-keyboard.md) | 实体键盘 |
 | [18-lifecycle.md](18-lifecycle.md) | 转屏、切换应用、换输入框、引擎重启这些时刻 |
-| [19-motion-notices.md](19-motion-notices.md) | 提示条（位置、替换、配色）、始终显示悬浮条、候选字号 |
+| [19-motion-notices.md](19-motion-notices.md) | 提示条（位置、替换、配色）、始终显示悬浮条、候选字号、主题里的宠物 |
 | [20-accessibility.md](20-accessibility.md) | 读屏：开着 TalkBack 探索触摸每个键盘、表情/颜文字/符号面板的格子、长按候选的菜单（读的话、节点框、焦点） |
 | [fixtures/](fixtures/) | 测试页 `fields.html` 和导入用的词表 |
 
-大词库用例（WD-14d、14h、TBL-12c 发版时用发布包脚本跑，平时不跑；发版时手动跑的 WD-14r、14v、TBL-12d 也要；14i、14s 等搬到 JVM 的用 fixtures 里的 big-words.txt 或小词表，不要它）要雾凇拼音（[rime-frost](https://github.com/gaboolic/rime-frost/releases)）发布的
+大词库用例（WD-14d、14h、TBL-12c 发版时用发布包脚本跑，平时不跑；发版时手动跑的 WD-14v 也要；14i、14s 等搬到 JVM 的用 fixtures 里的 big-words.txt 或小词表，不要它）要雾凇拼音（[rime-frost](https://github.com/gaboolic/rime-frost/releases)）发布的
 `frost_dict_for_fcitx5.txt`，约 89 MB，不放进 fixtures：下载后用环境变量 `UAT_FROST=<路径>` 指给脚本。用例里的数
 （1914461 个词、176 行读不懂）出自 SHA-256 为 `86473190c505691c7f1ef7b87345a16b555c75fea30527f472a151b6eb1ad41f`
 的那一份（1914637 行），脚本先核对哈希，对不上记为 Blocked；换新版时连同用例里的数一起改。
@@ -74,12 +74,15 @@
 3. 幽默输入法已启用并设为当前键盘。
 4. 浏览器里打开了测试页（见下），点了「普通文本」框，屏幕键盘已弹出，当前输入法是拼音，键盘上方是工具栏。
 
+默认的性能档位是「自动」。用例里没学过时的首选（如「他 dl」第一个是「的脸」）按高档写，JVM 回放也按高档跑；
+M6 模拟器上自动即高，在自动定成中档或低档的机器上手工照做，先在 **通用输入** 里把 **性能档位** 选成「高档」。
+
 **B0-横屏**：B0，再把设备转成横屏（关掉自动旋转时，用系统的旋转按钮或 `adb shell settings put system user_rotation 1`），
 重新点一下「普通文本」框。
 
 **B0-14键**：B0，然后在 **输入法 → 拼音** 里把 **键盘** 选成「14 键」，回测试页点「普通文本」框。
 
-**B0-注音九键**、**B0-注音全键盘**：同 B0-14键，**键盘** 选成「注音九键」「注音全键盘」。
+**B0-拼音18键**、**B0-注音九键**、**B0-注音全键盘**：同 B0-14键，**键盘** 选成「18 键」「注音九键」「注音全键盘」。
 
 **B0-18键**：B0，在 **输入法** 里添加"双拼"，然后在 **输入法 → 双拼** 里把 **方案** 选成"自然码"（新装默认是小鹤）、**键盘** 选成「18 键」，回测试页点「普通文本」框，换到双拼。
 
@@ -173,6 +176,8 @@ adb shell su 0 am start -n io.github.sraw.youmo.debug/org.fcitx.fcitx5.android.i
 | 大部分 | 真机或 Android 模拟器（arm64-v8a 镜像，装的就是发布用的 arm64 包；Apple 芯片上原生跑）。发版前至少在一台真机上跑一遍 P0；语音的 VO-23、VO-24、VO-26 也在真机上照「操作」跑（时间戳、开麦前的全零、真实的小声，片段麦克风测不到），VO-55 在真机上量松开到出字的时间（模拟器上只是中位数 ≤ 1500 ms 的粗线） |
 | 实体键盘（17） | 真机接蓝牙或 USB 键盘；或者模拟器加一个 uinput 键盘（见 [17-hardware-keyboard.md](17-hardware-keyboard.md) 开头）。模拟器有自己的内核，和别的用例同一台设备上跑；**只在模拟器里造虚拟键盘**（容器类设备如 redroid 和宿主机共用内核，造出来的键盘宿主机也会收到） |
 | 横屏与分体（16） | 屏幕横过来宽度不少于 600 dp 的手机或平板，模拟器也行 |
+| 宠物的内存（MN-31） | 默认模拟器（测试页要 API 34+）；预算按它的 heapgrowthlimit 定，低端机的 3 MB 预算要在 ≤192 MB 的镜像上量 |
+| 用 node 做样本的（ST-203、ST-215） | 任何模拟器；跑 `uat.py` 的电脑要装 node（ST-203 用 `web/theme-maker/tools/make-skin-fixtures.mjs` 做加密的搜狗皮肤，ST-215 还要先 `./gradlew :lib:keyboard-scene:youmoEngine`）；没有 node 时记阻塞 |
 | 语音（12） | 真机，有麦克风，导入语音包；arm64 debug 包导入语音包后也能在模拟器上跑（片段麦克风，见「实体键盘和语音」） |
 
 模拟器快照里装了浏览器"WebView Browser Tester"（`org.chromium.webview_shell`），测试页在它里面打开（`am start -a android.intent.action.VIEW -d <地址> -n org.chromium.webview_shell/.WebViewBrowserActivity`）。
@@ -183,23 +188,23 @@ adb shell su 0 am start -n io.github.sraw.youmo.debug/org.fcitx.fcitx5.android.i
 
 | 类 | 在哪 | 写法 | 例子 |
 |---|---|---|---|
-| 引擎 | ime-core 单测（小数据、毫秒级）或 `:lib:ime-eval:uatTest`（真数据：EngineReplay 只有引擎，HostReplay 加 Kotlin 宿主的标点、简繁、快速输入、面板、虚拟时钟） | `needs="jvm:<测试类>.<方法>"`，`.md` 加 **JVM** 行 | 整句、学习排序、标点、快速输入、九键连按 |
+| 引擎 | ime-core 单测（小数据、毫秒级）或 `:lib:ime-eval:uatTest`（真数据：EngineReplay 只有引擎，HostReplay 加 Kotlin 宿主的标点、简繁、快速输入、面板、虚拟时钟） | `.md` 写 **JVM** 行，测试方法标 `@Uat`；脚本里不用登记 | 整句、学习排序、标点、快速输入、九键连按 |
 | 界面 | `:app:testDebugUnitTest` 的 Robolectric + Roborazzi（`uat/*UatTest`、`KeyboardHarness`、`*KeyboardScreenshotTest`） | 同上 | 键盘样子、状态面板、设置页、词库页、横屏/分体 |
 | 只能在设备上 | 模拟器 | 不写 `needs=` | 真窗口和 insets、系统界面（向导、输入法选择框、导航栏、TalkBack）、麦克风、真实体键盘、安装/升级/降级、杀进程、转屏和切应用、锁屏、内存和堆 |
 | 冒烟 | 模拟器，另有 JVM 断言 | 不写 `needs=`，`.md` 有 **JVM** 行并写"设备上留作冒烟" | 每区一条胶水最重的 |
 
-设备上跑的是下面这些（2026-11 搬到模拟器前 redroid 上的 33 条，加上原来单独在模拟器上跑的实体键盘 17 条）：
+搬到模拟器时（2026-11）设备上跑的是下面这些（redroid 上的 33 条，加上原来单独在模拟器上跑的实体键盘 17 条），之后只零星补过几条（PAN-35、T9-71）。这张表不是全部：之后的用例 JVM 断言什么、设备上还看什么写在各条的 **JVM** 行，现在的条数见下面「现在共」那一行：
 
 | 类 | 用例 |
 |---|---|
 | 只能在设备上（17） | KB-31、LC-01、LC-02、LC-03、LC-08、LC-10、LC-11、LC-13、PR-34、PY-96、SET-01、SET-09、ST-09、ST-26、ST-39、TB-22、TB-41 |
 | 冒烟（13） | KB-01、PY-01、T9-02、EN-02、HW-03、TBL-01、TB-08、PR-03、PR-10、LS-03、QU-01、WD-03、ST-29 |
-| JVM 断言了一部分、设备上照跑（8） | EN-19、TB-23、WD-37、WD-39、WD-42、T9-60、PY-109、ST-48 |
+| JVM 断言了一部分、设备上照跑（10） | EN-19、TB-23、WD-37、WD-39、WD-42、T9-60、T9-71、PY-109、ST-48、PAN-35 |
 | 实体键盘（17） | HK-01、HK-03、HK-03c、HK-03d、HK-17、HK-24、HK-29、HK-35、HK-36、HK-37、HK-39、HK-40、HK-41、HK-42、HK-43、HK-44、HK-45 |
 
 新用例先想能不能在 JVM 上断言；只有落在"只能在设备上"那几类的才写设备脚本。一条既有引擎半又有界面半时两半各写一个测试，
 不因为"界面那半 JVM 没断言"把整条留在设备上。
-这八条 JVM 上有测试，剩下的那半还在设备上：EN-19 的打字结果（「hello 」「abc hello 」、退格、逗号）JVM 上断言，设备上只看候选栏不出联想词；TB-23 的 Robolectric 转屏不重排已显示的悬浮键盘，JVM 上是转屏后新起的键盘读回位置。WD-37 的读完前不能导入导出 JVM 上断言，设备上走系统的文件选择器、真的导入导出文件；WD-39、WD-42（常用词）的排序和确认框 JVM 上断言，设备上从真的文件选择器导入、导出，看真引擎的候选。T9-60（注音九键）、PY-109（大千）的键盘排列和引擎 JVM 上断言，设备上看真引擎、真数据打出的码行和候选；ST-48（浮条）的出现、位置和触摸区 JVM 上断言，设备上看真窗口里应用的输入框排到哪里、浮条能不能点。原先还没搬的 EN-11、PY-87、T9-31 已于 2026-10-31 整条搬到 JVM。ST-26（动画）和 LC-10（引擎重启）要在 main 代码里加口子（IdleUi/InputWindowManager 的动画、HostDaemon 的引擎工厂）才能上 JVM，先算在"只能在设备上"。
+这十条 JVM 上有测试，剩下的那半还在设备上：EN-19 的打字结果（「hello 」「abc hello 」、退格、逗号）JVM 上断言，设备上只看候选栏不出联想词；TB-23 的 Robolectric 转屏不重排已显示的悬浮键盘，JVM 上是转屏后新起的键盘读回位置。WD-37 的读完前不能导入导出 JVM 上断言，设备上走系统的文件选择器、真的导入导出文件；WD-39、WD-42（常用词）的排序和确认框 JVM 上断言，设备上从真的文件选择器导入、导出，看真引擎的候选。T9-60（注音九键）、PY-109（大千）的键盘排列和引擎 JVM 上断言，设备上看真引擎、真数据打出的码行和候选；ST-48（浮条）的出现、位置和触摸区 JVM 上断言，设备上看真窗口里应用的输入框排到哪里、浮条能不能点。PAN-35（数字框打 -）的键盘和发出的键 JVM 上断言，设备上看真的网页框和 EditText 收没收到。T9-71（一个字的文字像键角小字）的画法 JVM 上断言，设备上经设置页真的设好，量真字体画出的墨迹。原先还没搬的 EN-11、PY-87、T9-31 已于 2026-10-31 整条搬到 JVM。ST-26（动画）和 LC-10（引擎重启）要在 main 代码里加口子（IdleUi/InputWindowManager 的动画、HostDaemon 的引擎工厂）才能上 JVM，先算在"只能在设备上"。
 
 平时模拟器跑这些；发版时（`UAT_BUILD=release`）再加上面 `release,scripted:` 的三条大词库用例，`jvm` 的 run 文件也要绿。
 
@@ -216,14 +221,14 @@ adb shell su 0 am start -n io.github.sraw.youmo.debug/org.fcitx.fcitx5.android.i
 | `needs=` | 在哪跑 | 例子 |
 |---|---|---|
 | `voice:…` | 导入了语音包的 debug 包（默认就是；`--no-voice` 时、发布包上在别处跑：发布包没有片段麦克风） | 12 语音 |
-| `release:…` | 发版时手动（要上一版正式包或两个版本的包） | PR-13、PR-14、PR-30、PR-35、PR-36、PR-37、PR-38、PR-41、PR-43、TBL-12d、TBL-33、TBL-43、WD-14r、WD-14v、QU-20、ST-82、ST-85、ST-110 |
+| `release:…` | 发版时手动（要上一版正式包或两个版本的包） | PR-13、PR-14、PR-35、PR-36、PR-37、PR-38、TBL-43、WD-14v、QU-20、ST-82、ST-85、TB-76、PR-71、ST-226、ST-229 |
 | `release,scripted:…` | 发版时用发布包脚本跑（`UAT_BUILD=release` 时脚本照跑，平时不跑；要雾凇拼音，一条三四分钟） | WD-14d、WD-14h、TBL-12c |
-| `manual:…` | 真机或手工 | HK-03a、HK-03b、HK-30、HK-33、MN-13、SET-11、ST-56、ST-57、ST-58、QU-24、ST-68、ST-69、ST-70、ST-73、ST-74、TB-53、VO-37、ST-75、ST-76、ST-77、ST-78、ST-79、ST-80、ST-81、TB-46a、PR-51、ST-83、ST-84、ST-86、ST-87、ST-88、ST-89、ST-91、ST-92、ST-93、ST-94、ST-102、ST-103、KB-84、ST-111、WD-49、PR-52a、ST-116、KB-88、VO-40、PY-121a、LC-33、ST-131、ST-141、ST-189、ST-190、PY-156 |
-| `jvm:<测试>` | JVM 上的测试（`:app:testDebugUnitTest`、`:app:testDebugUnitTestAt29` 的 Robolectric，`:lib:ime-eval:uatTest` 的引擎回放，`:lib:ime-core:test`，`:lib:keyboard-scene:jvmTest`），`uat.py jvm` 记录 | T9-01、PAN-09、ST-01、MN-20 |
+| `manual:…` | 真机或手工 | HK-03a、HK-03b、HK-30、HK-33、MN-13、SET-11、ST-56、ST-57、ST-58、QU-24、ST-68、ST-69、ST-70、ST-73、ST-74、TB-53、VO-37、ST-75、ST-76、ST-77、ST-78、ST-79、ST-80、ST-81、TB-46a、PR-51、ST-83、ST-84、ST-86、ST-87、ST-88、ST-89、ST-91、ST-92、ST-93、ST-94、ST-102、ST-103、KB-84、ST-111、WD-49、PR-52a、ST-116、KB-88、VO-40、PY-121a、LC-33、ST-131、ST-141、ST-189、ST-190、PY-156、ST-224 |
+| `jvm:<测试>` | JVM 上的测试（.md 有 **JVM** 行、脚本里没有这条的，`uat.py` 自动按 jvm 算，测试名从 `@Uat` 读；`:app:testDebugUnitTest`、`:app:testDebugUnitTestAt29` 的 Robolectric，`:lib:ime-eval:uatTest` 的引擎回放，`:lib:ime-core:test`，`:lib:keyboard-scene:jvmTest`），`uat.py jvm` 记录 | T9-01、PAN-09、ST-01、MN-20 |
 
 `skip:…`／`block:…` 只留给别的原因，记"跳过"／"阻塞"。
 
-现在共 1106 条（P0 149、P1 829、P2 128）：模拟器上跑 179 条（其中 129 条在 JVM 上也断言，设备上留作冒烟或照跑），在别处跑 927 条（JVM 816、发版时 25、真机或手工 66、语音 20）。
+现在共 1207 条（P0 153、P1 906、P2 148）：模拟器上跑 230 条（其中 176 条在 JVM 上也断言，设备上留作冒烟或照跑），在别处跑 977 条（JVM 863、发版时 22、真机或手工 70、语音 22）。
 
 （2026-11 从 redroid 搬到模拟器时 `needs=` 改了两处：原来的 `emu:` 去掉，实体键盘用例不再单独跑；`release,redroid:` 改名 `release,scripted:`，意思不变：发版时脚本跑。）
 
@@ -276,7 +281,7 @@ debug 包（要先有 arm64-v8a debug 包），只当宿主应用、把它自己
 有些用例的 **预期** 在 JVM 上就能完整断言：`app/src/test` 里的 `KeyboardHarness` 在 Robolectric 里造出整个键盘
 （真的输入法服务和 `InputView`，引擎换成 `FakeHostApi`，候选等用假事件推进来），设置页用 `MainActivity` 加同一个假引擎；
 样子用 Roborazzi 截图，和 `app/src/test/screenshots/` 里提交的金图比。测试方法上标 `@Uat("<编号>")`（keyboard-scene 的测试用它自己的 `org.fcitx.fcitx5.android.scene.Uat`），用例 .md 里多一行
-**JVM** 写测试名；整条搬走的，脚本里是 `needs="jvm:…"`，设备上不跑。还在设备上留一条冒烟的（看引擎和界面之间的胶水），
+**JVM** 写测试名（「暂无」「没有」「无」开头的不算 JVM 行）；整条搬走的，脚本里不再登记（`uat.py` 把它算作 `jvm:`，测试名从 `@Uat` 读），设备上不跑。`uat.py counts`（CI 跑）把没有一个测试标它的 `@Uat` 的、**JVM** 行写的 `类.方法` 不是哪个测试的，都报成问题。还在设备上留一条冒烟的（看引擎和界面之间的胶水），
 .md 里写明。
 
 ```sh

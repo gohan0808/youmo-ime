@@ -6,21 +6,15 @@ package org.fcitx.fcitx5.android.engine.handwriting
 
 import org.fcitx.fcitx5.android.engine.data.PinyinData
 import org.fcitx.fcitx5.android.engine.data.PinyinDataBuilder
+import org.fcitx.fcitx5.android.engine.data.syl
 import org.fcitx.fcitx5.android.engine.lattice.CoarseWords
 import org.fcitx.fcitx5.android.engine.lattice.Predictor
 import org.fcitx.fcitx5.android.engine.lattice.UserWords
 import org.fcitx.fcitx5.android.engine.lattice.WordScorer
-import org.fcitx.fcitx5.android.engine.pinyin.Syllables
 import org.fcitx.fcitx5.android.engine.user.UserModel
 import java.nio.ByteBuffer
 
-private fun syl(vararg s: String) = s.map { Syllables.id(it) }.toIntArray()
-
-/**
- * The words the handwriting tests read: 谈 and 淡 alike to the pad, 谈话 a word; 人 likelier than
- * 山 alone, 山 after 高. In testFixtures, as bytes too, for ime-eval's tests to read the same
- * words, from a file where they run a command.
- */
+/** The handwriting tests' words, in testFixtures as bytes for ime-eval's tests too. */
 val handwritingDataBytes: ByteArray by lazy {
     PinyinDataBuilder()
         .unigram("<unk>", -7f, 0f)

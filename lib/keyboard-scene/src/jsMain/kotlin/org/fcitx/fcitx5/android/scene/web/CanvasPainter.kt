@@ -21,38 +21,21 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-/** What a page gives the painter besides the scene: its files, the keyboard's picture, the icons, the fonts' CSS families. */
 internal interface PaintAssets {
-    /** The CSS font-family list a scene's font name (`system`, a theme's `<font>`) is drawn and measured in. */
     fun family(font: String): String
 
-    /** The theme's image [file] (a nine-slice's): `{image, width, height}`, the image a 2D context draws; null where there is none (yet). */
     fun image(file: String): dynamic
 
-    /** The theme's picture, blurred [blurDp] and at [brightness] (null: the theme's own), the scene's size, drawn at its top left; null where there is none. */
     fun picture(blurDp: Int?, brightness: Int?): dynamic
 
-    /** The icon [name] as the app draws it: `{vw, vh, paths: [{d, rule?, stroke?, alpha?, transform?}]}`; null where there is none. */
+    /** An app icon's or a theme SVG's paths, or a raster icon decoded as [image] gives one: `{image, width, height}`. */
     fun icon(name: String): dynamic
 }
 
 /**
- * A scene's ops ([Op]) drawn on a 2D canvas context (CanvasRenderingContext2D): the app's ScenePainter for the
- * theme maker's page, op for op, so the page shows what the phone does. It computes nothing of where things go
- * (the engine did), only how a canvas draws each, as ScenePainter has Android draw it:
- * - a blur is Skia's ([sigma]: what BlurMaskFilter makes of its radius), drawn as a canvas's shadow of the
- *   shape put far off (a shadow's blur is every browser's; `filter` is not), so nothing of the shape itself shows;
- * - what Android draws as one shape is drawn on a layer and laid on the canvas once ([laid]): a shape less
- *   another (a key cap's band under its face; an inner shadow's ring less its hole) is the one filled and the
- *   other cut out of it by the nonzero rule (Path.op's DIFFERENCE of two winding fills, a path that crosses
- *   itself too), and text outlined is its stroke and fill together, so a colour not opaque is laid once, not twice;
- * - text is set as Paint sets it: squeezed by its scale from where it starts, letter-spaced half a space in
- *   from its start (Paint.letterSpacing's), outlined by a stroke twice the width drawn with its fill
- *   (FILL_AND_STROKE), its shadow both again, moved and blurred;
- * - a nine-slice cut as NineSliceLayout cuts it, its source's pixels whole; an icon its vector's paths in its
- *   tint, at whole pixels as a drawable's bounds are, each path's stroke as VectorDrawable's defaults.
- * [width] and [height] are the scene's: where the picture is laid. The layers are canvases the size of the
- * context's own ([ctx]`.canvas`): a page's canvas has one.
+ * A scene's ops drawn on a 2D canvas as the app's ScenePainter draws them, so the page shows what the phone does. A blur
+ * is drawn as the shadow of the shape put far off (shadow blur is in every browser, `filter` is not); what Android draws
+ * as one shape is drawn on a layer and laid once, so a translucent colour is not laid twice.
  */
 internal class CanvasPainter(
     private val ctx: dynamic,
@@ -61,14 +44,13 @@ internal class CanvasPainter(
     private val width: Double,
     private val height: Double,
 ) {
-    // the context drawn on: the canvas's, or a layer's while one is drawn ([laid])
     private var c: dynamic = ctx
 
     // a canvas without the context's letterSpacing (Safari before 18.4, Firefox before 115) has letters set one by one
     private val spaces: Boolean = hasLetterSpacing(ctx)
 
     init {
-        // layers, areas and text outlines all size themselves by it; fail here, not midway through a scene
+        // fail here, not midway through a scene
         check(ctx.canvas != null && ctx.canvas != undefined) { "a painter needs a context with a canvas" }
     }
 
@@ -97,6 +79,7 @@ internal class CanvasPainter(
             is Op.Picture -> picture(op)
             is Op.Text -> text(op)
             is Op.Icon -> icon(op)
+            is Op.Sticker -> sticker(op)
         }
     }
 
@@ -106,15 +89,12 @@ internal class CanvasPainter(
         c.fill()
     }
 
-    // what of [shape] is outside [less]: the one filled on a layer, the other cut out of it
     private fun fillLess(shape: Shape, less: Shape, color: Argb) = laid(area(shape.bounds), color, 0.0) {
         trace(shape)
         c.fill()
         cut(less)
     }
 
-    // inside the face, its ring less its hole in the shadow's colour, blurred: the ring filled on a layer, the
-    // hole cut out of it, that blurred as one onto the canvas clipped to the face
     private fun innerShadow(op: Op.InnerShadow) {
         c.save()
         trace(op.shape)
@@ -129,7 +109,6 @@ internal class CanvasPainter(
         c.restore()
     }
 
-    // [shape] cut out of what the layer has: the nonzero rule, as Path.op takes a winding path
     private fun cut(shape: Shape) {
         c.globalCompositeOperation = "destination-out"
         trace(shape)
@@ -138,12 +117,7 @@ internal class CanvasPainter(
         c.globalCompositeOperation = "source-over"
     }
 
-    /**
-     * [draw] (paths filled, text set: in the styles it is given) drawn on a layer, within the device's [area], as
-     * one thing in [color] blurred [radius] px: opaque there, then laid on the canvas once at [color]'s alpha, or
-     * its shadow ([blurred]) where [radius] is some. What overlaps itself in it (a stroke and its fill) is not
-     * laid twice, and what is cut out of it is gone before it is blurred.
-     */
+    /** Self-overlap (a stroke and its fill) is not laid twice, and cut-outs are gone before the blur. */
     private inline fun laid(area: IntArray, color: Argb, radius: Double, draw: () -> Unit) {
         if (area[2] == 0 || area[3] == 0) return
         val l = layer()
@@ -181,13 +155,11 @@ internal class CanvasPainter(
         c.restore()
     }
 
-    // the layer for [laid]: a canvas the size of the context's, kept for the next paint of it
     private fun layer(): dynamic {
         val canvas = ctx.canvas
         val w = canvas.width as Int
         val h = canvas.height as Int
         val kept = LAYERS.get(canvas)
-        // one of another size (the canvas resized since) is made again
         val fits = kept != null && kept != undefined && kept.canvas.width == w && kept.canvas.height == h
         if (fits) return kept
         val l = newCanvas(canvas, w, h).getContext("2d")
@@ -195,7 +167,6 @@ internal class CanvasPainter(
         return l
     }
 
-    // [box] (in the context's units) on the device: x, y, width, height in whole pixels, round it and on the canvas
     private fun area(box: Box): IntArray {
         val t = c.getTransform()
         val m = listOf(t.a, t.b, t.c, t.d, t.e, t.f).map { (it as Number).toDouble() }
@@ -210,11 +181,6 @@ internal class CanvasPainter(
     }
 
 
-    /**
-     * [draw] (a path filled, a text set, an image laid: in the fill style it is given) blurred [radius] px in
-     * [color], or as it is where [radius] is none: a canvas's shadow of what [draw] draws far to the left, so only
-     * the shadow lands where it was. Its blur in the device's pixels: the radius times [scale] (the context's).
-     */
     private inline fun blurred(radius: Double, color: Argb, scale: Double = deviceScale(), draw: () -> Unit) {
         if (radius <= 0) {
             c.fillStyle = css(color)
@@ -229,14 +195,12 @@ internal class CanvasPainter(
         c.shadowOffsetX = a * FAR
         c.shadowOffsetY = b * FAR
         c.translate(-FAR, 0.0)
-        // opaque: the shadow is its colour's alpha, the shape's coverage times it
         c.fillStyle = OPAQUE
         c.strokeStyle = OPAQUE
         draw()
         c.restore()
     }
 
-    // where a step of 1 across goes on the device: the context's transform's first column (none known: 1, 0)
     private fun deviceX(): Pair<Double, Double> {
         if (c.getTransform == undefined) return 1.0 to 0.0
         val m = c.getTransform()
@@ -246,7 +210,6 @@ internal class CanvasPainter(
     private fun deviceScale(): Double = deviceX().let { (a, b) -> sqrt(a * a + b * b) }
 
     private fun gradient(op: Op.Gradient) {
-        // CSS's: 0deg up, 90deg right, the line long enough for the corners to reach the ends' colours (ScenePainter's)
         val b = op.shape.bounds
         val a = op.angle * PI / HALF_TURN
         val dx = sin(a)
@@ -262,7 +225,6 @@ internal class CanvasPainter(
     private fun nineSlice(op: Op.NineSlice) {
         val image = assets.image(op.file)
         if (image == null || image == undefined) {
-            // theme 3.0's colour where the image is not (yet)
             op.fallback?.let { fill(op.shape, it) }
             return
         }
@@ -274,7 +236,6 @@ internal class CanvasPainter(
         trace(op.shape)
         c.clip()
         for (p in pieces) {
-            // the source's whole pixels, as Android's Rect of them
             val sl = p.src.left.toInt()
             val st = p.src.top.toInt()
             val sw = p.src.right.toInt() - sl
@@ -293,7 +254,6 @@ internal class CanvasPainter(
             c.drawImage(p, 0.0, 0.0, width, height)
             c.restore()
         }
-        // the colour over it, there with the picture or without (theme 3.0's key face)
         op.over?.let { fill(op.shape, it) }
     }
 
@@ -315,7 +275,6 @@ internal class CanvasPainter(
                 laid(textArea(op, x, y, stroke.width, s.blur), s.color, s.blur) { glyphs(op, x, y, stroke) }
             }
         }
-        // FILL_AND_STROKE: the outline and the letters one shape, its colour laid once
         stroke?.let { s -> laid(textArea(op, op.x, op.baseline, s.width, 0.0), s.color, 0.0) { glyphs(op, op.x, op.baseline, s) } }
         if (!op.color.transparent) {
             c.fillStyle = css(op.color)
@@ -324,18 +283,14 @@ internal class CanvasPainter(
         if (rotated) c.restore()
     }
 
-    // the room [op] set at ([x], [y]) takes on the device, its outline [stroke] wide and blurred [blur] round it: what
-    // a layer clears and lays for it, not the whole canvas (a theme outlining every key's words laid the canvas once
-    // a key). Its run measured; a letter's ascent and descent, an italic's lean, generously: a layer cut short
-    // would cut the letters, one too large costs only pixels
+    // what a layer clears and lays, not the whole canvas (a theme outlining every key's words laid the canvas once per key)
     private fun textArea(op: Op.Text, x: Double, y: Double, stroke: Double, blur: Double): IntArray {
         c.save()
         c.font = font(op.weight, op.size, assets.family(op.font))
         val m = c.measureText(op.text)
         c.restore()
         val run = (m.width as Number).toDouble()
-        // marks stacked past the generous ascent or descent (Thai, Vietnamese, some emoji fonts): the ink's own
-        // reach where the canvas tells it, so no layer cuts them
+        // marks stacked past the generous ascent or descent (Thai, Vietnamese, some emoji fonts)
         val ascent = maxOf(op.size * ASCENT, (m.actualBoundingBoxAscent as Number?)?.toDouble() ?: 0.0)
         val descent = maxOf(op.size * DESCENT, (m.actualBoundingBoxDescent as Number?)?.toDouble() ?: 0.0)
         val width = (run + op.letterSpacing * op.size * op.text.length) * op.scaleX
@@ -344,17 +299,14 @@ internal class CanvasPainter(
         return area(Box(x - pad - lean, y - ascent - pad, x + width + pad + lean, y + descent + pad))
     }
 
-    // the glyphs at ([x], [y]) in the styles set, outlined by [stroke] where given (its colour the fill's: FILL_AND_STROKE)
     private fun glyphs(op: Op.Text, x: Double, y: Double, stroke: TextStroke?) {
         val spacing = op.letterSpacing * op.size
-        // the text's styles within the save: the page's context is left as it was found
         c.save()
         c.font = font(op.weight, op.size, assets.family(op.font))
         if (spaces) c.letterSpacing = "${spacing}px"
         c.textAlign = "left"
         c.textBaseline = "alphabetic"
-        // Paint spaces letters half before each, a canvas all after: moved by the half, squeezed as the
-        // letters are (Minikin's spacing is the size times the scale; a canvas's is, under the scale below)
+        // Paint spaces letters half before each, a canvas all after
         c.translate(x + spacing * op.scaleX / 2, y)
         if (op.scaleX != 1.0) c.scale(op.scaleX, 1.0)
         if (stroke != null) {
@@ -364,7 +316,6 @@ internal class CanvasPainter(
         if (spaces || spacing == 0.0) {
             set(op.text, 0.0, stroke != null)
         } else {
-            // no letterSpacing: each letter where a canvas with it would set it, its advance and the spacing on
             var at = 0.0
             for (letter in letters(op.text)) {
                 set(letter, at, stroke != null)
@@ -379,11 +330,57 @@ internal class CanvasPainter(
         c.fillText(text, x, 0.0)
     }
 
+    // not decoded (yet): the words and icon it hides, as the app draws them until its own decode is in
+    private fun sticker(op: Op.Sticker) {
+        val image = assets.image(op.file)
+        if (image == null || image == undefined) {
+            draw(op.standIn)
+            return
+        }
+        if (op.alpha <= 0) return
+        val at = fitted((image.width as Number).toDouble(), (image.height as Number).toDouble(), op.box)
+        c.save()
+        c.globalAlpha = op.alpha.coerceAtMost(1.0)
+        c.drawImage(image.image, at.left, at.top, at.width, at.height)
+        c.restore()
+    }
+
+    private fun raster(op: Op.Icon, image: dynamic) {
+        val b = op.box
+        val at = fitted((image.width as Number).toDouble(), (image.height as Number).toDouble(), b)
+        val turned = op.rotation != 0.0
+        val turn = {
+            if (turned) {
+                c.translate(b.centerX, b.centerY)
+                c.rotate(op.rotation * PI / HALF_TURN)
+                c.translate(-b.centerX, -b.centerY)
+            }
+        }
+        if (!op.tintMask) {
+            c.save()
+            turn()
+            c.globalAlpha = op.tint.alpha / OPAQUE_ALPHA.toDouble()
+            c.drawImage(image.image, at.left, at.top, at.width, at.height)
+            c.restore()
+            return
+        }
+        // its alpha alone, in the tint: drawn on a layer, the colour laid over it source-in, the layer laid at the tint's alpha
+        val r = if (turned) sqrt(at.width * at.width + at.height * at.height) / 2 else 0.0
+        val reach = if (turned) Box(at.centerX - r, at.centerY - r, at.centerX + r, at.centerY + r) else at
+        laid(area(reach), op.tint, 0.0) {
+            turn()
+            c.drawImage(image.image, at.left, at.top, at.width, at.height)
+            c.globalCompositeOperation = "source-in"
+            c.fillRect(at.left, at.top, at.width, at.height)
+            c.globalCompositeOperation = "source-over"
+        }
+    }
+
     private fun icon(op: Op.Icon) {
         val icon = assets.icon(op.name)
-        // a transparent icon-color hides the icon, a theme's own coloured paths too
         if (icon == null || icon == undefined || op.tint.transparent) return
-        // whole pixels, as the drawable's bounds
+        // a raster icon not decoded yet has the app's of its name here, drawn as its own is
+        if (icon.image != null && icon.image != undefined) return raster(op, icon)
         val b = op.box
         val left = b.left.roundToInt()
         val top = b.top.roundToInt()
@@ -399,12 +396,10 @@ internal class CanvasPainter(
         val vw = (icon.vw as Number).toDouble()
         val vh = (icon.vh as Number).toDouble()
         if (icon.vx == null) {
-            // the app's own icons (no viewBox origin given) stretched to the box as its VectorDrawable's bounds are:
-            // a box a px wider than tall, its sides rounded apart, is filled the same on both
+            // the app's own icons stretch to the box as VectorDrawable bounds do
             c.scale(w / vw, h / vh)
         } else {
-            // a theme's SVG scaled alike both ways and centred (it may be wide), its viewBox's origin at the box's
-            // top left (Material Symbols' is 0 -960), as the app's PackIconDrawable fits it
+            // a theme's SVG scaled uniformly and centred, as the app's PackIconDrawable fits it
             val fit = SvgSubset.Icon(vw, vh, emptyList(), (icon.vx as Number).toDouble(), (icon.vy as Number).toDouble())
                 .fit(Box(0.0, 0.0, w.toDouble(), h.toDouble()))
             c.translate(fit.dx, fit.dy)
@@ -420,15 +415,12 @@ internal class CanvasPainter(
             if (p.stroke != null && p.stroke != undefined) {
                 c.strokeStyle = tint
                 c.lineWidth = (p.stroke as Number).toDouble()
-                // VectorDrawable's defaults for a path's stroke (the icons' JSON says none of these): a canvas's
-                // are the same but its miter limit, 10, and an earlier op may have left others
+                // an earlier op may have left other stroke settings
                 c.lineCap = "butt"
                 c.lineJoin = "miter"
                 c.miterLimit = MITER_LIMIT
                 c.stroke(path)
             } else {
-                // a theme SVG's own colour keeps its hue, faded by the icon-color's alpha as the tinted paths are,
-                // rounded as the app's PackIconDrawable rounds it
                 val own = p.fill as Number?
                 c.fillStyle = own?.let { Argb(it.toInt()).let { f -> css(Argb.of((f.alpha * op.tint.alpha / OPAQUE_ALPHA.toDouble()).roundToInt(), f.red, f.green, f.blue)) } } ?: tint
                 c.fill(path, (p.rule as String?) ?: "nonzero")
@@ -438,7 +430,6 @@ internal class CanvasPainter(
         c.restore()
     }
 
-    // an icon's group transform as SVG writes it (`translate(x y) rotate(r) scale(x y)`), applied in order
     private fun transform(t: String) {
         for (m in STEP.findAll(t)) {
             val v = m.groupValues[2].trim().split(SPACE).filter { it.isNotEmpty() }.map { it.toDouble() }
@@ -455,8 +446,7 @@ internal class CanvasPainter(
         add(shape)
     }
 
-    // [shape] added to the path: a rectangle rounded as Skia rounds it (radii too large for a side all scaled
-    // down alike), or the path's edges
+    // radii too large for a side all scaled down alike, as Skia does
     private fun add(shape: Shape) {
         when (shape) {
             is Shape.Rect -> {
@@ -500,21 +490,26 @@ internal class CanvasPainter(
     }
 
     companion object {
-        /** A colour as CSS writes it, its alpha 0–1. */
         fun css(c: Argb): String = "rgba(${c.red},${c.green},${c.blue},${c.alpha / 255.0})"
 
-        /** A canvas's `font`: the weight, the size in px, the families. */
         fun font(weight: Int, size: Double, family: String): String = "$weight ${size}px $family"
 
-        /** The Gaussian's sigma Skia gives a blur of [radius] (SkBlurMask::ConvertRadiusToSigma: BlurMaskFilter's). */
+        /** An image [w]×[h] scaled alike to sit in [box], centred, never past 3 times its own size (a raster icon, a sticker). */
+        fun fitted(w: Double, h: Double, box: Box): Box {
+            if (w <= 0 || h <= 0) return Box(box.centerX, box.centerY, box.centerX, box.centerY)
+            val k = minOf(box.width / w, box.height / h, MAX_UPSCALE)
+            val dw = w * k
+            val dh = h * k
+            return Box(box.centerX - dw / 2, box.centerY - dh / 2, box.centerX + dw / 2, box.centerY + dh / 2)
+        }
+
         fun sigma(radius: Double): Double = if (radius > 0) SIGMA_SCALE * radius + SIGMA_BIAS else 0.0
 
         private const val SIGMA_SCALE = 0.57735
         private const val SIGMA_BIAS = 0.5
         private const val MITER_LIMIT = 4.0
+        private const val MAX_UPSCALE = 3.0
 
-        // a text's room round its run, in its size: above its baseline, below, either side (textArea); a blur's
-        // reach in its radii
         private const val ASCENT = 1.25
         private const val DESCENT = 0.5
         private const val LEAN = 0.25
@@ -522,25 +517,23 @@ internal class CanvasPainter(
         private const val HALF_TURN = 180.0
         private const val OPAQUE_ALPHA = 255
 
-        // far enough that a shape put there shows nothing on any canvas a page makes
         const val FAR = 100_000.0
         private const val OPAQUE = "#000000"
         private val STEP = Regex("(translate|rotate|scale)\\(([^)]*)\\)")
         private val SPACE = Regex("[\\s,]+")
 
-        // each page canvas's layer (its 2D context), weakly: a canvas let go takes its layer with it
+        // weak: a canvas let go takes its layer with it
         private val LAYERS: dynamic = js("new WeakMap()")
     }
 }
 
-// made once, not a function a call (an icon's every path, a text's every letter)
+// made once, not per call (every path of an icon, every letter of a text)
 private val MAKE_PATH2D: dynamic = js("(function (d) { return new Path2D(d); })")
 private val HAS_LETTER_SPACING: dynamic = js("(function (c) { return 'letterSpacing' in c; })")
 private val CODE_POINTS: dynamic = js("(function (t) { return Array.from(t); })")
 
 private fun newPath2D(d: String): dynamic = MAKE_PATH2D(d)
 
-// a canvas [w] × [h]: an OffscreenCanvas where there is one, else one of [like]'s document
 private fun newCanvas(like: dynamic, w: Int, h: Int): dynamic {
     val make: dynamic = js(
         "(function (like, w, h) { if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(w, h); " +
@@ -551,5 +544,4 @@ private fun newCanvas(like: dynamic, w: Int, h: Int): dynamic {
 
 private fun hasLetterSpacing(ctx: dynamic): Boolean = HAS_LETTER_SPACING(ctx) as Boolean
 
-// [text]'s letters: its code points (a canvas sets no fewer)
 private fun letters(text: String): Array<String> = CODE_POINTS(text).unsafeCast<Array<String>>()

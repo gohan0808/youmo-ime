@@ -4,6 +4,7 @@
  */
 package org.fcitx.fcitx5.android.engine.lattice
 
+import org.fcitx.fcitx5.android.engine.data.syl
 import org.fcitx.fcitx5.android.engine.platform.jvm.JvmFile
 import org.fcitx.fcitx5.android.engine.user.DictionaryCompiler
 import org.fcitx.fcitx5.android.engine.user.DictionaryFile
@@ -26,7 +27,7 @@ class CoarseWordsTest {
         assertEquals(list.distinct(), list)
     }
 
-    // PY-37: `cao` put 肏 on the first page
+    // `cao` put 肏 on the first page
     @Test
     fun theVulgarCaoIsListed() {
         assertTrue(listOf("肏", "肏你妈", "操逼").all { it in CoarseWords.LIST })
@@ -74,10 +75,7 @@ class CoarseWordsTest {
         assertFalse(list.unasked(13, Typed(emptyMap(), texts), 10))
     }
 
-    /**
-     * Guards speed, not a result ([aWordOfTheListIsUnaskedTillTheUserTypesIt] has those): asked of every arc
-     * of a lattice, nearly none of them the list's, unasked looks up the user's counts of the list's words alone.
-     */
+    /** Guards speed, not a result: asked of every arc, unasked looks up the user's counts of the list's words alone. */
     @Test
     fun theUsersCountsAreLookedUpForTheListsWordsAlone() {
         val user = Typed(mapOf(0 to 1f, 13 to 1f), texts)
@@ -88,7 +86,6 @@ class CoarseWordsTest {
         assertEquals("counts looked up for a word of the list", 1, user.asked)
     }
 
-    // review S6: a merged dictionary's word on the list is unasked by its id, till the user typed it
     @Test
     fun aMergedDictionarysWordOnTheListIsUnaskedTillTyped() {
         val data = UserFixtures.data
@@ -99,7 +96,7 @@ class CoarseWordsTest {
             DictionaryFile.open(JvmFile(file)),
         )
         val coarse = CoarseWords.of({ -1 }, listOf("拟浩"))
-        val entry = { t: String -> UserModel.Entry(t, UserFixtures.syl("ni", "hao")) }
+        val entry = { t: String -> UserModel.Entry(t, syl("ni", "hao")) }
         val listed = user.known(entry("拟浩"))
         assertTrue(user.isMerged(listed))
         assertTrue(coarse.unasked(listed, user, data.vocabulary.size))

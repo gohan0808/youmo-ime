@@ -76,14 +76,27 @@ class SkinZipTest {
 
     @Test
     fun aFinderZipOfOneFlexIsUnpackedLikeAnyOther() {
-        // the bug: Finder adds __MACOSX/._ink.flex beside ink.flex; it was counted as a second .flex, so the
-        // inner one was never unpacked and the import failed with a file-name error
+        // Finder's __MACOSX/._ink.flex was counted as a second .flex, so the inner one was never unpacked
         val flex = zip("extension.json" to "{}".toByteArray(), "stylesheets/a.json" to "{}".toByteArray())
         val finder = zip("ink.flex" to flex, "__MACOSX/._ink.flex" to byteArrayOf(0, 5, 22, 7))
         assertEquals(setOf("extension.json", "stylesheets/a.json"), SkinZip.readSkin(finder.inputStream(), "ink.zip").keys)
         // nor is a `._extension.json` beside it an extension of the outer ZIP's own
         val dot = zip("ink.flex" to flex, "._extension.json" to byteArrayOf(0))
         assertEquals(setOf("extension.json", "stylesheets/a.json"), SkinZip.readSkin(dot.inputStream(), "ink.zip").keys)
+    }
+
+    @Test
+    fun aZipOfOneSkinFileIsThatFile() {
+        // an issue's attachment: a ZIP is all one may upload, Finder's files beside it
+        val bdi = zip("port/gen.ini" to "[PANEL]".toByteArray(), "Info.txt" to "Name=x".toByteArray())
+        val attached = zip("x.BDI" to bdi, "__MACOSX/._x.BDI" to byteArrayOf(0))
+        assertEquals(setOf("port/gen.ini", "Info.txt"), SkinZip.readSkin(attached.inputStream(), "a.zip").keys)
+        // a skin's own ZIP holding one, a container (the converter's to open) and a format told apart by its name: as they are
+        val baidu = zip("port/gen.ini" to byteArrayOf(1), "res/old.bdi" to bdi)
+        assertEquals(setOf("port/gen.ini", "res/old.bdi"), SkinZip.readSkin(baidu.inputStream(), "a.zip").keys)
+        assertEquals(setOf("w.ssf"), SkinZip.readSkin(zip("w.ssf" to "Skin\u0003\u0000junk".toByteArray()).inputStream(), "a.zip").keys)
+        assertEquals(setOf("t.sxi"), SkinZip.readSkin(zip("t.sxi" to bdi).inputStream(), "a.zip").keys)
+        assertEquals(setOf("a.bds", "b.it"), SkinZip.readSkin(zip("a.bds" to bdi, "b.it" to bdi).inputStream(), "a.zip").keys)
     }
 
     @Test
@@ -118,8 +131,7 @@ class SkinZipTest {
 
     @Test
     fun aZippedExtensionIsUnpackedWithinTheZipsBudget() {
-        // a budget of 300 KB (the rule, at a test's size): 200 KB unpacked in the .flex (within it alone), 100 KB more
-        // in the ZIP's own files: past it together
+        // 300 KB: 200 KB unpacked in the .flex, 100 KB more in the ZIP's own files: past it together
         val budget = 300L * 1024
         val rnd = Random(3)
         fun noise(n: Int) = ByteArray(n) { rnd.nextInt(4).toByte() }
@@ -167,8 +179,17 @@ class SkinZipTest {
     }
 
     @Test
+    fun aSogouContainerIsHandedOnWhole() {
+        // opened by the converter; `read` (a ZIP's, a .flex's inside one) still refuses it
+        val container = "Skin\u0003\u0000junk".toByteArray()
+        val files = SkinZip.readSkin(container.inputStream(), "dl/warm.ssf")
+        assertEquals(setOf("warm.ssf"), files.keys)
+        assertArrayEquals(container, files.getValue("warm.ssf"))
+        assertEquals(Reason.SOGOU_ENCRYPTED, reason(container))
+    }
+
+    @Test
     fun notAZip() {
-        assertEquals(Reason.SOGOU_ENCRYPTED, reason("Skin\u0003\u0000junk".toByteArray()))
         assertEquals(Reason.NOT_ZIP, reason("hello world".toByteArray()))
         assertEquals(Reason.NOT_ZIP, reason(ByteArray(0)))
         assertEquals(Reason.NOT_ZIP, reason(ByteArray(40).also { it[0] = 0x50; it[1] = 0x4b; it[2] = 3; it[3] = 4 }))
@@ -235,7 +256,7 @@ class SkinZipTest {
             try {
                 SkinZip.read(x)
             } catch (_: SkinError) {
-                // refused with a reason: as it should be
+                // refused with a reason
             }
         }
     }

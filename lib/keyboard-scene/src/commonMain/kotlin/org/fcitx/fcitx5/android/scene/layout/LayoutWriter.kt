@@ -9,7 +9,7 @@ import org.fcitx.fcitx5.android.scene.xml.Xml
 import kotlin.math.floor
 
 /**
- * A [Layout] as layout-1's text (061-custom-layout §12, what the layout maker saves and the app exports), canonical: one
+ * A [Layout] as layout-1's text (what the layout maker saves and the app exports), canonical: one
  * layout is always the same text, and [LayoutReader] reads it back as the same layout.
  *
  * - `<meta>`, `<defaults>`, then the rows and includes in order; two spaces an indent, an element a line.
@@ -73,15 +73,7 @@ object LayoutWriter {
                     "    ", "gap",
                     listOf("id" to cell.id, "width" to cell.width.takeIf { it != Width.Units(1.0) }?.let(::width), "when" to cell.condition?.toString()),
                 )
-                is Slot -> element(
-                    "    ", "slot",
-                    listOf(
-                        "id" to cell.id, "kind" to cell.kind, "width" to cell.width.takeIf { it != Width.Units(1.0) }?.let(::width),
-                        "rows" to cell.rows.takeIf { it != 1 }?.toString(), "face" to cell.face.takeIf { it != Face.Default }?.xml,
-                        "look" to cell.look, "class" to cell.classes.takeIf { it.isNotEmpty() }?.joinToString(" "),
-                        "when" to cell.condition?.toString(),
-                    ),
-                )
+                is Slot -> slot(cell)
             }
         }
         appendLine("  </row>")
@@ -90,6 +82,24 @@ object LayoutWriter {
     private fun StringBuilder.defaults(indent: String, d: KeyAttrs) {
         val attrs = look(d) + listOf("width" to d.width?.let(::width))
         if (attrs.any { it.second != null }) element(indent, "defaults", attrs)
+    }
+
+    private fun StringBuilder.slot(cell: Slot) {
+        val scroll = cell.kind == LayoutReader.SCROLL
+        element(
+            "    ", "slot",
+            listOf(
+                "id" to cell.id, "kind" to cell.kind, "list" to cell.list,
+                "direction" to cell.direction.takeIf { it != Direction.Vertical && scroll }?.xml,
+                "show" to cell.show.takeIf { it != Slot.DEFAULT_SHOW && scroll }?.toString(),
+                "width" to cell.width.takeIf { it != Width.Units(1.0) }?.let(::width),
+                "rows" to cell.rows.takeIf { it != 1 }?.toString(),
+                "face" to cell.face.takeIf { it != if (scroll) LayoutReader.SCROLL_FACE else Face.Default }?.xml,
+                "look" to cell.look.takeIf { !scroll || it != LayoutReader.SCROLL_LOOK },
+                "class" to cell.classes.takeIf { it.isNotEmpty() }?.joinToString(" "),
+                "when" to cell.condition?.toString(),
+            ),
+        )
     }
 
     private fun StringBuilder.key(k: Key) {
@@ -200,7 +210,7 @@ object LayoutWriter {
                 '\t' -> append("&#9;")
                 '\n' -> append("&#10;")
                 '\r' -> append("&#13;")
-                // what XML has no character for (a control pasted into a name): left out, as the reader drops it (R26 F8187)
+                // what XML has no character for (a control pasted into a name): left out, as the reader drops it
                 else -> if (Xml.allows(c)) append(c)
             }
         }

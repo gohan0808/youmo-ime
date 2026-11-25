@@ -4,20 +4,26 @@
  */
 package org.fcitx.fcitx5.android.uat
 
+import android.content.ClipData
 import android.text.InputType
+import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.preference.PreferenceManager
 import androidx.preference.TwoStatePreference
+import kotlinx.coroutines.job
+import kotlinx.coroutines.runBlocking
 import org.fcitx.fcitx5.android.FcitxApplication
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.Uat
 import org.fcitx.fcitx5.android.daemon.HostDaemon
+import org.fcitx.fcitx5.android.data.clipboard.ClipboardManager
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
 import org.fcitx.fcitx5.android.input.KeyboardHarness
 import org.fcitx.fcitx5.android.ui.main.LogActivity
 import org.fcitx.fcitx5.android.ui.main.settings.SettingsRoute
 import org.fcitx.fcitx5.android.until
 import org.fcitx.fcitx5.android.utils.appContext
+import org.fcitx.fcitx5.android.utils.clipboardManager
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -30,7 +36,6 @@ import org.robolectric.annotation.GraphicsMode
 import org.robolectric.shadows.ShadowDialog
 import org.robolectric.shadows.ShadowToast
 
-/** 开发者 (uat/14 ST-29, ST-119; uat/18 LC-20): its page, the editor info inspector it turns on in the keyboard's ⋯, 语音先问再记's counts. */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(application = FcitxApplication::class, qualifiers = "w393dp-h851dp-port-440dpi")
@@ -39,8 +44,7 @@ class DeveloperUatTest {
     @get:Rule
     val prefs = PrefsRule()
 
-    // read each time, not kept from the class's making (OneDefaultPreferencesShadow now makes the page's
-    // preferences AppPrefs' own; before it the switch saved to another, 2026-10-31's full run)
+    // read each time, not kept from the class's making: the page's preferences must be AppPrefs' own
     private val inspector get() = AppPrefs.getInstance().internal.editorInfoInspector
 
     @Test
@@ -56,7 +60,7 @@ class DeveloperUatTest {
             val switch = st.pref(R.string.editor_info_inspector) as TwoStatePreference
             switch.performClick()
             st.idle()
-            // saved under the inspector's key in the default preferences, which AppPrefs reads
+            // the default preferences, which AppPrefs reads
             val saved = PreferenceManager.getDefaultSharedPreferences(st.activity).getBoolean(inspector.key, false)
             assertTrue("switch ${switch.isChecked}", switch.isChecked && saved)
         }
@@ -71,7 +75,6 @@ class DeveloperUatTest {
         SettingsHarness().use { st ->
             st.activity
             st.open(SettingsRoute.Developer)
-            // a line to read, not a button
             assertTrue(!st.pref(st.activity.getString(R.string.voice_ask_counts, 3, 1)).isSelectable)
         }
     }
@@ -91,7 +94,6 @@ class DeveloperUatTest {
         }
     }
 
-    // 重启 Fcitx 实例, OK: what it says once the restart is done or given up on
     private fun restartSays(): String = SettingsHarness().use { st ->
         st.activity
         st.open(SettingsRoute.Developer)
@@ -116,6 +118,31 @@ class DeveloperUatTest {
             assertEquals(appContext.getString(R.string.restart_fcitx_still_starting), restartSays())
         } finally {
             HostDaemon.testRestarted = true
+        }
+    }
+
+    @Test
+    @Uat("ST-196")
+    fun clearingTheClipboardDatabaseTakesTheFavouritesToo() {
+        ClipboardManager.resetDuplicateCheck()
+        appContext.clipboardManager.setPrimaryClip(ClipData.newPlainText(null, "公园"))
+        runBlocking {
+            ClipboardManager.coroutineContext.job.children.forEach { it.join() }
+            ClipboardManager.favorite(ClipboardManager.lastEntry!!.id)
+        }
+        assertEquals(1 to 1, ClipboardManager.recentCount to ClipboardManager.favoriteCount)
+        SettingsHarness().use { st ->
+            st.activity
+            st.open(SettingsRoute.Developer)
+            st.pref(R.string.clear_clb_db).performClick()
+            st.idle()
+            val dialog = ShadowDialog.getLatestDialog() as AlertDialog
+            assertEquals(st.s(R.string.clear_clp_db_confirm), dialog.findViewById<TextView>(android.R.id.message)!!.text.toString())
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+            until("cleared", { ClipboardManager.recentCount to ClipboardManager.favoriteCount }) {
+                st.idle()
+                ClipboardManager.recentCount == 0 && ClipboardManager.favoriteCount == 0
+            }
         }
     }
 }

@@ -16,6 +16,11 @@
     <string-array name="kw_stroke_singles">
         <item>筆畫篩選</item>
     </string-array>
+    <string-array name="kw_shuangpin_keys_shown">
+        <item>拼音行</item>
+        <item>按鍵顯示</item>
+        <item>雙拼字母</item>
+    </string-array>
     <string-array name="kw_glide">
         <item>滑動輸入</item>
         <item>劃詞</item>
@@ -56,6 +61,7 @@
         <item>背景圖</item>
     </string-array>
     <string-array name="kw_clipboard">
+        <item>收藏</item>
         <item>黏貼簿</item>
         <item>剪貼簿</item>
         <item>複製紀錄</item>
@@ -68,6 +74,11 @@
         <item>繁體</item>
         <item>簡繁</item>
         <item>繁簡</item>
+    </string-array>
+    <string-array name="kw_switch_input_method">
+        <item>地球</item>
+        <item>切換輸入法</item>
+        <item>語言</item>
     </string-array>
     <string-array name="kw_nine_keys">
         <item>九宮格</item>
@@ -131,6 +142,9 @@
         <item>慢</item>
         <item>耗電</item>
         <item>省電</item>
+        <item>處理器</item>
+        <item>CPU</item>
+        <item>自動</item>
     </string-array>
     <string-array name="kw_code_row">
         <item>拼音顯示在哪</item>
@@ -172,5 +186,12 @@
     <string-array name="kw_hardware_shortcuts">
         <item>切換輸入法快捷鍵</item>
         <item>Ctrl+Space</item>
+    </string-array>
+    <string-array name="kw_scroll_lists">
+        <item>左列</item>
+        <item>符號列</item>
+        <item>九鍵左邊</item>
+        <item>數字鍵盤符號</item>
+        <item>運算符</item>
     </string-array>
 </resources>

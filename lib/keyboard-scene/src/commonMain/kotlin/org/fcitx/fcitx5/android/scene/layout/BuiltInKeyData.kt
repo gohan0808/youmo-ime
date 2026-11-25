@@ -231,18 +231,9 @@ internal object BuiltInKeyData {
             "num/9" to NONE,
         ),
         unnamed = mapOf(
-            "#" to NONE,
-            "(" to NONE,
-            ")" to NONE,
-            "*" to NONE,
-            "+" to NONE,
-            "," to NONE,
-            "-" to NONE,
             "." to NONE,
-            "/" to NONE,
-            ":" to NONE,
             "=" to NONE,
-            "back" to NONE,
+            "back" to Held(actions = mapOf("long-press" to "panel-lock")),
         ),
     )
 

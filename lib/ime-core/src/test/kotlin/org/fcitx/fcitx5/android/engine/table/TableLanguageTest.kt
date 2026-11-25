@@ -14,10 +14,9 @@ import org.fcitx.fcitx5.android.engine.learn.Kinds
 import org.fcitx.fcitx5.android.engine.learn.Learner
 import org.fcitx.fcitx5.android.engine.pinyin.Syllables
 import org.fcitx.fcitx5.android.engine.rerank.SentencePicker
-import org.fcitx.fcitx5.android.engine.rerank.SentenceRefiner
 import org.fcitx.fcitx5.android.engine.session.Action
 import org.fcitx.fcitx5.android.engine.session.Offer
-import org.fcitx.fcitx5.android.engine.session.syl
+import org.fcitx.fcitx5.android.engine.data.syl
 import org.fcitx.fcitx5.android.engine.user.UserModel
 import org.fcitx.fcitx5.android.engine.user.UserModel.Entry
 import org.fcitx.fcitx5.android.engine.user.UserScorer
@@ -36,7 +35,6 @@ class TableLanguageTest {
         user: UserModel = UserModel(d.dictionary, d.vocabulary),
         predicts: Boolean = false,
         reranker: SentencePicker? = null,
-        refiner: SentenceRefiner? = null,
         block: ((Entry) -> Unit)? = null,
         forgotten: (String) -> Unit = {},
         habits: Habits = Habits.OFF,
@@ -49,7 +47,6 @@ class TableLanguageTest {
             reading = { text -> d.wordIndex.find(text).takeIf { it != NO_WORD }?.let(readings::reading) },
             predictor = if (predicts) readings else null,
             reranker = reranker,
-            refiner = refiner,
             block = block,
             forgotten = forgotten,
             habits = habits,
@@ -66,18 +63,14 @@ class TableLanguageTest {
         // the table's order without one
         assertEquals(listOf("人", "山"), session(null).apply { apply(Action.Context("高")) }.type("abcd").second.candidates)
         val s = session(language())
-        // alone, the commoner first
         assertEquals(listOf("人", "山"), s.type("abcd").second.candidates)
         s.apply(Action.Reset)
-        // after 高, 山
         s.apply(Action.Context("高"))
         assertEquals(listOf("山", "人"), s.type("abcd").second.candidates)
         s.apply(Action.Reset)
-        // after 高 typed here too
         assertEquals("高", s.type("g").first)
         assertEquals(listOf("山", "人"), s.type("abcd").second.candidates)
         s.apply(Action.Reset)
-        // a 简码's order is the table's
         s.apply(Action.Context("高"))
         assertEquals(listOf("人", "山"), s.type("ab").second.candidates.take(2))
         // and every code's, where the table does not order by use (for those who type by position)
@@ -92,14 +85,12 @@ class TableLanguageTest {
         val user = learner.model
         val s = session(language(user, habits = learner.habits))
         s.type("g")
-        // 人 picked after 高, where 山 comes first
         assertEquals("人", s.apply(Action.Select(s.type("abcd").second.candidates.indexOf("人"))).commit)
         assertEquals(setOf("高", "人", "高 人"), learner.used())
-        // under the code typed, no word before it (U-28), corrected where 山 was first; never for pinyin's order (D28)
+        // under the code typed, no word before it, corrected where 山 was first; never for pinyin's order
         val picked = learner.log.state.stats.keys.single { it.code.kind == Kinds.table("wubi") && it.code.keys.isNotEmpty() && it.text == "人" }
         assertEquals("abcd", picked.code.keys)
         assertEquals(0f, user.count(d.wordIndex.find("人")), 0f)
-        // nothing where nothing is learned (a password)
         val noneLearner = Learner(d)
         val none = noneLearner.model
         val password = session(language(none, habits = noneLearner.habits)).apply { learning = false }
@@ -121,13 +112,11 @@ class TableLanguageTest {
         val picked = s.apply(Action.Pick(0))
         assertEquals("山", picked.commit)
         assertTrue("高 山" in learner.used())
-        // a code key ends the offer and starts a code
         s.type("g")
         val typed = s.apply(Action.Key('a'))
         assertFalse(typed.predicting)
         assertEquals("a", typed.preedit)
         s.apply(Action.Reset)
-        // backspace and a key the app takes end it too
         s.type("g")
         val back = s.apply(Action.Backspace)
         assertFalse(back.handled)
@@ -136,16 +125,13 @@ class TableLanguageTest {
         val key = s.apply(Action.Key('，'))
         assertFalse(key.handled)
         assertTrue(key.candidates.isEmpty())
-        // enter puts in what is typed, nothing offered
         s.type("ab")
         assertFalse(s.apply(Action.CommitRaw).predicting)
-        // where nothing is learned, nothing offered
         s.learning = false
         assertFalse(s.type("g").second.predicting)
     }
 
-    // PLAN §2.1, H review N9: a traditional table's words are learned simplified, as 联想 reads them,
-    // so what is put in after one 3 times is offered after it (髙 standing for a traditional 高 here)
+    // learned simplified, as 联想 reads them (髙 standing for a traditional 高)
     @Test
     fun `what a traditional table puts in after a word is offered after it`() {
         val learner = Learner(d)
@@ -166,28 +152,13 @@ class TableLanguageTest {
     }
 
     @Test
-    fun `the sentence models weigh the 重码 again, the large one while the user pauses`() {
+    fun `the sentence model weighs the 重码 again`() {
         val seen = ArrayList<String>()
         val picker = SentencePicker { context, readings, _ -> seen += context; readings.indexOf("山").coerceAtLeast(0) }
         val medium = session(language(reranker = picker))
         medium.apply(Action.Context("我说"))
         assertEquals(listOf("山", "人"), medium.type("abcd").second.candidates)
         assertEquals("我说", seen.last())
-
-        val refiner = SentenceRefiner { _, readings, _, _ -> readings.indexOf("山").takeIf { it >= 0 } ?: SentenceRefiner.NONE }
-        val high = session(language(refiner = refiner))
-        val shown = high.type("abcd").second
-        assertEquals(listOf("人", "山"), shown.candidates)
-        assertTrue(shown.refines)
-        val refined = high.apply(Action.Refine)
-        assertEquals(listOf("山", "人"), refined.candidates)
-        assertFalse(refined.refines)
-        // the one put in is the one shown
-        assertEquals("山", high.apply(Action.Select(0)).commit)
-        // a page turned meanwhile ends the weighing
-        high.type("abcd")
-        high.apply(Action.NextPage)
-        assertEquals(listOf("人", "山"), high.apply(Action.Refine).candidates)
     }
 
     @Test
@@ -196,7 +167,6 @@ class TableLanguageTest {
         val user = learner.model
         val s = session(language(user, habits = learner.habits))
         s.type("g")
-        // the comma is the app's
         assertFalse(s.apply(Action.Key('，')).handled)
         assertEquals(listOf("人", "山"), s.type("abcd").second.candidates)
         s.apply(Action.Select(1))
@@ -221,16 +191,15 @@ class TableLanguageTest {
         }
         val s = TableSession(dictionary("g 高", "abcd 人", "abcd 山", "abcd 天"), TableOptions.WUBI, language = language(), shared = shared)
         s.apply(Action.Context("高"))
-        // a word of pinyin's: after the table's own (U-28); 天, blocked in pinyin, the table's own still (C12)
+        // a word of pinyin's: after the table's own; 天, blocked in pinyin, the table's own still
         assertEquals(listOf("山", "人", "天", "人山"), s.type("abcd").second.candidates)
         s.apply(Action.Reset)
-        // 五笔's z stands for any key: the table's order
         s.apply(Action.Context("高"))
         assertEquals(listOf("人", "山"), s.type("abcz").second.candidates.take(2))
     }
 
     @Test
-    fun `forgetting a table entry forgets it everywhere, as every input method learned it, once learned while ordering by use`() {
+    fun `forgetting a table entry forgets its order under the code alone, once learned while ordering by use`() {
         val forgotten = ArrayList<String>()
         val shared = object : SharedWords by SharedWords.NONE {
             override fun forget(text: String) {
@@ -240,7 +209,6 @@ class TableLanguageTest {
         val learner = Learner(d)
         val s = session(language(learner.model, habits = learner.habits), shared)
         val at = s.type("abcd").second.candidates.indexOf("山")
-        // nothing learned of it yet (U-28)
         assertFalse(Offer.FORGET in s.offers(at))
         s.apply(Action.Forget(at))
         assertEquals(emptyList<String>(), forgotten)
@@ -248,7 +216,9 @@ class TableLanguageTest {
         val again = s.type("abcd").second.candidates.indexOf("山")
         assertTrue(Offer.FORGET in s.offers(again))
         s.apply(Action.Forget(again))
-        assertEquals(listOf("山"), forgotten)
+        // pinyin's learning of 山 is pinyin's: nothing forgotten everywhere, the order here is
+        assertEquals(emptyList<String>(), forgotten)
+        assertFalse(Offer.FORGET in s.offers(s.type("abcd").second.candidates.indexOf("山")))
         // 调频 off: the table's order is all there is, nothing of its own to forget
         val fixed = TableSession(table, TableOptions.WUBI.copy(orderByUse = false), language = language(learner.model, habits = learner.habits))
         assertTrue(fixed.type("abcd").second.candidates.indices.none { Offer.FORGET in fixed.offers(it) })
@@ -285,7 +255,6 @@ class TableLanguageTest {
     fun `a word the user made in pinyin, picked here, is learned as they made it, after the word before it`() {
         val learner = Learner(d)
         val user = learner.model
-        // the word model lacks it: the user's own, read ren shan
         val made = Entry("人山", intArrayOf(Syllables.id("ren"), Syllables.id("shan")))
         user.own(made)
         val shared = object : SharedWords by SharedWords.NONE {
@@ -312,14 +281,12 @@ class TableLanguageTest {
     }
 
     @Test
-    fun `a code that commits itself leaves nothing to weigh, a row twice in the table too`() {
-        val refiner = SentenceRefiner { _, _, _, _ -> 0 }
-        val s = TableSession(dictionary("abcd 人", "abcd 人"), TableOptions.WUBI, language = language(refiner = refiner))
+    fun `a code that commits itself leaves nothing shown, a row twice in the table too`() {
+        val s = TableSession(dictionary("abcd 人", "abcd 人"), TableOptions.WUBI, language = language(reranker = { _, _, _ -> 0 }))
         val (commit, shown) = s.type("abcd")
         assertEquals("人", commit)
-        assertFalse(shown.refines)
         // nothing typed: the code's 重码 are not shown again, to be picked
-        assertTrue(s.apply(Action.Refine).candidates.isEmpty())
+        assertTrue(shown.candidates.isEmpty())
     }
 
     @Test
@@ -328,7 +295,6 @@ class TableLanguageTest {
         val sorted = TableSession(longer, TableOptions.WUBI, language = language())
         sorted.apply(Action.Context("高"))
         assertEquals(listOf("山", "人", "天"), sorted.type("abc").second.candidates)
-        // not sorted by length: the 重码 are placed all the same
         val unsorted = TableSession(longer, TableOptions.WUBI.copy(sortByCodeLength = false), language = language())
         unsorted.apply(Action.Context("高"))
         assertEquals(listOf("山", "人", "天"), unsorted.type("abc").second.candidates)

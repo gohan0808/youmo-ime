@@ -18,6 +18,7 @@ import org.fcitx.fcitx5.android.FcitxApplication
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.Uat
 import org.fcitx.fcitx5.android.data.theme.TestThemes
+import org.fcitx.fcitx5.android.input.NoticeState
 import org.fcitx.fcitx5.android.input.NoticeState.Companion.SAID_MS
 import org.fcitx.fcitx5.android.input.NoticeState.Companion.STEADY_MS
 import org.fcitx.fcitx5.android.input.NoticeState.Companion.UNDO_MS
@@ -28,6 +29,7 @@ import org.fcitx.fcitx5.android.ui.main.settings.PlaceholderStrings
 import org.fcitx.fcitx5.android.ui.main.settings.placeholder
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -38,6 +40,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import org.robolectric.shadow.api.Shadow
 import org.robolectric.shadows.ShadowWindowManagerImpl
+import splitties.dimensions.dp
 import java.time.Duration
 
 /** The keyboard's one notice: one window, replaced in place, put away by a tap, 撤销 or its time. */
@@ -59,13 +62,12 @@ class UndoChipTest {
 
     private fun idle(ms: Long = 0) = shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(ms))
 
-    // the longest animation a notice runs, and a frame after: each below run to its end (F3519)
+    // the longest animation a notice runs, and a frame after: each below run to its end
     private val settled = Motion.entries.maxOf { it.enter(Motion.Settings.DEFAULT) } + FRAME_MS
 
     private fun chip(motion: Motion.Settings = off) =
         UndoChip(anchor, TestThemes.PixelDark, { _, _, _ -> UndoChipPlacement.Place(0, 0, UndoChipPlacement.Slide.Up) }, { motion })
 
-    // the chips up: panels, the activity's own window left out
     private fun windows(): List<View> {
         val wm = Shadow.extract<ShadowWindowManagerImpl>(activity.windowManager)
         return wm.views.filter { (it.layoutParams as? WindowManager.LayoutParams)?.type == WindowManager.LayoutParams.TYPE_APPLICATION_PANEL }
@@ -99,7 +101,7 @@ class UndoChipTest {
         chip.show("二")
         assertEquals("one window, the same one", listOf(first), windows())
         assertEquals(listOf("二"), first.texts())
-        // the first's act stands: replaced is gone without 撤销
+        // replaced is gone without 撤销: the first's act stands
         assertEquals(listOf("lapsed 一"), r.calls)
     }
 
@@ -135,10 +137,51 @@ class UndoChipTest {
         assertEquals(listOf("undo 删"), r.calls)
     }
 
+    // a table's offered words: each its own button of at least 48 dp, the one tapped picked, the notice going; no time of
+    // its own: it stays till a key or the keyboard puts it away
+    @Test
+    fun anOffersWordsAreEachAButtonOfTheirOwn() {
+        val chip = chip()
+        val picked = mutableListOf<String>()
+        val choices = listOf("汪小明 iije", "小明 ihje").map { UndoChip.Choice(it, "said $it") { picked += it } }
+        chip.show("记住：", aboveKeys = true, ms = NoticeState.STAYS, choices = choices)
+        val window = windows().single()
+        assertEquals(listOf("记住：", "汪小明 iije", "小明 ihje"), window.texts())
+        val second = window.find("小明 ihje")!!
+        second.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED)
+        assertTrue(second.measuredWidth >= activity.dp(UndoChip.TOUCH_DP) && second.measuredHeight >= activity.dp(UndoChip.TOUCH_DP))
+        assertEquals("said 小明 ihje", second.contentDescription)
+        // no area beyond the buttons takes a word: a tap off them puts the notice away
+        assertNull((window.find("记住：")!!.parent as View).touchDelegate)
+        second.performClick()
+        assertEquals(listOf("小明 ihje"), picked)
+        assertFalse(chip.showing)
+        // once only
+        second.performClick()
+        assertEquals(listOf("小明 ihje"), picked)
+        chip.show("记住：", aboveKeys = true, ms = NoticeState.STAYS, choices = choices)
+        idle(60_000)
+        assertTrue(chip.showing)
+        chip.typed()
+        assertFalse(chip.showing)
+    }
+
+    @Test
+    fun anOfferReplacedTakesNoTapOnItsFadingWords() {
+        val chip = chip(Motion.Settings.DEFAULT)
+        val picked = mutableListOf<String>()
+        chip.show("记住：", choices = listOf(UndoChip.Choice("汪小明 iije", "") { picked += "汪小明" }))
+        idle(settled)
+        val old = windows().single().find("汪小明 iije")!!
+        chip.show("已复制")
+        old.performClick()
+        assertEquals(emptyList<String>(), picked)
+        assertTrue(chip.showing)
+    }
+
     @Test
     fun withAnimationsOffItIsInPlaceAndOpaqueAtOnce() {
-        // ST-26: 禁用动画 reaches the notice too; a screen recording cannot tell it on a device, the
-        // notice's first frame being most of the way in already
+        // 禁用动画 reaches the notice too; a screen recording cannot tell it, the first frame being most of the way in
         fun View.moved(): Boolean = alpha < 1f || translationX != 0f || translationY != 0f ||
             (this is ViewGroup && (0 until childCount).any { getChildAt(it).moved() })
         chip(off).show("已复制")
@@ -163,7 +206,6 @@ class UndoChipTest {
     fun aLineSaidGoesInOneSecondOneWithUndoInThree() {
         val chip = chip()
         chip.show("已复制")
-        // each pinned from both sides, from its show (F3500)
         idle(SAID_MS - 1)
         assertTrue(chip.showing)
         idle(1)
@@ -197,7 +239,6 @@ class UndoChipTest {
         idle(1)
         assertFalse(chip.showing)
         idle(settled)
-        // a line said is no control: the time to act alone does not lengthen it
         a11y.setNonInteractiveUiTimeout(0)
         chip.show("已复制")
         idle(SAID_MS)
@@ -218,9 +259,9 @@ class UndoChipTest {
     fun clipboardDeletesAreUndoneTogetherFromTheChip() {
         val chip = chip()
         val calls = mutableListOf<String>()
-        val deleted = DeletedEntries({ calls += "undo ${it.toList()}" }, { calls += "purge ${it.toList()}" })
-        deleted.deleted(1).let { (n, undo) -> chip.show("$n", undo, aboveKeys = true) }
-        deleted.deleted(2, 3).let { (n, undo) -> chip.show("$n", undo, aboveKeys = true) }
+        val deleted = DeletedEntries<Int>({ calls += "undo ${it.toList()}" }, { calls += "purge ${it.toList()}" })
+        deleted.deleted(listOf(1)).let { (n, undo) -> chip.show("$n", undo, aboveKeys = true) }
+        deleted.deleted(listOf(2, 3)).let { (n, undo) -> chip.show("$n", undo, aboveKeys = true) }
         assertEquals(listOf("3", undoLabel), windows().single().texts())
         windows().single().find(undoLabel)!!.performClick()
         assertEquals("the first notice replaced purges nothing", listOf("undo [1, 2, 3]"), calls)
@@ -230,13 +271,13 @@ class UndoChipTest {
     fun clipboardDeletesArePurgedWhenAnotherNoticeTakesTheirPlace() {
         val chip = chip()
         val calls = mutableListOf<String>()
-        val deleted = DeletedEntries({ calls += "undo ${it.toList()}" }, { calls += "purge ${it.toList()}" })
-        deleted.deleted(1).let { (n, undo) -> chip.show("$n", undo, aboveKeys = true) }
+        val deleted = DeletedEntries<Int>({ calls += "undo ${it.toList()}" }, { calls += "purge ${it.toList()}" })
+        deleted.deleted(listOf(1)).let { (n, undo) -> chip.show("$n", undo, aboveKeys = true) }
         chip.show("已复制", aboveKeys = true)
         assertEquals(listOf("purge [1]"), calls)
     }
 
-    // a finger down and up at ([x], [y]) of [view], dispatched from its window's root as a touch is
+    // dispatched from its window's root as a touch is
     private fun tap(view: View, x: Float, y: Float) {
         val root = view.rootView
         val at = IntArray(2).also(view::getLocationInWindow)
@@ -257,7 +298,7 @@ class UndoChipTest {
         val r = Record()
         chip.show("删掉了", r.undo("删"))
         idle()
-        // the line between the words and 撤销: a near miss is 撤销's, not the chip's (which lapses)
+        // a near miss between the words and 撤销 is 撤销's, not the chip's (which lapses)
         val line = shownRow("删掉了").getChildAt(1)
         tap(line, 0.5f, line.height / 2f)
         assertEquals(listOf("undo 删"), r.calls)
@@ -281,7 +322,6 @@ class UndoChipTest {
         val old = shownRow("一")
         val s = Record()
         chip.show("二二二二二二", s.undo("二"))
-        // mid crossfade: the old row is still there, its 撤销 too; a finger on it, dispatched
         val button = old.find(undoLabel)!!
         tap(button, button.width / 2f, button.height / 2f)
         assertEquals(listOf("lapsed 一"), r.calls)
@@ -291,8 +331,7 @@ class UndoChipTest {
         assertEquals(listOf("二二二二二二", undoLabel), windows().single().texts())
     }
 
-    // F4048: mid crossfade only the old 撤销's area is swallowed (its delegate rebuilt by the
-    // layout pass replace asks for); the new row's 撤销 takes back its own act
+    // mid crossfade only the old 撤销's area is swallowed (its delegate rebuilt by the layout pass); the new 撤销 takes back its own act
     @Test
     fun duringTheFadeTheOldUndosAreaIsSwallowedAndTheNewUndoTakesBack() {
         val chip = chip(Motion.Settings.DEFAULT)
@@ -305,7 +344,6 @@ class UndoChipTest {
         // the layout pass replace's requestLayout asks for, run now: the delegate moves to nothing
         old.measure(View.MeasureSpec.makeMeasureSpec(old.width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(old.height, View.MeasureSpec.EXACTLY))
         old.layout(old.left, old.top, old.right, old.bottom)
-        // the old row's line beside its 撤销: in the delegate's area, outside 撤销 itself
         val line = old.getChildAt(1)
         tap(line, 0.5f, line.height / 2f)
         assertEquals(listOf("lapsed 一"), r.calls)
@@ -317,7 +355,7 @@ class UndoChipTest {
         assertFalse(chip.showing)
     }
 
-    // F4048: the rest of the old row, under the new one, lets a tap by: it reaches the new notice
+    // the rest of the old row, under the new one, lets a tap by
     @Test
     fun duringTheFadeATapOnTheOldWordsReachesTheNewNotice() {
         val chip = chip(Motion.Settings.DEFAULT)
@@ -331,8 +369,7 @@ class UndoChipTest {
         assertFalse(chip.showing)
     }
 
-    // every notice one size, its words' (the user, 2026-11-17): 撤销 takes the row's height, it
-    // does not stretch the chip to a 48 dp touch target
+    // every notice one size: 撤销 takes the row's height, not stretching the chip to a 48 dp touch target
     @Test
     @Uat("MN-04")
     fun aNoticeWithUndoIsAsTallAsOneThatOnlySays() {
@@ -349,14 +386,13 @@ class UndoChipTest {
         assertEquals(saidHeight, windows().single().height)
         val button = row.find(undoLabel)!!
         assertEquals("撤销 the row's height", saidHeight, button.height)
-        // its own padding, not the ripple's inset's (which setting the background put in its place; c33d19e5b)
+        // its own padding, not the ripple's inset's (which setting the background put in its place)
         val dp = activity.resources.displayMetrics.density
         assertEquals((12 * dp).toInt(), button.paddingStart)
         assertEquals((16 * dp).toInt(), button.paddingEnd)
     }
 
-    // F4143: a notice said before the keyboard's first layout wraps at the screen's width, not at
-    // nothing: as wide as the same notice once the keyboard is laid out
+    // said before the keyboard's first layout, it wraps at the screen's width, not at nothing
     @Test
     fun aNoticeBeforeTheFirstLayoutIsAsWideAsAfterIt() {
         val message = "已复制到剪贴板，可以粘贴"
@@ -411,10 +447,9 @@ class UndoChipTest {
         assertTrue("6 s from the second, not 2 s from the first", chip.showing)
     }
 
-    // the edit menu's box where chip() places a notice (its top left), in the window's pixels
     private val overChip = android.graphics.Rect(0, 0, 500, 100)
 
-    // 051-fix-popup: the edit menu opened where the notices go, under their window
+    // the edit menu opened where the notices go, under their window
     @Test
     @Uat("KB-62")
     fun theEditMenuPutsAwayWhatWasDoneAndHidesAFailureTillItGoes() {
@@ -438,14 +473,13 @@ class UndoChipTest {
         assertTrue(chip.showing)
         chip.uncovered()
         assertTrue("back", said.isShown)
-        // shown again for as long as at first
         idle(STEADY_MS - 1)
         assertTrue(chip.showing)
         idle(1)
         assertFalse(chip.showing)
     }
 
-    // review M1: one said while the menu is up where it goes is under the menu, not over it, and not lost
+    // one said while the menu is up is under the menu, not over it, and not lost
     @Test
     fun aNoticeSaidUnderTheMenuIsShownAsItGoes() {
         val chip = chip()
@@ -454,7 +488,6 @@ class UndoChipTest {
         assertTrue("up", chip.showing)
         val said = windows().single().find("已复制")!!
         assertFalse("but under the menu", said.isShown)
-        // not timed while hidden
         idle(SAID_MS * 3)
         assertTrue(chip.showing)
         chip.uncovered()
@@ -463,12 +496,11 @@ class UndoChipTest {
         assertTrue("timed from then", chip.showing)
         idle(1)
         assertFalse(chip.showing)
-        // the menu gone: the next one said is shown at once
         chip.show("已剪切")
         assertTrue(windows().single().find("已剪切")!!.isShown)
     }
 
-    // review L5: the menu meets only the notices where it is: one over the bar (a word's 撤销) is left as it is
+    // the menu meets only the notices where it is: one over the bar is left as it is
     @Test
     fun theMenuLeavesANoticeElsewhereAlone() {
         val chip = UndoChip(anchor, TestThemes.PixelDark, { _, _, aboveKeys ->
@@ -503,11 +535,11 @@ class UndoChipTest {
         chip.show("已复制")
         chip.typed()
         assertFalse(chip.showing)
-        // the engine could not load: the key it failed on comes to the keyboard after the notice
+        // the key it failed on comes to the keyboard after the notice
         chip.show("读不出来", steady = true)
         chip.typed()
         assertTrue(chip.showing)
-        // said once, it stays its 2 s, counted from its show
+        // it stays its 2 s, counted from its show
         idle(STEADY_MS - 1)
         assertTrue(chip.showing)
         idle(1)

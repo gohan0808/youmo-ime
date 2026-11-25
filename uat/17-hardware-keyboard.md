@@ -211,7 +211,7 @@ Android 10（API 29，youmo29）没有 `uinput` 命令，脚本在那里改用�
 <!-- learning: U-80 -->
 - **前提**：B0-实体，按 PY-54 在「他」后面连着选两次「点了」（「他 dl」第一个是「点了」）。
 - **操作**：打「他」，按 d l；用方向键把高亮移到「点了」；按住 Shift 和 Delete 一两秒再松开；按 Esc 清掉，再打「他」，按 d l。再来一次（先按 PY-54 重新学会「点了」）：按住 Shift 和 Delete，不松 Delete，松开 Shift 再按下，然后两个都松开（只在模拟器上做，交付前跑）。
-- **预期**：「点了」上的 **忘掉学到的** 只做了一次（撤销提示在候选窗上方，窗贴屏幕顶时在下方，不盖候选；光标那行的字看得见；只出现一次）；之后「他 dl」第一个是「带来」，回到词库的顺序。按住 Delete 时再按一次 Shift 那次：没删掉字，学到的只忘一次，仍是中文。
+- **预期**：「点了」上的 **忘掉学到的** 只做了一次（撤销提示在候选窗上方，窗贴屏幕顶时在下方，不盖候选；光标那行的字看得见；只出现一次）；之后「他 dl」第一个是「的脸」，回到没学过时的顺序。按住 Delete 时再按一次 Shift 那次：没删掉字，学到的只忘一次，仍是中文。
 - **JVM**：`HardwareKeyUatTest.shiftDeleteForgetsTheHighlightedOnceHeld`（按住 Shift+Delete 只忘一次高亮的「点了」，Delete 不给引擎；之后的顺序是引擎的事）；设备上不跑。
 
 ### HK-32 [P1] 快速 Shift+Delete 不当轻点 Shift 切中英
@@ -286,7 +286,7 @@ Android 10（API 29，youmo29）没有 `uinput` 命令，脚本在那里改用�
 - **前提**：同 HK-43，屏幕键盘显示着 14 键。
 - **操作**：在屏幕 14 键上点 BN UI GH AS OP（各点在 n、i、h、a、o 那一半，这串键也是「不好」）、空格；按实体键盘的 Esc（联想还在时）；按 n i，按 2。
 - **预期**：「你好」上屏，后面出联想；Esc 之后框里还是「你好」；n i 按全拼读，打字时按 2 选第 2 个候选上屏。Esc 的先后（有联想时第一下先关联想，同 HK-03；之后的才交给应用）只在 JVM 上查，设备上看不到。
-- **JVM**：`KeyboardPairTest.withNothingTypedEscapeAndDigitsAreTheAppsAfterTheFourteenKeysToo`（没打字、也没有联想时，实体键盘的 Esc 交给应用、数字照样选候选）；`EnginesKeys14Test.anEscapeClosesThePredictionsOfTheFourteenKeysFirst`（有联想时 Esc 先关联想）；设备上 Esc 只是冒烟（实体键一按触屏键盘就收起，看不到联想；网页框里 Esc 也不改字），只查「你好」后出现联想、按 2 选第 2 个候选。
+- **JVM**：`KeyboardPairTest.withNothingTypedEscapeAndDigitsAreTheAppsAfterTheFourteenKeysToo`（没打字、也没有联想时，实体键盘的 Esc 交给应用、数字照样选候选）；`EnginesImKeyboardsTest.anEscapeClosesThePredictionsOfTheFourteenKeysFirst`（有联想时 Esc 先关联想）；设备上 Esc 只是冒烟（实体键一按触屏键盘就收起，看不到联想；网页框里 Esc 也不改字），只查「你好」后出现联想、按 2 选第 2 个候选。
 
 ### HK-45 [P1] 双拼 18 键时实体键盘按全键盘双拼打
 - **前提**：B0-实体，添加"双拼"，**方案** 改成"微软"，**键盘** 改成「18 键」，回测试页点「普通文本」框，换到双拼。

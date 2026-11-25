@@ -6,17 +6,31 @@ package org.fcitx.fcitx5.android.data.theme
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import androidx.annotation.VisibleForTesting
+import org.fcitx.fcitx5.android.data.layout.CustomLayouts
 import org.fcitx.fcitx5.android.input.theme.SkinZip
+import org.fcitx.fcitx5.android.scene.layout.LayoutCheck
 import org.fcitx.fcitx5.android.scene.skin.Pixels
+import org.fcitx.fcitx5.android.scene.skin.SkinError
 import org.fcitx.fcitx5.android.scene.skin.SkinImage
 import org.fcitx.fcitx5.android.scene.skin.SkinLimits
+import org.fcitx.fcitx5.android.scene.skin.SkinPlatform
+import org.fcitx.fcitx5.android.utils.LowMemory
+import org.fcitx.fcitx5.android.utils.appContext
+import java.io.BufferedInputStream
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.io.InputStream
+import java.security.GeneralSecurityException
+import java.util.zip.Inflater
+import java.util.zip.InflaterInputStream
+import javax.crypto.Cipher
+import javax.crypto.CipherInputStream
+import javax.crypto.spec.IvParameterSpec
+import javax.crypto.spec.SecretKeySpec
 
-/**
- * A skin's images decoded and a converted one's written by Android ([ThemeFilesManager.openSkin]): an image's size
- * read from its header first, one past [SkinLimits.MAX_IMAGE_PIXELS] not decoded; decoded not premultiplied, as
- * [Pixels] is, its pixels read a part at a time ([SkinImage.pixels]: a key's tile of an atlas, not the atlas whole).
- */
+/** An image past [SkinLimits.MAX_IMAGE_PIXELS] (by its header) is not decoded; decoded unpremultiplied, read a tile at a time. */
 internal object AndroidSkinCodec : ThemeFilesManager.SkinCodec {
     override fun image(bytes: ByteArray): SkinImage? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -33,7 +47,7 @@ internal object AndroidSkinCodec : ThemeFilesManager.SkinCodec {
             override val width = bitmap.width
             override val height = bitmap.height
 
-            // held to the bitmap, as PixelsImage's crop is: getPixels throws past it
+            // held to the bitmap: getPixels throws past it
             override fun pixels(x: Int, y: Int, w: Int, h: Int): Pixels {
                 val l = x.coerceIn(0, width)
                 val t = y.coerceIn(0, height)
@@ -69,5 +83,80 @@ internal object AndroidSkinCodec : ThemeFilesManager.SkinCodec {
         }
     }
 
+    override fun layoutSources(): LayoutCheck.Sources = CustomLayouts.sources
+
+    /**
+     * Read as a stream into one array of the length it gives (no doubling buffer); a byte past it or short of it is no
+     * payload. A phone low on memory takes half as much: a length past it is too big, as past [maxBytes].
+     */
+    override fun sogouPlain(container: ByteArray, maxBytes: Int): ByteArray? = sogouPlain(container, maxBytes, LowMemory.on(appContext))
+
+    @VisibleForTesting
+    @Suppress("SwallowedException", "ReturnCount")
+    internal fun sogouPlain(container: ByteArray, maxBytes: Int, lowMemory: Boolean): ByteArray? {
+        val sealed = container.size - SOGOU_HEADER
+        if (sealed <= 0) return null
+        val limit = if (lowMemory) minOf(maxBytes, LOW_MEMORY_MAX_BYTES) else maxBytes
+        val inflater = Inflater()
+        return try {
+            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+            cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(hex(SkinPlatform.SOGOU_KEY), "AES"), IvParameterSpec(hex(SkinPlatform.SOGOU_IV)))
+            BufferedInputStream(CipherInputStream(ByteArrayInputStream(container, SOGOU_HEADER, sealed), cipher), STREAM_BUFFER).use { plain ->
+                val head = ByteArray(Int.SIZE_BYTES)
+                if (!plain.readFully(head)) return null
+                val raw = head.foldIndexed(0L) { i, v, b -> v or ((b.toLong() and BYTE) shl (Byte.SIZE_BITS * i)) }
+                if (raw > SkinLimits.RATIO_FROM && raw > SkinLimits.MAX_RATIO.toLong() * sealed) return null
+                // a true length (zlib data follows) past what is left is too big; a wrong key's random one is no payload
+                if (raw > limit) {
+                    if (zlibFollows(plain)) throw SkinError(SkinError.Reason.UNPACKED_TOO_BIG)
+                    return null
+                }
+                val out = ByteArray(raw.toInt())
+                val inflated = InflaterInputStream(plain, inflater, STREAM_BUFFER)
+                if (!inflated.readFully(out) || inflated.read() != -1) return null
+                // to its end, so a wrong padding is found
+                while (plain.read(head) != -1) Unit
+                out
+            }
+        } catch (e: IOException) {
+            null
+        } catch (e: GeneralSecurityException) {
+            null
+        } finally {
+            // its native memory now, not at a later GC
+            inflater.end()
+        }
+    }
+
+    private fun zlibFollows(plain: InputStream): Boolean {
+        val h = ByteArray(2)
+        if (!plain.readFully(h)) return false
+        val cmf = h[0].toInt() and BYTE.toInt()
+        val flg = h[1].toInt() and BYTE.toInt()
+        return cmf and ZLIB_METHOD_MASK == ZLIB_DEFLATE && (cmf shl Byte.SIZE_BITS or flg) % ZLIB_CHECK == 0
+    }
+
+    private fun InputStream.readFully(into: ByteArray): Boolean {
+        var at = 0
+        while (at < into.size) {
+            val n = read(into, at, into.size - at)
+            if (n < 0) return false
+            at += n
+        }
+        return true
+    }
+
+    private fun hex(s: String): ByteArray = ByteArray(s.length / 2) { s.substring(2 * it, 2 * it + 2).toInt(HEX).toByte() }
+
     private const val PNG_QUALITY = 100
+
+    // "Skin" and a version, before the cipher text
+    private const val SOGOU_HEADER = 8
+    const val LOW_MEMORY_MAX_BYTES = 64 * 1024 * 1024
+    private const val STREAM_BUFFER = 64 * 1024
+    private const val BYTE = 0xFFL
+    private const val HEX = 16
+    private const val ZLIB_METHOD_MASK = 0x0F
+    private const val ZLIB_DEFLATE = 8
+    private const val ZLIB_CHECK = 31
 }

@@ -10,6 +10,8 @@ import org.fcitx.fcitx5.android.engine.runtime.EngineEvent
 import org.fcitx.fcitx5.android.engine.runtime.Keyboard
 import org.fcitx.fcitx5.android.engine.runtime.UserWord
 import org.fcitx.fcitx5.android.engine.learn.Kinds
+import org.fcitx.fcitx5.android.engine.pinyin.Fuzzy
+import org.fcitx.fcitx5.android.engine.runtime.EngineSettings
 import org.fcitx.fcitx5.android.engine.pinyin.NineKeyLetters
 import org.fcitx.fcitx5.android.engine.pinyin.g14
 import org.fcitx.fcitx5.android.engine.pinyin.g14Code
@@ -19,11 +21,7 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * uat/06-pinyin.md's 14-key cases whose 预期 is the engine's (design k14-tap-position §4, review
- * S3): the keys tapped as GroupedKeyboard sends them, each a code with where across its key it fell
- * ([Keyboard.tapKey]). The device's cases test the keyboard's side, the place a touch gives.
- */
+/** uat/06-pinyin.md's 14-key cases: keys tapped as GroupedKeyboard sends them, each with where across its key it fell. */
 class Keys14UatTest {
 
     private val nihao = NineKeyLetters.G14.typings("nihao").single() // BN UI GH AS OP
@@ -178,8 +176,7 @@ class Keys14UatTest {
         s = ev(EngineEvent.BACKSPACE)
         assertEquals(bare - 1, s.preedit.filter { it.isLetter() }.length)
         assertTrue("cursor ${s.cursor} of ${s.preedit}", s.cursor in 0 until s.preedit.length)
-        // and with a syllable taken, a Backspace inside the code after it leaves the syllable taken:
-        // the key goes, not the syllable (the two above had undone theirs already)
+        // a Backspace inside the code after a taken syllable leaves the syllable taken
         s = ev(EngineEvent.CURSOR, s.preedit.length)
         take("ni")
         val taken = s.preedit
@@ -207,8 +204,7 @@ class Keys14UatTest {
         expectText("中")
     }
 
-    // the separator sends ' (GroupedKeyboard): with nothing typed fcitx's Chinese punctuation takes it,
-    // its second half the service's pairing (GroupedKeyboardUatTest.theSeparatorWithNothingTypedIsPairedQuotes)
+    // the separator sends ': with nothing typed fcitx's punctuation takes it, paired by the service
     @Test
     @Uat("PY-87")
     fun theSeparatorWithNothingTypedIsAQuoteAndWhileTypingSplitsXian() = with(HostReplay(engines = UatEngines.fresh())) {
@@ -222,7 +218,22 @@ class Keys14UatTest {
         expectText("西安")
     }
 
+    // ni taken off the bar still reads li with l ↔ n on: 理想 among the first; off, no li (a long press here commits)
+    @Test
+    @Uat("PY-163")
+    fun aSyllableTakenStillReadsTheFuzzyPairsOn() {
+        for (s in listOf(EngineSettings(fuzzy = setOf(Fuzzy.L_N)), EngineSettings())) with(EngineReplay(settings(s))) {
+            type(NineKeyLetters.G14.typings("ni").single())
+            syllable("ni")
+            type(NineKeyLetters.G14.typings("xiang").single())
+            assertEquals("${s.fuzzy}: ${candidates.take(FIRST)}", s.fuzzy.isNotEmpty(), "理想" in candidates.take(FIRST))
+        }
+    }
+
     private companion object {
+        // the candidates looked at: a fuzzy reading's word may be past the first page
+        const val FIRST = 30
+
         // wangxiaoming on the 14 keys
         const val WXM = "qw as bn gh zx ui as op m ui bn gh"
     }

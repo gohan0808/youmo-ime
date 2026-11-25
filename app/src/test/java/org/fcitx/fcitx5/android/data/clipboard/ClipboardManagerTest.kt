@@ -11,14 +11,13 @@ import org.junit.Test
 
 class ClipboardManagerTest {
 
-    // copied last at 500, 450 and 300, newest first, as ClipboardDao.unpinnedTimestampAt has them
-    private val unpinned = listOf(500L, 450L, 300L)
+    // newest first, as ClipboardDao.recentTimestampAt has them
+    private val recent = listOf(500L, 450L, 300L)
 
     @Test
     fun theLastKeptIsTheLimitthNewest() = runTest {
-        assertEquals(300L, lastKept(3, 900L) { unpinned.getOrNull(it) })
-        // room for one more: none is outdated
-        assertNull(lastKept(4, 900L) { unpinned.getOrNull(it) })
+        assertEquals(300L, lastKept(3, 900L) { recent.getOrNull(it) })
+        assertNull(lastKept(4, 900L) { recent.getOrNull(it) })
     }
 
     @Test
@@ -30,7 +29,6 @@ class ClipboardManagerTest {
 
     @Test
     fun noneIsOutdatedWithNoLimit() = runTest {
-        // 「无上限」: nothing goes, the store not asked
         assertNull(lastKept(CLIPBOARD_UNLIMITED, 900L) { throw AssertionError("asked for entry $it") })
     }
 

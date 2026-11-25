@@ -6,30 +6,20 @@ package org.fcitx.fcitx5.android.scene.skin
 
 import org.fcitx.fcitx5.android.scene.theme.SoundKey
 
-/**
- * A skin format the converter reads ([BaiduSkin], [SogouSkin], [TrimeSkin], [FlorisSkin]): what it says of itself, and each of its versions
- * as a [SkinLook]. A new format is one more of these and a line in [SkinConverter.READERS]; the theme is written
- * from the looks alone ([SkinTheme]).
- */
+/** A skin format the converter reads; a new format is one more of these and a line in [SkinConverter.READERS]. */
 interface SkinSource {
-    /** The skin's own name and author, as it gives them (cleaned for a theme by [SkinTheme]). */
     val name: String
     val author: String
 
-    /** Its preview picture's bytes, or null. */
     val preview: ByteArray?
 
-    /** The versions it has: [Variant.LIGHT], [Variant.DARK] or both. */
     val variants: Set<Variant>
 
-    /** One version of it in theme terms. */
     fun look(variant: Variant): SkinLook
 }
 
-/** A theme's two versions. */
 enum class Variant(val word: String) { LIGHT("light"), DARK("dark") }
 
-/** How a face is filled: a colour, or an image drawn as a nine-patch of [insets] (none: stretched whole). */
 sealed interface SkinFill {
     data class Color(val argb: Int) : SkinFill
 
@@ -37,8 +27,9 @@ sealed interface SkinFill {
 }
 
 /**
- * A kind of key's face: [fill] and [pressed], its label's [color] and [pressedColor]; [icons] that its icons take the
- * colour too; [drawn] that its face draws its own label or symbol (none of the app's drawn over it).
+ * [drawn]: its face draws its own label or symbol (none of the app's drawn over it). [scale] is a text size in percent,
+ * [weight] 300 or 700, [pressScale] a percent, [transitionMs] its time, [pressSink] in dp: [SkinTheme] clamps each to what a
+ * theme takes, and leaves out a weight other than those or a sink that is not a number.
  */
 class SkinKey(
     val fill: SkinFill?,
@@ -47,15 +38,44 @@ class SkinKey(
     val pressedColor: Int?,
     val icons: Boolean,
     val drawn: Boolean = false,
+    val pressedIconColor: Int? = null,
+    val markColor: Int? = null,
+    val pressedMarkColor: Int? = null,
+    val scale: Int? = null,
+    val weight: Int? = null,
+    val pressScale: Int? = null,
+    val transitionMs: Int? = null,
+    val pressSink: Double? = null,
 )
 
+/** An icon as the skin draws it, at rest and [pressed] (null: the same). */
+class SkinIcon(val normal: Pixels, val pressed: Pixels?)
+
+/** A keyboard's keys as the skin places them, in [width] across (the units of [SkinKeyBox]); its id one of [SkinLayoutWriter.IDS]. */
+class SkinBoard(val id: String, val rows: List<List<SkinKeyBox>>, val width: Double)
+
+/** A key's touch rectangle; a board with one not finite is not written (only its layout is left out). */
+class SkinKeyBox(val x: Double, val y: Double, val w: Double, val h: Double, val action: SkinAction)
+
 /**
- * One version of a skin in theme terms, filled by a [SkinSource]: [width] is the skin's pixels across the keyboard,
- * which make its dp ([SkinTheme]: 360 dp across). [keys] are by the theme selector they become (`key`,
- * `key.function`, `key[role=backspace]`, `qwerty/q`), [inset] the gap around a key (up and down, across) in dp.
+ * What a key does, matched against the app's layout. A letter key, a digit key of `nine` (`Letter('1')`) and a grouped key of
+ * `k18`/`k14` (any one of its group's letters) are a [Letter].
  */
+sealed interface SkinAction {
+    data class Letter(val char: Char) : SkinAction
+
+    /**
+     * A layout's `role=` (`backspace`, `shift`, `enter`, `space`, `numbers`, `symbols`, `lang`) or a key's id (`emoji`,
+     * `comma`, `period`, `reset`, `zero`, …, as in the app's own `layouts/`).
+     */
+    data class Role(val name: String) : SkinAction
+
+    /** Drawn only (a decoration). */
+    data object None : SkinAction
+}
+
+/** [width] is the skin's pixels across the keyboard, which make its dp ([SkinTheme]: 360 dp across). */
 class SkinLook(val width: Int) {
-    /** The whole input method's background, the bar's part on top, or null. */
     var board: Pixels? = null
     var boardColor: Int? = null
     var barColor: Int? = null
@@ -69,119 +89,164 @@ class SkinLook(val width: Int) {
     val sounds = LinkedHashMap<SoundKey, Pair<String, ByteArray>>()
     var font: Pair<String, ByteArray>? = null
 
-    /** The keys' corner radius in dp; null: square, as skins whose images draw their own shape. */
     var radius: Double? = null
-    val notes = LinkedHashSet<SkinNote>()
-}
 
-/** What a skin had that its theme does not: told the user as the import asks ([SkinConversion.notes]). */
-enum class SkinNote {
-    /** The keys' positions and sizes, and boards the app lays out otherwise (18 keys): the app's own layouts. */
-    LAYOUT,
+    private val iconsByName = LinkedHashMap<String, SkinIcon>()
+    private val letters = LinkedHashMap<Char, SkinIcon>()
 
-    /** Layers drawn over the board that are no key (stickers, shadows, frames). */
-    DECORATION,
+    /** By the app's icon names ([SkinIcons.NAMES]), through [icon]; only the first version's are read. */
+    val icons: Map<String, SkinIcon> get() = iconsByName
 
-    /** Key and background animations. */
-    ANIMATION,
+    /** Drawn as stickers on 26 keys' letters, through [letterImage]; only the first version's are read. */
+    val letterImages: Map<Char, SkinIcon> get() = letters
 
-    /** Per-style text sizes and fonts (Baidu's `font.json`, sizes in the styles). */
-    TEXT_SIZE,
+    /**
+     * The first version's own dark board, for a skin of two versions (a second version's board is its dark one anyway);
+     * a skin with one version has no dark one to put it in. Only the first version's is read.
+     */
+    var darkPicture: Pixels? = null
 
-    /** The toolbar's and the candidate bar's own icons. */
-    TOOLBAR_ICONS,
+    /** Only the first version's are read. */
+    val layouts = ArrayList<SkinBoard>()
 
-    /** Letters drawn as pictures: only their colour is taken. */
-    LETTER_IMAGES,
+    /** In the order seen; a note's arguments, or none. */
+    val notes = LinkedHashMap<SkinNote, List<String>>()
 
-    /** A key sound that is no format or length a theme takes. */
-    SOUND,
+    /** Kept made small ([SkinIcons.fit]) where [name] is one of the app's; another only told of ([SkinNote.KEY_ICONS]). */
+    fun icon(name: String, normal: Pixels, pressed: Pixels?) {
+        if (name in SkinIcons.NAMES) iconsByName[name] = SkinIcon(SkinIcons.fit(normal), pressed?.let { SkinIcons.fit(it) }) else notes += SkinNote.KEY_ICONS
+    }
 
-    /** The dark version's background picture: a theme has one picture, the light one's. */
-    DARK_PICTURE,
-
-    /** Periods of the day past day and night (Sogou's third and later). */
-    MORE_PERIODS,
-
-    /** An image that did not decode, was past the limits or is not in the file. */
-    IMAGES,
-
-    /** Values a theme takes from other files (Trime's `__include`, `__patch`): only its own file's are read. */
-    INCLUDES,
-
-    /** More themes or colour schemes in the file than the one light and one dark taken. */
-    MORE_THEMES,
-
-    /** The styles of panels and modes the app draws its own way (clipboard, emoji, one-handed, floating, Material You). */
-    PANELS,
-}
-
-/** Why a file is no skin the app converts: [reason], with [detail] (a file's name) where one says more. */
-class SkinError(val reason: Reason, val detail: String = "", cause: Throwable? = null) : Exception("$reason $detail".trim(), cause) {
-    enum class Reason {
-        /** Not a ZIP, or one broken past reading. */
-        NOT_ZIP,
-
-        /** A ZIP of no format the app knows. */
-        UNKNOWN,
-
-        /** Past the size of a skin file ([SkinLimits.MAX_ARCHIVE_BYTES]). */
-        TOO_BIG,
-
-        /** Past [SkinLimits.MAX_ENTRIES] files. */
-        TOO_MANY_FILES,
-
-        /** A file past [SkinLimits.MAX_ENTRY_BYTES] unpacked, all past [SkinLimits.MAX_TOTAL_BYTES], or packed past [SkinLimits.MAX_RATIO]. */
-        UNPACKED_TOO_BIG,
-
-        /** A file encrypted, or packed in a way not read. */
-        ENCRYPTED,
-
-        /** A file's name a path out of the skin (`../`, absolute). */
-        UNSAFE_NAME,
-
-        /** Sogou's encrypted container (`Skin` header): computer skins. */
-        SOGOU_ENCRYPTED,
-
-        /** A Sogou skin for the computer: a candidate window, no keyboard. */
-        SOGOU_PC,
-
-        /** A skin whose keyboard was not found (no 26-key board, no key faces). */
-        NO_KEYBOARD,
-
-        /** A skin's file that reads as nothing it should be (a converter's check that failed). */
-        BROKEN,
+    /** Kept made small, for a letter of a to z (either case, the first given); another left out. */
+    fun letterImage(c: Char, normal: Pixels, pressed: Pixels?) {
+        val l = c.lowercaseChar().takeIf { it in 'a'..'z' && it !in letters } ?: return
+        letters[l] = SkinIcon(SkinIcons.fit(normal, SkinTheme.MAX_STICKER_SIDE), pressed?.let { SkinIcons.fit(it, SkinTheme.MAX_STICKER_SIDE) })
     }
 }
 
-/**
- * The bounds the converter holds a skin to: the file, its unpacked files, an image decoded. All of it is in memory at
- * once, in the input method's process: the file, its files (a FlorisBoard extension's in a ZIP counted with the ZIP's,
- * one budget) and the images decoded. As decided (dev/design/060-skin-import.md §7.1): the file 64 MB, a file in it
- * 32 MB, all unpacked 128 MB; an iOS skin's atlases unpack to some 20–30 MB.
- */
+/** A note with no arguments, or [SkinNote]'s arguments kept as first given. */
+operator fun MutableMap<SkinNote, List<String>>.plusAssign(note: SkinNote) {
+    getOrPut(note) { emptyList() }
+}
+
+/** Told the user as the import asks ([SkinConversion.notes]). */
+enum class SkinNote {
+    /** No keyboard's keys carried over. */
+    LAYOUT,
+
+    /** Some did not: the arguments are their ids ([SkinLayoutWriter.IDS]). */
+    LAYOUT_SOME,
+
+    /** Keys the app does not have left out of keyboards written (a number or tool row): the arguments are their ids. */
+    LAYOUT_EXTRA,
+
+    /** What a keyboard written lacks of the app's, the skin not having it: each argument a board's id and a `lacks` finding's arguments, tab-separated. */
+    LAYOUT_LACKS,
+
+    DECORATION,
+
+    ANIMATION,
+
+    KEYBOARD_ANIMATION,
+
+    FRAME_ANIMATION,
+
+    TEXT_SIZE,
+
+    FONT,
+
+    /** The argument is how many did not match. */
+    TOOLBAR_ICONS,
+
+    KEY_ICONS,
+
+    LETTER_IMAGES,
+
+    SOUND,
+
+    /** The dark version's picture did not fit or read. */
+    DARK_PICTURE,
+
+    /** The skin has one version: the dark one is made of its colours. */
+    NO_DARK,
+
+    MORE_PERIODS,
+
+    IMAGES,
+
+    /** The argument is how many. */
+    INCLUDES,
+
+    MORE_THEMES,
+
+    PANELS,
+}
+
+class SkinError(val reason: Reason, val detail: String = "", cause: Throwable? = null) : Exception("$reason $detail".trim(), cause) {
+    enum class Reason {
+        NOT_ZIP,
+
+        UNKNOWN,
+
+        TOO_BIG,
+
+        TOO_MANY_FILES,
+
+        UNPACKED_TOO_BIG,
+
+        ENCRYPTED,
+
+        UNSAFE_NAME,
+
+        SOGOU_ENCRYPTED,
+
+        SOGOU_PC,
+
+        NO_KEYBOARD,
+
+        BROKEN,
+
+        /** A format told apart and not converted: [detail] is one of [SkinFormat]'s ids. */
+        UNSUPPORTED,
+    }
+}
+
+/** [SkinError.Reason.UNSUPPORTED]'s formats, by an id the app and the web page each put in their own words. */
+object SkinFormat {
+    /** 手心输入法's skin. */
+    const val SHOUXIN = "shouxin"
+
+    /** Gboard's theme. */
+    const val GBOARD = "gboard"
+
+    /** 仓输入法's skin. */
+    const val CANG = "cang"
+
+    /** A theme inside an APK. */
+    const val APK = "apk"
+
+    /** Sogou's own-made skin: pictures and colours by key kind, no keys' places. */
+    const val SOGOU_DIY = "sogou-diy"
+
+    val ALL = listOf(SHOUXIN, GBOARD, CANG, APK, SOGOU_DIY)
+}
+
+/** All of it is in memory at once, in the input method's process. */
 object SkinLimits {
     const val MAX_ARCHIVE_BYTES = 64L * 1024 * 1024
     const val MAX_ENTRIES = 5000
     const val MAX_ENTRY_BYTES = 32L * 1024 * 1024
     const val MAX_TOTAL_BYTES = 128L * 1024 * 1024
 
-    /** Unpacked to packed, for a file past [RATIO_FROM] bytes: past it, a zip bomb. */
     const val MAX_RATIO = 200
     const val RATIO_FROM = 1024L * 1024
 
-    /** An image's pixels, checked before decoding: a skin's largest atlas is 2215×2561 (5.7 M). */
     const val MAX_IMAGE_PIXELS = 12L * 1024 * 1024
 
-    /** Decoded images kept to be read again ([SkinFiles.image]): past it, those kept are let go first. */
     const val MAX_KEPT_PIXELS = MAX_IMAGE_PIXELS
 
-    /** A text file read (INI, CSS, TIL): past it, read as empty. */
     const val MAX_TEXT_BYTES = 1024 * 1024
 
-    /**
-     * A keyboard font taken, by every reader: past it, not taken and said ([SkinNote.TEXT_SIZE]). A CJK font is
-     * often 10–30 MB; half a theme pack's own 32 MB a file leaves room for the pictures in the pack's 64 MB.
-     */
+    /** A CJK font is often 10–30 MB; half a pack's 32 MB a file leaves room for the pictures. */
     const val MAX_FONT_BYTES = 16 * 1024 * 1024
 }

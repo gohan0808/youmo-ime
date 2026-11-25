@@ -4,6 +4,8 @@
  */
 package org.fcitx.fcitx5.android.engine.session
 
+import org.fcitx.fcitx5.android.engine.data.pinyinDataOf
+import org.fcitx.fcitx5.android.engine.handwriting.HandwritingSession.Companion.NO_PIECE
 import org.fcitx.fcitx5.android.engine.learn.Learner
 import org.fcitx.fcitx5.android.engine.pinyin.PinyinSegmenter
 import org.fcitx.fcitx5.android.engine.pinyin.Syllables
@@ -17,11 +19,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * What the user's sentences keep (U-08, impl/design-1c.md §1): a first of theirs after its word, a
- * pin and a word added by hand put in the decoder's sentences; and the habits of a word of the
- * start ranked where it ends though the decoder's first word ends elsewhere (names:36).
- */
+/** What the user's sentences keep: their firsts, pins and words added by hand in the decoder's sentences. */
 class PinyinSessionEnforcedTest {
 
     private val data = pinyinDataOf(
@@ -38,7 +36,7 @@ class PinyinSessionEnforcedTest {
 
     private val session = session()
 
-    private fun Session.type(keys: String): Snapshot = keys.map { apply(Key(it)) }.lastOrNull() ?: apply(Action.Refine)
+    private fun Session.type(keys: String): Snapshot = keys.map { apply(Key(it)) }.lastOrNull() ?: apply(Action.Ink(NO_PIECE))
 
     private fun Session.pick(keys: String, text: String) {
         val shown = type(keys).candidates
@@ -58,10 +56,8 @@ class PinyinSessionEnforcedTest {
         session.apply(Reset)
         assertEquals("我指导", session.type("wozhidao").candidates.first())
         session.apply(Reset)
-        // after another word it is not theirs
         assertEquals("喔知道", session.type("wozhidao").candidates.firstOrNull { it.startsWith("喔") })
         session.apply(Reset)
-        // 知道了 a word over zhidao and le: the sentence keeps it
         assertEquals("老师知道了", session.type("laoshizhidaole").candidates.first())
     }
 
@@ -74,7 +70,6 @@ class PinyinSessionEnforcedTest {
         assertEquals("喔指导", session.type("wozhidao").candidates.firstOrNull { it.startsWith("喔") })
     }
 
-    // F2672: a separator typed is a place of no key; what is kept is kept all the same
     @Test
     fun aPinIsKeptInSentencesTypedWithASeparator() {
         session.apply(Pin(session.type("zhidao").candidates.indexOf("指导")))
@@ -82,7 +77,7 @@ class PinyinSessionEnforcedTest {
         assertEquals("我指导", session.type("wo'zhidao").candidates.first())
     }
 
-    // a character pinned is first alone, the sentence's to read in a sentence (the user, 2026-10-21)
+    // a character pinned is first alone, the sentence's to read in a sentence
     @Test
     fun aCharacterPinnedIsNotKeptInSentences() {
         session.apply(Pin(session.type("de").candidates.indexOf("得")))
@@ -92,7 +87,7 @@ class PinyinSessionEnforcedTest {
         assertEquals("我的书", session.type("wodeshu").candidates.first())
     }
 
-    // review-design-1c S4: the sentences the pin makes the same are taken of more of the decoder's, as many as before
+    // the sentences the pin makes the same are taken of more of the decoder's, as many as before
     @Test
     fun aPinKeepsAsManySentences() {
         val many = pinyinDataOf(
@@ -110,7 +105,6 @@ class PinyinSessionEnforcedTest {
         assertTrue(pinned.toString(), pinned.all { it.endsWith("指导") })
     }
 
-    // 汪小明 added by hand, the only word of wangxiaoming: kept in the sentence; 王小明 a word there too, not
     @Test
     fun aWordAddedByHandAloneOverItsKeysIsKept() {
         val alone = pinyinDataOf(Triple("王", "wang", -2f), Triple("汪", "wang", -4f), Triple("小明", "xiao ming", -2f), Triple("吃饭", "chi fan", -2f))
@@ -120,12 +114,12 @@ class PinyinSessionEnforcedTest {
         val s = PinyinSession(alone, PinyinSegmenter(), pageSize = 20, prediction = false, user = model, learnTo = learner.learnTo(), addedWords = { setOf("汪小明") })
         assertEquals("汪小明吃饭", s.type("wangxiaomingchifan").candidates.first())
         s.apply(Reset)
-        // its keys alone: that is the whole sentence (U-65), 汪 still to pick alone
+        // its keys alone: that is the whole sentence, 汪 still to pick alone
         val itsKeys = s.type("wangxiaoming").candidates
         assertEquals("汪小明", itsKeys.first())
         assertTrue(itsKeys.toString(), "汪" in itsKeys)
 
-        // a word of the dictionary's of the same keys: as U-02 has it, on the first page after the first, never kept in sentences
+        // a word of the dictionary's of the same keys: on the first page after the first, never kept in sentences
         val other = UserModel(data.dictionary, data.vocabulary, index = data.wordIndex)
         other.listByHand(UserModel.Entry("汪小明", intArrayOf(Syllables.id("wang"), Syllables.id("xiao"), Syllables.id("ming"))))
         assertEquals("王小明吃饭", session(other, setOf("汪小明")).type("wangxiaomingchifan").candidates.first())
@@ -146,20 +140,5 @@ class PinyinSessionEnforcedTest {
         assertTrue(shown.toString(), shown.indexOf("汪") in 0 until shown.indexOf("往"))
     }
 
-    // the habit levels are worked out once a reading: a pause's refining re-places the sentences, never them
-    @Test
-    fun aPauseLeavesTheHabitLevelsAsTheyAre() {
-        session.pick("wangxiaoming", "汪")
-        session.pick("", "小明")
-        session.apply(Reset)
-        val refining = PinyinSession(
-            data, PinyinSegmenter(), pageSize = 20, prediction = false, user = learner.model, learnTo = learner.learnTo(),
-            refiner = { _, readings, _, _ -> readings.indexOfFirst { it.startsWith("往") } },
-        )
-        val typed = refining.type("wangxiaomingchifan").candidates
-        val refined = refining.apply(Action.Refine).candidates
-        assertTrue(refined.toString(), refined.indexOf("汪") in 0 until refined.indexOf("往"))
-        assertEquals(typed.filter { it.length == 1 }, refined.filter { it.length == 1 })
-    }
 
 }

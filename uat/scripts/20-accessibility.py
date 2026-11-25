@@ -5,7 +5,7 @@ own neither, ever gets the focus) explores, so the script checks the nodes (word
 touch is done by hand (see the .md)."""
 import time
 
-from uat import PKG, Blocked, case, check
+from uat import PKG, Blocked, case, check, script
 
 def area(s):
     """the box below the bar that holds the keys or the panel"""
@@ -152,12 +152,8 @@ def ax12(d):
     return explore(d, box=box, skip=lambda n: n.b in before, want=["屏蔽"], least=2)
 
 
-case("AX-13", needs="jvm:KeyHandwritingUatTest.notInAPasswordFieldNorEnglishNorQuickInputNorWhileTalkBackExplores")(lambda d: None)
-
-
 case("AX-17", needs="jvm:RareCharsPageUatTest.thePageHoldsBackAndLetsThrough、RareCharsTouchTest.aLongPressWithNoFingerIsNoDrag、"
               "RareCharsTouchTest.newLettersAreAtTheirTop")(lambda d: None)
-case("AX-14", needs="jvm:ShiftKeyNameTest.theShiftKeyIsNamedOnItsCapAndToAScreenReader")(lambda d: None)
 
 
 case("AX-15", needs="manual:TalkBack 读框里的拼音（设计页 M16）：手工听")(lambda d: None)
@@ -168,9 +164,42 @@ case("AX-18", needs="jvm:HandwritingUatTest.theCandidateBarsButtonIsLitWhileHand
 case("AX-19", needs="manual:TalkBack 读竖屏、横屏键盘样式两项，单手、悬浮按当时的方向读开关，斜箭头读「退出单手模式」，双击单手后焦点在单手按钮上：真机手工听")(lambda d: None)
 
 
-case("AX-20", needs="jvm:StrokePageUatTest.aScreenReadersTouchExplorationDrawsNone")(lambda d: None)
-
 case("AX-21", needs="jvm:GroupCardTest.a card read body then strip, the next card after this strip、"
                "ChoiceCardTest.the body is one node read as a radio button named by the keyboard、"
                "FoldCardTest.the title row is one button saying the summary and whether it is open、"
                "RareCharsCardsUatTest.theCardsAndTheLettersAreReadOut")(lambda d: None)
+
+
+@case("AX-23", base="B0-九键", mutates=True)
+def ax23(d):
+    # what TalkBack is offered, read off the tree: the words and the actions (TalkBack itself: by ear on a phone)
+    p = script("04-panels")
+    d.open_page("text")
+    items = p.column(d)
+    said = [t for t, _ in items]
+    check(said and all(said), f"九键左列的项读不出：{said}")
+    first, q = items[0][1], p.item_of(d, "？", "?")
+    check("移到最前" not in first.actions and {"删除这一项", "编辑这一列"} <= set(first.actions), f"第一项的动作 {first.actions}")
+    check({"删除这一项", "移到最前", "编辑这一列"} <= set(q.actions), f"? 的动作 {q.actions}")
+    return f"九键左列读 {said}；第一项动作 {first.actions}，? 的 {q.actions}；动作的执行在 JVM（ScrollColumnMenuTest.talkBackDoesTheMenusThreeThings）"
+
+
+@case("AX-24", base="B0")
+def ax24(d):
+    p = script("04-panels")
+    d.open_page("text")
+    p.numbers(d)
+    was = p.lock_node(d)
+    p.hold_back(d)
+    check(p.board(d) == "数字", f"长按返回后不是数字键盘：{p.board(d)}")
+    now = p.lock_node(d)
+    p.hold_back(d)
+    # the Dumper reads the state through the framework's API 30 field: below it androidx keeps it in the node's extras, unread here
+    locked = "已锁定" if int(d.sh("getprop ro.build.version.sdk").strip() or 0) >= 30 else ""
+    check((was.desc, was.hold, was.state) == ("返回", "锁定", ""), f"返回读「{was.desc}」，长按读「{was.hold}」，状态「{was.state}」")
+    check((now.desc, now.hold, now.state) == ("返回", "解锁", locked), f"长按后返回读「{now.desc}」，长按读「{now.hold}」，状态「{now.state}」")
+    p.key(d, "symbols", after=1.0)
+    s = d.screen()
+    panel = next((n.desc for n in s.ime() if n.desc in ("选完符号后停留", "选完符号后返回")), None)
+    check(panel == "选完符号后停留", f"符号面板的锁读「{panel}」")
+    return f"返回的长按「{was.hold}」→「{now.hold}」，状态「{was.state}」→「{now.state}」，符号面板的锁「{panel}」"

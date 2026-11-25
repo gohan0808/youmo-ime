@@ -4,13 +4,14 @@
  */
 package org.fcitx.fcitx5.android.engine.runtime
 
+import org.fcitx.fcitx5.android.device.CorePin
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog.CHAIZI_DATA
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog.CHAR_INFO_DATA
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog.CHAR_LEVELS_DATA
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog.EMOJI_DATA
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog.ENGLISH_DATA
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog.PINYIN_DATA
-import org.fcitx.fcitx5.android.engine.InputMethodCatalog.REFINING_MODEL
+import org.fcitx.fcitx5.android.engine.InputMethodCatalog.LARGE_MODEL
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog.SENTENCE_MODEL
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog.STROKE_DATA
 import org.fcitx.fcitx5.android.engine.data.CharLevels
@@ -28,25 +29,28 @@ import org.fcitx.fcitx5.android.engine.pinyin.LatinWords
 import org.fcitx.fcitx5.android.engine.pinyin.Syllables
 import org.fcitx.fcitx5.android.engine.platform.Blobs
 import org.fcitx.fcitx5.android.engine.reading.ToneMark
+import org.fcitx.fcitx5.android.engine.rerank.GatedPicker
+import org.fcitx.fcitx5.android.engine.rerank.LargeHandle
 import org.fcitx.fcitx5.android.engine.rerank.MatrixKernel
+import org.fcitx.fcitx5.android.engine.rerank.PinnedPicker
 import org.fcitx.fcitx5.android.engine.rerank.Reranker
 import org.fcitx.fcitx5.android.engine.rerank.SentenceModel
-import org.fcitx.fcitx5.android.engine.rerank.SentenceRefiner
+import org.fcitx.fcitx5.android.engine.rerank.SentencePicker
 import org.fcitx.fcitx5.android.engine.stroke.Strokes
 import org.fcitx.fcitx5.android.engine.user.UserModel
 import org.fcitx.fcitx5.android.engine.user.imports.WordText
 import org.fcitx.fcitx5.android.input.voice.VoiceHomophones
+import org.fcitx.fcitx5.android.input.voice.VoiceRerank
 import java.io.IOException
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executor
+import java.util.concurrent.FutureTask
 
 /**
- * What [Engines] reads from the app's assets ([blobs]), each when first asked for and kept: the
- * pinyin data and what every session over it shares (the Latin words, the characters' syllables
- * and readings, the decoder's extensions, the model's words for [TextWords]), the two sentence
- * models and the refiner over the larger, the strokes, English's words and their trigram model,
- * the emoji ([emojiOf]), and how the dictionary reads a text ([pinyinsOf]). What cannot be read is reported to
- * [onError]; the sentence models' int8 weights are multiplied by [kernel], if given, else by
- * Kotlin. Run on the fcitx thread, as [Engines] is, but for [pinyinData], which Engines' warm-up
- * reads ahead off it.
+ * What [Engines] reads from the app's assets, each on first ask and kept: pinyin data and what its sessions
+ * share, the sentence models, strokes, English, emoji and more. Unreadable files go to [onError]. Runs on the
+ * fcitx thread, except [pinyinData], which Engines' warm-up reads ahead.
  */
 internal class EngineAssets(
     private val blobs: Blobs,
@@ -56,39 +60,31 @@ internal class EngineAssets(
     private val textShows: (String) -> Boolean = { true },
 ) {
 
-    // the files are signed with the app: no need to read them through for their checksums
-    // read by Engines' warm-up off the fcitx thread too: synchronized, so a session made meanwhile waits for it
+    // signed with the app, so no checksum pass; synchronized lazy because the warm-up thread reads it too
     val pinyinData by lazy { PinyinData.load(blobs.load(PINYIN_DATA), verify = false) }
 
-    // the Latin words full pinyin reads as typed in lower case (iphone for iPhone)
-    val latinWords by lazy(LazyThreadSafetyMode.NONE) { LatinWords.of(pinyinData.dictionary) }
+    // Latin words pinyin reads as typed in lower case (iphone for iPhone); warmed up off the fcitx thread too
+    val latinWords by lazy { LatinWords.of(pinyinData.dictionary) }
 
-    // English's words and model; none if the app has not got them or cannot read them (a stale
-    // VERSION, say), English then suggesting nothing, and [onError] told why
+    // none if missing or unreadable (a stale VERSION): English then suggests nothing and [onError] is told
     val englishData: EnglishData? by lazy(LazyThreadSafetyMode.NONE) {
         readOr(null, "cannot read $ENGLISH_DATA: $NO_ENGLISH") {
             EnglishData.load(blobs.load(ENGLISH_DATA), verify = false) { onError(IOException("$ENGLISH_DATA: $NO_ENGLISH", it)) }
         }
     }
 
-    // built once for the pinyins' sessions, which read the same data and score alike; 联想 reads it at
-    // a table's first commit, half a second on a phone: built on Engines' warm-up thread meanwhile
-    // (UAT TBL-04/19 read the field before that commit landed), so made under a lock
+    // shared by the pinyin sessions; 联想 reads it at a table's first commit (half a second on a phone), so
+    // it is built on the warm-up thread under a lock
     val charSyllables by lazy { Predictor.charReadingsOf(pinyinData.dictionary, pinyinData.vocabulary) }
 
     private var extensions: Array<IntArray?>? = null
 
-    // the user model [extensions] was asked for by and its counts then ([UserModel.countsVersion]);
-    // [extensionsMixed] once two models asked for it
+    // the user model and counts version [extensions] was made for; [extensionsMixed] once two models asked
     private var extensionsUser: UserModel? = null
     private var extensionsMixed = false
     private var extensionsCounts = 0
 
-    /**
-     * Where the pinyins' decoders over [user] keep the longer words they look ahead to
-     * (PinyinDecoder), picked by what the user has learned: one array for the sessions of one user
-     * model, made at first need, and made anew after [dropDecoderExtensions].
-     */
+    /** Where the pinyin decoders over [user] keep the longer words they look ahead to: one array per user model, made at need, remade after [dropDecoderExtensions]. */
     fun decoderExtensions(user: UserModel?): Array<IntArray?> {
         extensions?.let { held ->
             if (user !== extensionsUser) extensionsMixed = true
@@ -103,27 +99,22 @@ internal class EngineAssets(
         }
     }
 
-    /** The longer words the look-ahead has picked so far, each node's, if an array is made: for the tests. */
+    /** For the tests. */
     internal fun extensionsPicked(): List<Int> = extensions?.flatMap { it?.filter { w -> w >= 0 } ?: emptyList() } ?: emptyList()
 
-    /** How many [decoderExtensions] arrays were made (S15 N2: not one a setting). */
+    /** For the tests: a setting change must not make a new one. */
     internal var extensionsMade = 0
         private set
 
-    /** For the sessions made next, as those before them go: the user's words may since have been cleared, imported or forgotten. */
+    /** For the next sessions: the user's words may since have been cleared, imported or forgotten. */
     fun dropDecoderExtensions() {
         extensions = null
-        // nor the model it was for kept reachable till the next is made (a reload, then English or a table alone)
+        // nor keep the old model reachable till the next is made
         extensionsUser = null
         extensionsMixed = false
     }
 
-    /**
-     * [dropDecoderExtensions] unless every node filled since the array was made would be filled
-     * alike now: one user model's, its counts as they were (a node is filled with the counts as it is
-     * first reached). A setting changes nothing the picks read, so the first keys after one need not
-     * look them all up again (S15 N2), but what was learned meanwhile would pick anew.
-     */
+    /** [dropDecoderExtensions] unless the same user model's counts are unchanged since the array was made, so a setting change does not redo the look-ups. */
     fun dropDecoderExtensionsIfLearned() {
         if (extensions == null) return
         if (extensionsMixed) return dropDecoderExtensions()
@@ -131,58 +122,121 @@ internal class EngineAssets(
         if (user.countsVersion != extensionsCounts) dropDecoderExtensions()
     }
 
-    /** A sentence model, read when first asked for; dropped when turned off, read (or tried) again when turned on. */
-    inner class ModelFile(private val path: String, private val unpack: Boolean) {
-        private var model: SentenceModel? = null
-        private var tried = false
-        private var reranker: Reranker? = null
-        private var rerankerLimit = 0
+    /**
+     * A sentence model's [Reranker], read on first ask; dropped when turned off, read again when turned on. Its
+     * task is made and dropped on the fcitx thread; the model, made whole inside it, reaches whichever thread gets it.
+     */
+    inner class ModelFile(private val path: String) {
+        @Volatile
+        private var task: FutureTask<Reranker>? = null
+        private var limit = 0
 
-        fun get(): SentenceModel? {
-            if (tried) return model
-            tried = true
-            // a pack without it, or one that does not read: pinyin reads by the decoder alone, as before models were added
-            model = readOr(null, "cannot read $path: pinyin reads by the decoder alone") {
-                SentenceModel.load(blobs.load(path), unpack, kernel ?: MatrixKernel.JVM)
-            }
-            return model
-        }
+        // the failed task already told, so a model that does not read is reported once
+        private var told: FutureTask<Reranker>? = null
 
-        /** The one reranker over the model, comparing [limit] readings, made at first need: a model is asked with one limit. */
-        fun reranker(limit: Int): Reranker? {
-            reranker?.let { made ->
-                // made for another limit, it would compare as many readings as that one asked for
-                check(limit == rerankerLimit) { "$path's reranker compares $rerankerLimit readings, not $limit" }
+        // the task already handed to a background executor: each high-level session asks again
+        private var preloaded: FutureTask<Reranker>? = null
+
+        // [ahead] where the reranker is first made: what reads a commit's context ahead
+        private fun task(limit: Int, ahead: Executor?): FutureTask<Reranker> {
+            task?.let { made ->
+                check(limit == this.limit) { "$path's reranker compares ${this.limit} readings, not $limit" }
                 return made
             }
-            return get()?.let { Reranker(it, limit = limit) }?.also {
-                reranker = it
-                rerankerLimit = limit
-            }
+            val ahead = ahead?.let(::pinnedOn)
+            return FutureTask(Callable { Reranker(SentenceModel.load(blobs.load(path), kernel = kernel ?: MatrixKernel.JVM), limit = limit, ahead = ahead) })
+                .also {
+                    task = it
+                    this.limit = limit
+                }
+        }
+
+        /**
+         * The one reranker over the model, read on this thread unless already reading elsewhere; a model is asked with
+         * one limit. [ahead]: where it reads a commit's context (`Reranker.ahead`), null on the asking thread.
+         */
+        fun reranker(limit: Int, ahead: Executor? = null): Reranker? = Handle(task(limit, ahead)).get()
+
+        /** The reranker as it will be once read, without reading it yet. */
+        fun handle(limit: Int, ahead: Executor? = null): LargeHandle = Handle(task(limit, ahead))
+
+        /** Starts reading on [executor], so the first key that needs the model need not wait for all of it; [ahead] as [handle]'s. */
+        fun preload(limit: Int, executor: Executor, ahead: Executor? = executor) {
+            val task = task(limit, ahead)
+            if (task === preloaded) return
+            preloaded = task
+            executor.execute(task)
         }
 
         fun drop() {
-            model = null
-            tried = false
-            reranker = null
+            task?.cancel(false)
+            task = null
+            // a done read ahead holds its model: kept, a lowered level would keep the memory it lowers for
+            preloaded = null
+        }
+
+        /** [Reranker.stopReading] where the model was read; none is read for it. */
+        fun stopReading() {
+            val made = task?.takeIf { it.isDone && !it.isCancelled } ?: return
+            runCatching { made.get() }.getOrNull()?.stopReading()
+        }
+
+        private inner class Handle(private val task: FutureTask<Reranker>) : LargeHandle {
+            override fun loaded(): Reranker? = if (task.isDone) get() else null
+
+            override fun get(): Reranker? {
+                // run() does nothing where another thread has it or it is done: get() then waits or returns
+                task.run()
+                if (task.isCancelled) return null
+                return try {
+                    task.get()
+                } catch (e: ExecutionException) {
+                    // out of memory too: the picks are then the small model's or the decoder's
+                    if (told !== task) {
+                        told = task
+                        onError(IOException("cannot read $path: pinyin reads without it", e.cause))
+                    }
+                    null
+                }
+            }
         }
     }
 
-    // in Kotlin, floats rather than int8 as stored: 17 MB rather than 4.5, and on ART two and a
-    // half times faster; a kernel is faster still on int8
-    val sentenceModel = ModelFile(SENTENCE_MODEL, unpack = kernel == null)
-    // int8 as stored: as floats it would be 100 MB, half of what an app may take on some phones
-    val refiningModel = ModelFile(REFINING_MODEL, unpack = false)
+    val sentenceModel = ModelFile(SENTENCE_MODEL)
+    val largeModel = ModelFile(LARGE_MODEL)
+
+    /** The sentence models' reads ahead given up: the engine is closing. */
+    fun stopReading() {
+        sentenceModel.stopReading()
+        largeModel.stopReading()
+    }
+
+    /** Where the matrix work runs: the kernel's cores, or anywhere. */
+    val pin: CorePin get() = kernel?.pin ?: CorePin.NONE
+
+    // pinned on the thread that runs it, as a thread started inside a pin would keep it
+    private fun pinnedOn(executor: Executor) = Executor { work -> executor.execute { pin.run(work::run) } }
+
+    /**
+     * What picks the first sentence at [level]: none at low; the small model at medium; at high the small one, the
+     * large deciding where the small is unsure (by the nine keys' gate where [nineKeys]: 九键, 14/18 键, 注音). The
+     * large is read at its first such key, or ahead on [background]. None where the small cannot be read, and then
+     * the large is not read either. On [reads] each model reads a commit's context, so the commit need not wait.
+     */
+    fun picker(level: ModelLevel, nineKeys: Boolean, background: Executor? = null, reads: Executor? = background): SentencePicker? {
+        if (level < ModelLevel.MEDIUM) return null
+        val small = sentenceModel.reranker(Reranker.LIMIT, reads) ?: return null
+        if (level < ModelLevel.HIGH) return PinnedPicker(small, pin)
+        background?.let { largeModel.preload(Reranker.LIMIT, it, reads) }
+        return PinnedPicker(GatedPicker.of(small, largeModel.handle(Reranker.LIMIT, reads), nineKeys), pin)
+    }
 
     fun pinyinOf(text: String, strayFirst: Boolean = false): String? = pinyinsOf(listOf(text), strayFirst)[text]
 
     /**
-     * How the dictionary reads each of [texts] ([Engines.pinyinOf]), one walk for them all. With
-     * [strayFirst], what those not read whole missed is walked for once more, every child of the
-     * root's, as a first character may read inside a word as it never does alone (了 liao in 了解):
-     * some hundred times the walk (WordText.readings), so not for what a table asks as it is
-     * typed in (a phrase it saves, what a long press offers), which reads 了解 le jie: a reading the
-     * dictionary has not, so such a word is read again with a stray first.
+     * How the dictionary reads each of [texts], one walk for all. [strayFirst] walks the unread pieces again
+     * from every root child, as a first character may read differently inside a word (了 liao in 了解); about
+     * a hundred times the cost, so not for tables' as-typed asks.
      */
     fun pinyinsOf(texts: Collection<String>, strayFirst: Boolean = false): Map<String, String?> {
         val offsets = texts.associateWith { text ->
@@ -203,11 +257,7 @@ internal class EngineAssets(
         return offsets.mapValues { (text, at) -> at?.let { reading(text, it, readings) } }
     }
 
-    /**
-     * What [pinyinsOf] walks for again with a stray first: the pieces [found] lacks of the texts it
-     * does not read whole, of two characters or more, as the first walk finds every character that
-     * is a word. None, and there is no second walk.
-     */
+    /** The pieces of two+ characters [found] lacks from texts not read whole, for the stray-first walk; empty means no second walk. */
     internal fun strayPieces(offsets: Map<String, IntArray?>, found: Map<String, IntArray>): Set<String> {
         val pieces = HashSet<String>()
         for ((text, at) in offsets) {
@@ -218,7 +268,7 @@ internal class EngineAssets(
         return pieces
     }
 
-    // as few of the dictionary's words as make [text] up, apart at [offsets]
+    // as few dictionary words as make [text] up, split at [offsets]
     private fun reading(text: String, offsets: IntArray, readings: Map<String, IntArray>): String? {
         val chars = offsets.size - 1
         // fewest pieces to each character, and the piece that got there
@@ -248,22 +298,18 @@ internal class EngineAssets(
 
     fun logProbs(texts: List<String>): FloatArray = FloatArray(texts.size) { textWords.logProb(texts[it]) }
 
-    /**
-     * The user's [words] for voice input's homophones ([VoiceHomophones.of]): each read as typed,
-     * its tones the dictionary's for it (by its characters for a word of theirs alone), a tone not
-     * known any its character has in that syllable; each character's readings, all of them, as heard.
-     */
+    /** The user's [words] for voice homophones: each read as typed with the dictionary's tones (any tone its character has where unknown); each character's readings all heard. */
     fun voiceHomophones(words: List<UserWord>): VoiceHomophones {
         val data = pinyinData
         return VoiceHomophones.of(
             words,
             readingsOf = ::voiceWordReadings,
-            // looked up in the mapped table as heard (its reads stateless, any thread's), not copied to the heap
+            // looked up in the mapped table (stateless reads, any thread), not copied to the heap
             charReadings = ::voiceReadings,
         )
     }
 
-    /** [w]'s readings, a character's each ([VoiceHomophones.reading], its tone where known), as voice reads the user's words; null if its pinyin does not spell it. */
+    /** Per character, as voice reads user words; null if its pinyin does not spell it. */
     fun voiceWordReadings(w: UserWord): List<IntArray>? {
         val data = pinyinData
         val syllables = w.pinyin.split(' ', '\'').filter { it.isNotEmpty() }.map(Syllables::id).toIntArray()
@@ -276,17 +322,34 @@ internal class EngineAssets(
         }
     }
 
-    /** [c]'s readings, all of them, as [VoiceHomophones.reading] packs them; null for none. */
+    /** As [VoiceHomophones.reading] packs them; null for none. */
     fun voiceReadings(c: Char): IntArray? {
         val of = pinyinData.charReadings.of(c.code)
         return if (of.isEmpty()) null else IntArray(of.size) { VoiceHomophones.reading(of[it].syllable, of[it].tone) }
     }
 
-    /** [VoiceHomophones.allowed] of each of [spans], by the dictionary's words and the model's counts. */
+    /** The user's words put in [text] as [VoiceHomophones.pick] judges, scored as heard: marks and spaces left out. */
+    fun voicePick(homophones: VoiceHomophones, text: String, before: String, blocked: List<String>): String {
+        val spans = homophones.candidates(text)
+        if (spans.isEmpty()) return text
+        val ok = voiceHomophonesAllowed(spans)
+        val allowed = spans.filterIndexed { i, _ -> ok[i] }
+        if (allowed.isEmpty()) return text
+        val after = VoiceRerank.bare(before).takeLast(VOICE_BEFORE)
+        return homophones.pick(text, allowed, blocked) { texts -> FloatArray(texts.size) { textWords.logProb(VoiceRerank.bare(texts[it]), after) } }
+    }
+
+    /** By the dictionary's words and the model's counts. */
     fun voiceHomophonesAllowed(spans: List<VoiceHomophones.Span>): BooleanArray {
         val data = pinyinData
-        // the readings of those that are words, one walk of the dictionary for them all
-        val wordTexts = spans.mapNotNullTo(HashSet()) { span -> span.text.takeIf { textWords.id(it) != NgramModel.NO_WORD } }
+        // readings of the words in them (VoiceHomophones.allowed reads each), one dictionary walk for all
+        val wordTexts = HashSet<String>()
+        for (span in spans) {
+            val text = span.text
+            for (from in 0 until text.length - 1) {
+                for (to in from + 2..text.length) text.substring(from, to).takeIf { textWords.id(it) != NgramModel.NO_WORD }?.let(wordTexts::add)
+            }
+        }
         val readings by lazy(LazyThreadSafetyMode.NONE) { WordText.readings(data.dictionary, data.vocabulary, wordTexts) }
         val dictionary = object : VoiceHomophones.Dictionary {
             override fun isWord(text: String) = textWords.id(text) != NgramModel.NO_WORD
@@ -306,45 +369,40 @@ internal class EngineAssets(
         return BooleanArray(spans.size) { VoiceHomophones.allowed(spans[it], dictionary) }
     }
 
-    // the words emoji stand for; none if the app has not got them
+    // none if the app has not got them
     private val emoji: EmojiData by lazy {
         readOr(EmojiData.EMPTY, "cannot read $EMOJI_DATA: no emoji candidates") {
             EmojiData.read(Charsets.UTF_8.decode(blobs.load(EMOJI_DATA)))
         }
     }
 
-    // asked of each emoji once it is to be offered, each a font lookup: a few thousand emoji in all
+    // per emoji, on first offer: a font lookup each
     private val shown = HashMap<String, Boolean>()
 
-    /** The emoji [word] stands for (EmojiCandidates), but those the phone cannot draw. */
+    /** Leaving out those the phone cannot draw. */
     fun emojiOf(word: String): List<String> = emoji.of(word).filter { shown.getOrPut(it) { emojiShows(it) } }
 
-    // characters by their parts' pinyin; none if the app has not got them
+    // none if the app has not got them
     private val chaizi: Chaizi by lazy {
         readOr(Chaizi.EMPTY, "cannot read $CHAIZI_DATA: no characters by their parts") {
             Chaizi.read(Charsets.UTF_8.decode(blobs.load(CHAIZI_DATA)))
         }
     }
 
-    /** Each character's radical, strokes and parts, for its card; none known if the app has not got them. */
+    /** None known if the app has not got them. */
     val charInfo: CharInfo by lazy {
         readOr(CharInfo.EMPTY, "cannot read $CHAR_INFO_DATA: no radicals or strokes on a character's card") {
             CharInfo.load(blobs.load(CHAR_INFO_DATA), verify = false)
         }
     }
 
-    /**
-     * Each listed character's group for 生僻字屏蔽 (APK's); null, told once, if it cannot be read: the
-     * blocking is then off, not guessed by ranges alone, which would hold back the table's 三级字 and
-     * traditional characters beyond the basic block (design §3.1).
-     */
+    /** Characters' 生僻字屏蔽 groups; null (told once) if unreadable, turning blocking off rather than guessing by ranges, which would hold back common table characters. */
     val charLevels: CharLevels? by lazy(LazyThreadSafetyMode.NONE) {
         readOr(null, "cannot read $CHAR_LEVELS_DATA: 生僻字屏蔽 off") { CharLevels.load(blobs.load(CHAR_LEVELS_DATA), verify = false) }
     }
 
-    // what [read] reads, or [fallback] with [onError] told [message] when the file cannot be opened (not in
-    // the pack: FileNotFoundException), read (IOException) or makes no sense (DataFormatException,
-    // IllegalArgumentException): the one rule for every optional file here (0.6.1 audit engine-13)
+    // [read], or [fallback] with [onError] told [message] when the file is missing, unreadable or malformed:
+    // the one rule for every optional file here
     private inline fun <T> readOr(fallback: T, message: String, read: () -> T): T = try {
         read()
     } catch (e: IOException) {
@@ -358,17 +416,16 @@ internal class EngineAssets(
         fallback
     }
 
-    // asked of each character by its parts once found: a rare one may be past the phone's font
+    // per character found by parts: a rare one may be past the phone's font
     private val drawn = HashMap<String, Boolean>()
 
-    /** The characters whose parts [letters] spells (Chaizi), each with its reading, but those the phone cannot draw. */
+    /** Leaving out those the phone cannot draw. */
     fun chaiziOf(letters: String): List<Pair<String, String>> =
         chaizi.of(letters).filter { drawn.getOrPut(it) { textShows(it) } }.map { it to charReading(it) }
 
-    /** Every character found by its parts ([Chaizi.all]), shown or not: what 生僻字屏蔽's grid asks can be typed. */
+    /** Every character findable by parts, shown or not: for 生僻字屏蔽's grid. */
     fun chaiziChars(): Sequence<String> = chaizi.all()
 
-    // null till asked for; an app without the data has no lookup
     private var strokeTable: Strokes? = null
     private var strokesTried = false
 
@@ -387,8 +444,8 @@ internal class EngineAssets(
         return strokeTable
     }
 
-    // a character to its readings, the likeliest first, for the stroke lookup and the parts to hint: a
-    // polyphone's drawn above as one of them (CandidateReadings.ofHint), and a part's blocked by them
+    // a character's readings, likeliest first, for the stroke lookup and part hints: a polyphone drawn as one
+    // (CandidateReadings.ofHint), and a part blocked by them
     private val charReadings: Map<String, String> by lazy {
         val dictionary = pinyinData.dictionary
         val vocabulary = pinyinData.vocabulary
@@ -409,40 +466,21 @@ internal class EngineAssets(
 
     fun charReading(c: String): String = charReadings[c].orEmpty()
 
-    /**
-     * What the candidates beside a pinyin key's own come from (emoji, characters by their parts, their
-     * readings), read on the warm-up's thread rather than at the first key on the fcitx thread:
-     * their lazies are the synchronized kind for it. Only those asked for: what the input method
-     * shows, each read once and held from then on.
-     */
+    /** Reads the aside sources (emoji, parts, readings) on the warm-up thread rather than at the first key; only those in use. Their lazies are synchronized for it. */
     fun warmUpAside(emoji: Boolean, chaizi: Boolean, charReadings: Boolean) {
         if (emoji) this.emoji
         if (chaizi) this.chaizi
         if (charReadings) this.charReadings
     }
 
-    val lateRefiner: SentenceRefiner = LateRefiner()
-
-    /**
-     * The larger model is read at the first pause, not when a session is made, so the switch to
-     * pinyin does not wait while the fcitx thread reads it (SentenceModel.load logs how long); its
-     * int8 weights are no longer copied out of the asset. Unreadable, it has nothing to say, and
-     * the session stops asking.
-     */
-    private inner class LateRefiner : SentenceRefiner {
-        override fun refine(context: String, readings: List<String>, scores: List<Float>, budget: Int): Int? {
-            val r = refiningModel.reranker(Reranker.REFINE_LIMIT) ?: return SentenceRefiner.NONE
-            // null is not done yet, more slices to come: not NONE, which would end it after the first
-            return r.refine(context, readings, scores, budget)
-        }
-    }
-
     private companion object {
-        // log10 P (unigram) at or above which a word of the dictionary is too common to be put in
-        // for by a user's word read alike (VoiceHomophones; 060-voice-userdict.md measured it)
+        // log10 unigram at or above which a dictionary word is too common to cut: a stretch across its edge is not replaced
         const val COMMON_WORD = -5.5f
 
-        // longer is a sentence, not a word: and the dictionary is walked as deep
+        // the model reads two words back: a few characters are enough
+        const val VOICE_BEFORE = 8
+
+        // longer is a sentence: and the dictionary is walked as deep
         const val MAX_WORD_CHARS = 8
 
         const val MAX_READINGS = 3

@@ -45,6 +45,13 @@ need only be made to the streaming recognizer; the changes below that predate 0.
   helping the hotword on while it is spoken, and on purpose an endpoint and its trailing blanks still
   follow the beam's own best, not finalized. 酒店 begins seven of the pack's hotwords (酒店管理…) and
   was 3.0 up on 九键 when the segment ended there.
+- **Reduplicated hotwords:** a hotword finished again right after itself gains nothing the second
+  time (`ContextGraph::ForwardOnce`, the streaming modified beam search's step): not strict, a
+  finished hotword takes the walk back to the root, so 方方 was paid again for each extra pair and an
+  added 方方 made 我想芳芳 我想方方方方 (n-best 1.58 over 我想方方 1.37). Apart, it counts each time.
+  Another hotword right after still counts: the graph has tokens, not readings, so it cannot tell
+  方方芳芳 heard for 芳芳 from two names said in a row (with both added, 我想芳芳 stays, 方方芳芳
+  third at 1.27 against 1.59).
 - **Hotwords graph:** `CreateStream(hotwords)` keeps the graph of the last hotwords it was given and
   returns it again for the same ones, rather than building the pack's hotwords into a new graph for
   each stream. The user's words are not written to the log, where upstream's streaming recognizer
@@ -94,7 +101,8 @@ the transducer's fields (the C++ `OnlineModelConfig` keeps upstream's others, un
 `VadModelConfig` only silero's; the JNI reads no more than those, except the transducer's QNN fields (`QnnConfig`,
 `csrc/qnn-config.cc`, the JNI's three QNN strings and `prependAdspLibraryPath`): they are part of
 upstream's transducer config, so they stay to keep its diff small, and are inert since `Validate`
-refuses the `qnn` provider. An empty `model_type` is taken as a transducer without reading the
+refuses the `qnn` provider. The JNI's `newFromAsset` (recognizer and VAD) and `prependAdspLibraryPath` have no
+Kotlin declaration (the app reads its models from files and runs no QNN); they stay, exported, for the same small diff. An empty `model_type` is taken as a transducer without reading the
 encoder's metadata, as upstream did to choose among families: a non-transducer model with no
 `model_type` fails late rather than at `Create`.
 Layer C is the build options that would now configure a broken build: speech synthesis, speaker

@@ -7,6 +7,7 @@ package org.fcitx.fcitx5.android.engine.runtime
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog
 import org.fcitx.fcitx5.android.engine.assertRows
 import org.fcitx.fcitx5.android.engine.data.PinyinDataBuilder
+import org.fcitx.fcitx5.android.engine.data.syl
 import org.fcitx.fcitx5.android.engine.learn.LearnLog
 import org.fcitx.fcitx5.android.engine.learn.backup.Backups
 import org.fcitx.fcitx5.android.engine.learn.backup.RestoreStash
@@ -17,6 +18,7 @@ import org.fcitx.fcitx5.android.engine.platform.MemoryFiles
 import org.fcitx.fcitx5.android.engine.platform.UserFiles
 import org.fcitx.fcitx5.android.engine.platform.jvm.JvmFiles
 import org.fcitx.fcitx5.android.engine.platform.write
+import org.fcitx.fcitx5.android.engine.user.WordLists
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -28,7 +30,7 @@ import java.io.FileNotFoundException
 import java.io.IOException
 import java.nio.ByteBuffer
 
-/** U-100, U-106 as the engine does them: a backup made, restored on another phone, taken back. */
+/** Backup and restore as the engine does them: a backup made, restored on another phone, taken back. */
 class EnginesBackupTest {
     // a directory where a file should be: on the disk too
     @get:Rule
@@ -78,7 +80,7 @@ class EnginesBackupTest {
     // a settings backup's stash, as the app leaves it (UserDataManager): a directory of its own, named by the time
     private fun stash(dir: UserFiles, time: Long = 1000L) = dir.dir(RestoreStash.DIR).dir("$time").apply { mkdirs() }
 
-    // U-100: exported, a new install, imported: the first three of each corrected input as they were
+    // exported, a new install, imported: the first three of each corrected input as they were
     @Test
     fun aBackupKeepsTheFirstThreeOfTwentyCorrectedInputsOnANewPhone() {
         val (before, bytes) = engines(MemoryFiles()).use { phone ->
@@ -92,13 +94,11 @@ class EnginesBackupTest {
         engines(MemoryFiles()).use { newPhone ->
             assertTrue(newPhone.backup(BackupOp.Restore(bytes)).ok)
             assertEquals(before, newPhone.allTop3())
-            // twice is once
             newPhone.backup(BackupOp.Restore(bytes))
             assertEquals(before, newPhone.allTop3())
         }
     }
 
-    // PLAN §2.9: the words added and blocked go with it, as the lists are no part of the record
     @Test
     fun theWordsAddedAndBlockedComeBack() {
         val bytes = engines(MemoryFiles()).use { phone ->
@@ -113,7 +113,24 @@ class EnginesBackupTest {
         }
     }
 
-    // C38: 退回恢复前 puts back the learning and the lists as they were, whole
+    // a zip restored while the engine was stopped (UserDataManager's stash): voice's 总是换 of both kept, a mark of a
+    // word on neither list dropped
+    @Test
+    fun aStashedZipsVoiceAlwaysIsMergedWithThePhones() {
+        val dir = MemoryFiles()
+        engines(dir).use { it.addWord("巴波", "ba bo") }
+        dir.file(WordLists.ALWAYS).write("巴波\n".toByteArray())
+        val stash = stash(dir)
+        stash.file(WordLists.ADDED).write("${char(2, 1)}${char(3, 1)} ca'ce\n".toByteArray())
+        stash.file(WordLists.ALWAYS).write("${char(2, 1)}${char(3, 1)}\n不在\n".toByteArray())
+        engines(dir).use { e ->
+            assertFalse(dir.dir(RestoreStash.DIR).exists())
+            val marked = e.userWords(UserWord.Kind.ADDED).filter { it.voiceAlways }.map { it.text }
+            assertEquals(setOf("巴波", char(2, 1) + char(3, 1)), marked.toSet())
+        }
+    }
+
+    // 退回恢复前 puts back the learning and the lists as they were, whole
     @Test
     fun aRestoreIsTakenBackWhole() {
         val bytes = engines(MemoryFiles()).use { other ->
@@ -131,14 +148,12 @@ class EnginesBackupTest {
             assertEquals(before, phone.allTop3())
             assertEquals(emptyList<String>(), phone.userWords(UserWord.Kind.ADDED).map { it.text })
             assertFalse(phone.backup(BackupOp.Kept).canRevert)
-            // learning goes on after it, on the record rewritten
             phone.pick("bo", char(1, 3))
             phone.pick("bo", char(1, 3))
             assertEquals(char(1, 3), phone.top3("bo")[0])
         }
     }
 
-    // U-106: on the first typing day one is made, in the engine's own directory, of this install
     @Test
     fun aBackupIsMadeOnTheFirstTypingDay() {
         val dir = MemoryFiles()
@@ -173,12 +188,11 @@ class EnginesBackupTest {
         val merged = engines(dir).use { phone ->
             assertFalse(dir.dir(RestoreStash.DIR).exists())
             assertEquals(learned.dropLast(1), phone.allTop3().dropLast(1))
-            // what the phone learned of ne kept beside the backup's
             assertTrue(phone.top3("ne").containsAll(listOf(char(19, 1), char(19, 3))))
             assertTrue(phone.backup(BackupOp.Kept).canRevert)
             phone.allTop3()
         }
-        // D-M2: killed before the stash was gone: merged again at the next start, which changes nothing, the copy before the first kept
+        // killed before the stash was gone: merged again at the next start, which changes nothing, the copy before the first kept
         stash(dir).file(RestoreStash.BACKUP).write(bytes)
         engines(dir).use { phone ->
             assertEquals(merged, phone.allTop3())
@@ -234,7 +248,7 @@ class EnginesBackupTest {
         engines(dir).use { assertEquals(learned, it.allTop3()) }
     }
 
-    // a 0.3.0 zip, its learning in the old logs alone: no longer converted, set aside unread, the lists left too
+    // an old build's zip, its learning in the old logs alone: no longer converted, set aside unread, the lists left too
     @Test
     fun anOldBuildsFilesAreSetAsideUnread() {
         val dir = MemoryFiles()
@@ -262,7 +276,6 @@ class EnginesBackupTest {
         }
     }
 
-    // D-S6: the user dictionary's export restored is a restore: imported, and taken back by 退回恢复前
     @Test
     fun anExportRestoredIsTakenBack() {
         engines(MemoryFiles()).use { phone ->

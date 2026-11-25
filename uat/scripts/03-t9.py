@@ -1,9 +1,10 @@
 """uat/03-t9.md (B0-九键). The .md is the source of truth; each function follows its case's
 前提/操作/预期."""
 
+import statistics
 import time
 
-from uat import case, check, choose, first, home, keys_at, script
+from uat import Blocked, case, check, choose, first, home, keys_at, script
 
 
 def t9(d, digits, gap=0.35, after=0.6):
@@ -11,9 +12,6 @@ def t9(d, digits, gap=0.35, after=0.6):
     a case set it on, at 快 or 中; off, the default, every tap is a key)"""
     k = d.keys(refresh=True)
     d.taps([k[c] for c in digits], gap=gap, after=after)
-
-
-case("T9-01", needs="jvm:T9KeyboardScreenshotTest")(lambda d: None)
 
 
 @case("T9-02", base="B0-九键", mutates="learn")
@@ -25,124 +23,6 @@ def t902(d):
     check(first(c) == "你好", f"候选 {c[:4]}")
     check(t == "你好", f"框里「{t}」")
     return f"候选 {c[:3]}，框里「{t}」"
-
-
-case("T9-03", needs="jvm:OtherInputMethodsUatTest.nineKeysTheSyllableColumnSettlesASyllable")(lambda d: None)
-
-
-case("T9-04", needs="jvm:NineKeysUatTest.backspaceAfterASyllableGivesTheDigitsBack")(lambda d: None)
-
-
-case("T9-05", needs="jvm:NineKeysUatTest.oneSeparatesSyllables")(lambda d: None)
-
-
-case("T9-09", needs="jvm:T9UatTest.aLongPressedLetterGoesInAsItIs")(lambda d: None)
-
-
-case("T9-10", needs="jvm:T9UatTest.aDigitKeySwipedUpTypesItsDigit")(lambda d: None)
-
-
-case("T9-11", needs="jvm:T9UatTest.startOverClearsWhatIsTyped")(lambda d: None)
-
-
-case("T9-12", needs="jvm:NineKeysUatTest.keysThatMakeASyllableAreRead")(lambda d: None)
-
-
-case("T9-13", needs="jvm:SettingsPagesUatTest.nineKeysLettersEdited")(lambda d: None)
-
-
-case("T9-15", needs="jvm:HostCasesUatTest.nineKeysAKeyMissedIsTypedWhereTheRowIsTapped")(lambda d: None)
-
-
-case("T9-17", needs="jvm:T9UatTest.aShortSwipeDownWithGlideOnIsATapOfTheKey")(lambda d: None)
-
-
-case("T9-18", needs="jvm:T9UatTest.theNumberPadsDigitsAreDigitsNotTheNineKeys、NineKeysHostUatTest.theNumberPadsDigitsAreTypedOrPick")(lambda d: None)
-
-
-case("T9-19", needs="jvm:NineKeysTapUatTest.withMultiTapOnOnesPunctuationCyclesAndAQuickSecondDigitIsItsLetter、NineKeysUatTest.withMultiTapAQuickSecondPressIsTheLetterLearnedWordOrNot")(lambda d: None)
-
-
-case("T9-19b", needs="jvm:NineKeysTapUatTest.afterADigitWithHalfWidthOnOnesSecondTapReplacesTheCommaTyped")(lambda d: None)
-
-
-case("T9-24", needs="jvm:NineKeysTapUatTest.multiTapOffByDefaultOneIsACommaEachPress、NineKeysUatTest.twoQuickPressesAreTwoKeys")(lambda d: None)
-
-
-case("T9-20", needs="jvm:NineKeysUatTest.emojiOnTheNineKeys")(lambda d: None)
-
-
-case("T9-22", needs="jvm:T9UatTest.aDigitSwipedUpWhileTypingPicksItsCandidate、NineKeysHostUatTest.aSwipedDigitPicksItsCandidate、NineKeysHostUatTest.theNumberPadsDigitsAreTypedOrPick")(lambda d: None)
-
-
-case("T9-23", needs="jvm:T9UatTest.aLongPressedDigitWhileTyping、NineKeysHostUatTest.resetPutsTheFirstCandidateIn")(lambda d: None)
-
-
-case("T9-25", needs="jvm:NineKeysUatTest.aCharacterErasedIsNoWordBefore")(lambda d: None)
-
-
-case("T9-27", needs="jvm:T9UatTest.aLongPressedSymbolAfterTheCandidate、NineKeysHostUatTest.aMarkWhileTypingCommitsTheCandidateThenTheChineseMark")(lambda d: None)
-
-
-case("T9-29", needs="jvm:SettingsPagesUatTest.nineKeysLongPressesEdited")(lambda d: None)
-
-
-case("T9-31", needs="jvm:T9UatTest.nineKeysEnglishShiftAtASentencesStartOnceAndLocked、NineKeysUatTest.nineKeysEnglishTakesEachKeysCase")(lambda d: None)
-
-
-case("T9-32", needs="jvm:NineKeysTapUatTest.englishsOneWithNothingTypedCyclesItsMarks、NineKeysUatTest.oneInAnEnglishWordIsAnApostrophe")(lambda d: None)
-
-
-case("T9-33", needs="jvm:NineKeysTapUatTest.englishByMultiTapCommitsALetterAtATime、NineKeysUatTest.lettersTypedAtATimeLeaveEnglishNothingToOffer")(lambda d: None)
-
-
-case("T9-34", needs="jvm:T9UatTest.anEmailFieldsColumn")(lambda d: None)
-
-
-case("T9-36", needs="jvm:NineKeysTapUatTest.anEnglishWordIsEndedByEnterTheColumnZeroOrAHeldDigit、NineKeysUatTest.anEnglishWordGoesInBeforeEnterAMarkZeroOrAHeldDigit")(lambda d: None)
-
-
-case("T9-37", needs="jvm:T9UatTest.nineKeysEnglishStaysOverARotation")(lambda d: None)
-
-
-case("T9-38", needs="jvm:T9UatTest.anAddressFieldsColumn")(lambda d: None)
-
-
-case("T9-40", needs="jvm:NineKeysUatTest.lettersPinnedSpellAWordNotInTheDictionaryAndItIsKept")(lambda d: None)
-
-
-case("T9-44", needs="jvm:NineKeysTapUatTest.aFieldAskingNoSuggestionsTypesEnglishByMultiTap、NineKeysUatTest.lettersTypedAtATimeLeaveEnglishNothingToOffer")(lambda d: None)
-
-
-case("T9-45", needs="jvm:T9UatTest.aPasswordFieldIsTheFullKeyboard")(lambda d: None)
-
-
-case("T9-46", needs="jvm:NineKeysUatTest.switchingWhileTypingCommitsWhatIsTyped")(lambda d: None)
-
-
-case("T9-48", needs="jvm:T9UatTest.theLongPressPopupIsSmall")(lambda d: None)
-
-
-case("T9-49", needs="jvm:NineKeysTapUatTest.shiftEndsARunTheNextPressANewCapital")(lambda d: None)
-
-
-case("T9-56b", needs="jvm:NineKeysUatTest.aWordTypedTwiceInFullDigitsGoesThirdUnderAPart")(lambda d: None)
-
-
-case("T9-56c", needs="jvm:NineKeysUatTest.multiTapInFullLiftsAWordUnderPartDigits")(lambda d: None)
-
-
-case("T9-56d", needs="jvm:NineKeysUatTest.digitsInFullLiftAWordUnderPartMultiTap")(lambda d: None)
-
-
-case("T9-57", needs="jvm:StrokeFilterUatTest.nineKeysWangThenADot")(lambda d: None)
-case("T9-65", needs="jvm:StrokeFilterUatTest.keyiThenAHengPutsTwoCharactersAloneRightAfterTheFirst")(lambda d: None)
-
-
-case("T9-58", needs="jvm:T9UatTest.theGlobeGoesToEnglishOnItsOwnKeyboard")(lambda d: None)
-
-
-case("T9-59", needs="jvm:NineKeysUatTest.zeroWhileTypingCommitsTheFirstThenZero")(lambda d: None)
 
 
 def zhuyin_hold(d, xy):
@@ -188,10 +68,10 @@ def t960(d):
     tones = sorted((n for n in kb.walk() if n.clickable and n.texts() and n.texts()[0] in "ˉˊˇˋ"), key=lambda n: n.c[1])
     check([n.texts()[0] for n in tones] == list("ˉˊˇˋ"), f"左列 {[n.texts() for n in tones]}")
     slot = k.get("，")
-    # the right column found by its scene ids (a build from before 060-render-p2 S8a may have none: fails plainly)
+    # the right column found by its scene ids
     if not any(n.key for n in kb.walk()):
         check(False, "T9-60 找不到场景键 id（键盘不是引擎画的）")
-    # ? ! ~ by their places: each face as punctuation maps it (060-render-p2 §5.3)
+    # ? ! ~ by their places: each face as punctuation maps it
     face = {n.key: n.texts()[0] for n in kb.walk() if n.key in ("r2c5", "r3c5", "r4c5") and n.texts()}
     check(slot is not None and len(face) == 3, f"键 {sorted(k)[:40]}，右列 {face}")
     # a tone with nothing typed types nothing
@@ -319,20 +199,6 @@ def t962(d):
     return f"没打字上滑「{idle}」，打字中上滑「{typing}」，两个九键的弹出一样"
 
 
-case("T9-61", needs="jvm:ZhuyinShortcutsUatTest.zhuyinNinesGroupsHaveNoneUntilOneIsSet、ZhuyinShortcutsUatTest.thePageHasZhuyinNinesTabBeforeDachens、ZhuyinKeyboardTest.theSymbolKeysAreNamedForTheirShortcuts、KeyShortcutPagesTest.zhuyinNinesGroupsAreNamedByTheirPlaceThreeARow")(lambda d: None)
-
-
-case("T9-63", needs="jvm:SettingsPagesUatTest.anEditedNineKeysLongPressKeepsItsLettersWhenTheyChange")(lambda d: None)
-case("T9-64", needs="jvm:EnginesWordCardTest")(lambda d: None)
-
-
-# ---------------------------------------------------------------- 按偏的键按落点读 (061-neighbour-correction)
-
-
-case("T9-66", needs="jvm:NeighbourSlipTest.theNineKeysReadADigitAsTheOneItWasTappedTowards、NeighbourTouchTest.theNineKeysDigitsGoWithTheirPlaceButNotOneNorZero")(lambda d: None)
-
-
-case("T9-67", needs="jvm:PinyinSessionSlipTest.theNineKeysCodeShowsTheSyllableAsMeant")(lambda d: None)
 
 
 @case("T9-68", base="B0-九键")
@@ -391,3 +257,98 @@ def t969(d):
     check(up.rstrip() == before.rstrip() and not up_typed, f"9264（{before!r}）后在 1 上往上划，编码行「{up}」、框里「{up_typed}」，上滑打出了东西")
     check(sep.replace(" ", "") == "xi'an" and "西安" in cands and not typed, f"94 1 26：编码行「{sep}」、候选 {cands[:6]}、框里「{typed}」，1 不是分词")
     return f"横：「{heng}」；点：「{dian}」；上滑：「{up}」；94 1 26：「{sep}」"
+
+
+@case("T9-70", base="B0-九键", mutates="learn", visual=True)
+def t970(d):
+    return script("06-pinyin").latin_mix(d, t9, "9633474663", "474663", "96636546842678244326")
+
+
+def text_digits(d, way, digits):
+    """the open key dialog's [way] (上滑, 下滑) set to the text [digits], typed on the keyboard's 123 page"""
+    st = script("14-settings")
+    ed = st.dialog_text_field(d, way)
+    d.tap((ed.b[2] - 12, ed.c[1]), 0.8)
+    k = d.keys(refresh=True)
+    for _ in range(len(ed.text) + 2 if ed.text else 0):
+        d.tap(k["bksp"], 0.15)
+    if "123" not in k:
+        raise Blocked(f"键盘上没有 123：{sorted(k)[:20]}")
+    d.tap(k["123"], 0.8)
+    d.type(digits)
+    d.sh("input keyevent 4")
+    time.sleep(0.8)
+    st.dialog_ok(d)
+
+
+def corner_height(im, b):
+    """the height in px of the ink in the top third of key box b's right half (its 右上 mark), against the key's
+    colour there"""
+    x0, y0, x1, y1 = b
+    box = (x0 + (x1 - x0) // 2, y0 + 3, x1 - 3, y0 + (y1 - y0) // 3)
+    g = im.crop(box).convert("L")
+    w, h = g.size
+    px = g.load()
+    bg = statistics.mode(px[x, y] for x in range(w) for y in range(h))
+    rows = [y for y in range(h) if any(abs(px[x, y] - bg) > 60 for x in range(w))]
+    return rows[-1] - rows[0] + 1 if rows else 0
+
+
+@case("T9-71", base="B0-九键", mutates=True, visual=True)
+def t971(d):
+    st = script("14-settings")
+
+    def heights():
+        d.open_page("text")
+        d.clear()
+        kb = d.need_keyboard()
+        descs = {n.desc: n.b for n in kb.walk() if n.clickable and n.desc}
+        # as a screen reader says them: 1 by its marks (「，。？！」), 2 「ABC，2」, the space 「空格，拼音」
+        said = {"1": lambda t: t.startswith("，。"), "2": lambda t: t.endswith("，2"), "3": lambda t: t.endswith("，3"),
+                "空格": lambda t: t.startswith("空格")}
+        keys = {k: next((b for t, b in descs.items() if f(t)), None) for k, f in said.items()}
+        if None in keys.values():
+            raise Blocked(f"键盘上找不到 1、2、3、空格：{sorted(descs)[:20]}")
+        im = d.png()
+        return {k: corner_height(im, b) for k, b in keys.items()}
+
+    st.slots_tab(d, "九键")
+    st.key_dialog(d, "1")
+    text_digits(d, "上滑", "1")
+    st.slots_tab(d, "功能键")
+    st.key_dialog(d, "空格")
+    text_digits(d, "上滑", "0")
+    one = heights()
+    d.shot("kb", "1 上的「1」、空格上的「0」和 2、3 的键角小字一样大、一样粗")
+    d.step("1 键改成「12」")
+    st.slots_tab(d, "九键")
+    st.key_dialog(d, "1")
+    text_digits(d, "上滑", "12")
+    twelve = heights()
+    d.shot("kb", "1 上的「12」是快捷键文字的样子，比 2 的「2」小、细")
+    check(abs(one["1"] - one["2"]) <= 1 and abs(one["空格"] - one["2"]) <= 1 and one["2"] > 0,
+          f"墨迹高度 1「{one['1']}」空格「{one['空格']}」，2「{one['2']}」3「{one['3']}」")
+    check(0 < twelve["1"] < twelve["2"] - 1, f"「12」墨迹高 {twelve['1']}，「2」{twelve['2']}")
+    return f"墨迹高度：设「1」时 {one}；设「12」时 {twelve}"
+
+
+@case("T9-72", base="B0-九键", mutates=True)
+def t972(d):
+    from uat import gear
+    p = script("04-panels")
+    d.hide_keyboard()
+    d.open_settings()
+    gear(d, "英文")
+    choose(d, "键盘", "九键")
+    d.open_page("text")
+    pinyin = p.column_all(d)
+    d.switch_im("英文")
+    english = p.column_all(d)
+    check(english == [",", ".", "?", "!", "'", "-", ":", ";", "@"], f"英文九键左列是 {english}")
+    p.hold_item(d, p.item_of(d, "@"), pick=p.REMOVE)
+    after = p.column_all(d)
+    check("@" not in after, f"删了 @ 后英文左列 {after}")
+    d.switch_im("拼音")
+    back = p.column_all(d)
+    check(back == pinyin and "@" in back, f"拼音九键左列 {back}（之前 {pinyin}）")
+    return f"英文 {english} → 删 @ {after}；拼音 {back}"

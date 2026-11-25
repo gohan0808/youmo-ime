@@ -43,7 +43,7 @@ def back_to_keys(d):
 def copy_range(d, start, n, at_copy=None):
     """in the focused field: the cursor at its very start (a tap before the first character: the
     panel's |< goes to the start of the line only), → start times, 选择, → n times, 复制. [at_copy]:
-    called right after 复制, while its notice shows (a line said goes in 1 s since 0.6.1: ST-26's shot)"""
+    called right after 复制, while its notice shows"""
     f = d.field()
     d.tap((f.b[0] + 18, f.b[1] + 55), 0.6)
     edit_panel(d)
@@ -70,36 +70,14 @@ def copy_word(d, word, at_copy=None):
 
 def clip_items(d):
     s = d.screen()
-    # below the panel's title bar (bottom 1506 on the emulator): the first row's centre, 1556, is above
-    # BAR_BOTTOM, so a cut there lost it
-    title = next((n for n in s.ime() if n.text == "剪贴板"), None)
+    # below the panel's bar (its back button: the tabs stand in its title), as the first row's centre is above BAR_BOTTOM
+    title = next((n for n in s.ime() if n.desc == "返回键盘"), None)
     top = title.b[3] if title else BAR_BOTTOM
     return [n for n in s.ime() if n.text and n.b[1] >= top and n.text not in ("试着复制些东西",)]
 
 
 def clip_item(d, text):
     return next((n for n in clip_items(d) if n.text.startswith(text)), None)
-
-
-case("TB-01", needs="jvm:BarUatTest.toolbarWhenIdleCandidatesWhileTyping")(lambda d: None)
-
-
-case("TB-02", needs="jvm:ToolbarUatTest.expandingTheToolbar、ToolbarSpacingUatTest.theBarsButtonsAreInSlotsOfOneWidthOpenOrShut")(lambda d: None)
-
-
-case("TB-03", needs="jvm:ToolbarUatTest.undoAndRedo")(lambda d: None)
-
-
-case("TB-04", needs="jvm:ToolbarUatTest.theHideButtonPutsTheKeyboardAway")(lambda d: None)
-
-
-case("TB-05", needs="jvm:BarUatTest.expandedCandidatesGridSelects")(lambda d: None)
-
-
-case("TB-06", needs="jvm:ToolbarUatTest.editingPanelMovesAndSelects")(lambda d: None)
-
-
-case("TB-07", needs="jvm:ToolbarUatTest.editingPanelSelectAllCutBack")(lambda d: None)
 
 
 @case("TB-08", mutates=True)
@@ -117,31 +95,55 @@ def tb08(d):
     return f"最上面「公园」，点后框里「{t}」，回到键盘"
 
 
-case("TB-09", needs="jvm:ToolbarUatTest.justCopiedOnTheBar")(lambda d: None)
+@case("TB-70", mutates=True, visual=True)
+def tb70(d):
+    copy_word(d, "公园")
+    d.open_page("text")
+    shots = []
+    try:
+        for night in (False, True):
+            if night:
+                d.sh("cmd uimode night yes")
+                time.sleep(1.5)
+                d.open_page("text")
+            clip_panel(d)
+            if not night:
+                item = clip_item(d, "公园")
+                check(item, f"最近 {[n.text for n in clip_items(d)][:4]}")
+                d.hold(item.c, 800)
+                time.sleep(0.6)
+                # the menu's 收藏, in a window of its own; the tab of the same name is on the bar
+                s = d.screen()
+                tab = next((n for n in s.ime() if n.text == "收藏" and n.b[1] < BAR_BOTTOM), None)
+                pick = next((n for n in s.nodes if n.text == "收藏" and (not tab or n.b != tab.b)), None)
+                check(pick, "长按菜单里没有「收藏」")
+                d.tap(pick.c, 0.3)
+                said = d.screen().find(text="已收藏", where="all")
+                check(said, "没有提示「已收藏」")
+                time.sleep(3.5)
+                check(clip_item(d, "公园"), "收藏后最近里没有「公园」了")
+            tab = next((n for n in d.screen().ime() if n.text == "收藏" and n.b[1] < BAR_BOTTOM), None)
+            check(tab, "栏上没有「收藏」标签")
+            d.tap(tab.c, 0.8)
+            check(clip_item(d, "公园"), f"收藏页 {[n.text for n in clip_items(d)][:4]}")
+            back = d.screen().find(desc="返回键盘", where="ime")
+            d.shot((0, back.b[1], 1080, 2340) if back else "full", ("深色" if night else "浅色") + "：收藏页列出「公园」，标签「收藏」是选中的颜色，栏上没有垃圾桶")
+            shots.append(night)
+            if night:
+                item = clip_item(d, "公园")
+                check(item, f"深色收藏页 {[n.text for n in clip_items(d)][:4]}")
+                d.tap(item.c, 0.8)
+                t = d.field_text(d.screen())
+                check(t == "公园", f"框里「{t}」")
+            else:
+                back_to_keys(d)
+    finally:
+        d.sh("cmd uimode night no")
+    time.sleep(1.5)
+    return "收藏后提示「已收藏」、最近里还在；收藏页列出它（浅色、深色各一张图），点了粘贴「公园」"
 
 
-case("TB-40", needs="jvm:ToolbarUatTest.justCopiedGoneAfterThirtySeconds")(lambda d: None)
-
-
-case("TB-42", needs="jvm:ToolbarUatTest.theToolbarButtonsPageSetsTheBar")(lambda d: None)
-
-
-case("TB-43", needs="jvm:ToolbarUatTest.thePanelsTogglesOnTheBar、KeyboardPickerUatTest.theKeyboardButtonOnTheBarIsThePanelsPicker")(lambda d: None)
-
-
-case("TB-10", needs="jvm:ToolbarUatTest.aPinnedEntryOutlivesTheLimit")(lambda d: None)
-
-
-case("TB-11", needs="jvm:ToolbarUatTest.editingAndDeletingAnEntry")(lambda d: None)
-
-
-case("TB-33", needs="jvm:ToolbarUatTest.clearingAskedUndoneThenThePinned")(lambda d: None)
-
-
-case("TB-13", needs="jvm:ClipboardUatTest.aCopiedLinkLosesItsTrackingParameters")(lambda d: None)
-
-
-case("TB-14", needs="jvm:ClipboardUatTest.historyOffKeepsNothing")(lambda d: None)
+case("TB-76", needs="release:要 0.6.2 装好、置顶两条（一条敏感）后覆盖安装这一版；发版时手动跑")(lambda d: None)
 
 
 def status_find(d, *texts):
@@ -169,34 +171,12 @@ def status_toggle(d, frm):
     return now
 
 
-case("TB-15", needs="jvm:BarUatTest.theStatusPanelTurnsTraditionalOn")(lambda d: None)
-
-
-case("TB-16", needs="jvm:BarUatTest.theStatusPanelTurnsEnglishPunctuationOn")(lambda d: None)
-
-
-case("TB-17", needs="jvm:BarUatTest.theStatusPanelTurnsFullWidthOn")(lambda d: None)
-
-
-case("TB-18", needs="jvm:ToolbarUatTest.theStatusAreasWaysIntoTheSettings")(lambda d: None)
-
-
-case("TB-19", needs="jvm:BarUatTest.englishsStatusPanelHasNoChineseToggles")(lambda d: None)
-
-
-# ---------------------------------------------------------------- 单手、悬浮
 
 
 def kbox(d, s=None):
     s = s or d.screen()
     kb = s.find(rid="keyboard_view", where="ime")
     return kb.b if kb else None
-
-
-case("TB-20", needs="jvm:ToolbarUatTest.oneHandedToASideAcrossAndBack、KeyboardStyleUatTest.normalAndOneHandedSlideTheSameView")(lambda d: None)
-
-
-case("TB-21", needs="jvm:ToolbarUatTest.oneHandedPanelsAsNarrow")(lambda d: None)
 
 
 def floating(d):
@@ -265,21 +245,6 @@ def tb22(d):
     return f"悬浮 {b1} → 拖到 {b2}；页面不动"
 
 
-case("TB-34", needs="jvm:FloatingUatTest.theDockingZoneShownAndDroppedIn")(lambda d: None)
-
-
-case("TB-36", needs="jvm:FloatingUatTest.aSecondFingerInTheZoneKeepsItFloating")(lambda d: None)
-
-
-case("TB-39", needs="jvm:FloatingUatTest.atTheTopTheUndoIsBelowAndTappable")(lambda d: None)
-
-
-case("TB-37", needs="jvm:FloatingUatTest.thePreviewsLettersAsLargeWhileFloating")(lambda d: None)
-
-
-case("TB-35", needs="jvm:FloatingUatTest.theHandleOnTop")(lambda d: None)
-
-
 @case("TB-23", mutates=True, visual=True)
 def tb23(d):
     floating(d)
@@ -296,8 +261,7 @@ def tb23(d):
         f = next((n for n in s.app() if n.cls == "EditText" and n.rid != "url_field"), None)
         if f:
             d.tap(f.c, 1.2)
-    # 横屏键盘样式 is its own: not set, docked turned; floating there too, at its own spot (061-floating-resize):
-    # never placed turned, 0.6.0's one place, here none, so the bottom; dragged to the top right, kept apart
+    # 横屏键盘样式 is its own: floating there at its own spot, the bottom until dragged
     if not d.screen().find(desc="键盘放回底部", where="ime"):
         floating(d)
     b3 = kbox(d)
@@ -319,33 +283,8 @@ def tb23(d):
     return f"左上 {b1}，再出 {b2}，横屏 {b3} → 右上 {b3r}，竖屏 {b4}"
 
 
-case("TB-24", needs="jvm:FloatingUatTest.theDockButtonPutsItBack、FloatingHandleTest.rightToLeftTheDockButtonStaysAtTheRightEnd")(lambda d: None)
 
 
-case("TB-65", needs="jvm:KeyboardStyleUatTest.theBarsOneHandedWhereSplitNotWhereFloating、KeyboardStyleUatTest.fromTheBarTheFocusIsOnTheNewViewsOneHandedButton")(lambda d: None)
-
-
-# ---------------------------------------------------------------- 计算结果
-
-
-case("TB-25", needs="jvm:ToolbarUatTest.aSumsResultOnTheBar")(lambda d: None)
-
-
-case("TB-26", needs="jvm:KeyboardFieldsUatTest.theResultReplacesTheWholeSum")(lambda d: None)
-
-
-case("TB-28", needs="jvm:ToolbarUatTest.copyingNothingLeavesTheCursor")(lambda d: None)
-
-
-case("TB-29", needs="jvm:ToolbarUatTest.holdingTheCandidatesExpandButtonHides")(lambda d: None)
-
-
-case("TB-30", needs="jvm:ToolbarUatTest.copyAndCutSaidNothingToCopySaid、EditingLagUatTest.copyWithTheSelectionReportLagging")(lambda d: None)
-
-case("TB-31", needs="jvm:ToolbarUatTest.pasteStaysInTheClipboardWhenSoSet")(lambda d: None)
-
-
-case("TB-32", needs="jvm:FloatingUatTest.squareKeysASquareFloatingKeyboard")(lambda d: None)
 case("TB-53", needs="manual:平面键时悬浮键盘竖屏、横屏的四角，看图")(lambda d: None)
 
 
@@ -364,27 +303,7 @@ def tb41(d):
     return "20 次都读到新名字"
 
 
-case("TB-44", needs="jvm:ToolbarUatTest.aPieceOfAnEntryCommittedAlone")(lambda d: None)
-
-
-case("TB-45", needs="jvm:ClipboardLimitUatTest.unlimitedIsTheLimitsButtonAndLoweringAsksFirst")(lambda d: None)
-
-
-case("TB-46", needs="jvm:ToolbarUatTest.piecesPickedByTapsCommittedInTapOrder")(lambda d: None)
 case("TB-46a", needs="manual:选中块的底色和字在浅色、深色主题下看得清，要人眼看")(lambda d: None)
-
-
-case("TB-47", needs="jvm:KeyboardPickerUatTest.eachInputMethodsKeyboardsPickedFromTheStatusArea")(lambda d: None)
-
-
-case("TB-48", needs="jvm:ClipboardSplitUatTest.aLongEntrySplitsItsStartAndADottedOneNotAtAll")(lambda d: None)
-
-
-case("TB-49", needs="jvm:ClipboardSplitUatTest.piecesPickedBySweepingAcross")(lambda d: None)
-
-
-case("TB-50", needs="jvm:ClipboardOrderUatTest.entriesPastedFromThePanelMoveFirstWhenItCloses、ClipboardDaoTest.anUnpinnedEntryUsedComesFirstOfTheUnpinnedAPinnedOneStays")(lambda d: None)
-case("TB-52", needs="jvm:BarUatTest.theToolbarExpandedOverAClipStaysExpanded")(lambda d: None)
 
 
 @case("TB-51", visual=True)
@@ -463,16 +382,6 @@ def tb54(d):
         d.shot("kb", f"{way}粘贴后")
     return f"候选栏 {got[0]} 字、面板 {got[1]} 字，都整段"
 
-case("TB-55", needs="jvm:ToolbarConfigTest.handwritingIsPinnedByDefaultAndGreyedWhereItDoesNotWrite、HandwritingUatTest.theToolbarsButtonTurnsHandwritingOffAndOn")(lambda d: None)
-
-case("TB-56", needs="jvm:BarToolbarThemeTest.theToolbarAndTheCodeAreTheThemes")(lambda d: None)
-
-case("TB-57", needs="jvm:ToolbarConfigTest.everyPinnedOneStaysAtTheRight、FloatingUatTest.theBarsEndsAreAllThereAndStayFloatingAndResizedToTheLeast")(lambda d: None)
-
-case("TB-66", needs="jvm:ToolbarConfigTest.aBarArrangedBeforeHandwritingGetsItAfterTheEmoji、AppPrefsTest.aBarArrangedBeforeHandwritingGetsIt")(lambda d: None)
-case("TB-67", needs="jvm:ToolbarConfigTest.handwritingIsPinnedByDefaultAndGreyedWhereItDoesNotWrite、ToolbarSpacingUatTest.englishGreysHandwritingInItsPlaceAndNothingMoves、ToolbarMoreUatTest.handwritingInMoresPanelIsGreyedAndLitAsOnTheBar")(lambda d: None)
-case("TB-68", needs="jvm:FloatingUatTest.theToolbarsOverflowIsInMoresPanelFloatingAndResizedToTheLeast、ToolbarUatTest.theToolbarButtonsPageSetsTheBar、ToolbarMoreUatTest.theSmallestBarsMiddleHoldsAClipAndASum")(lambda d: None)
-case("TB-69", needs="jvm:ToolbarConfigTest.aToolbarWithNothingToShowIsMoreAlone、ToolbarMoreUatTest.aToolbarWithNothingToShowHasMoreForTheMenuKey")(lambda d: None)
 
 def resizer(d, s=None):
     s = s or d.screen()
@@ -512,9 +421,6 @@ def tb58(d):
     return f"{b1} → 放大 {b2} → 缩小 {b3}"
 
 
-case("TB-59", needs="jvm:FloatingUatTest.resizedNoSmallerThan260NorPastTheScreen、FloatingKeyboardTest.aResizeStopsAtItsBoundsAndTheScreensEdgesAndSaysSo")(lambda d: None)
-
-
 @case("TB-60", mutates=True, visual=True)
 def tb60(d):
     def shown():
@@ -534,8 +440,7 @@ def tb60(d):
         floating(d)
     turned = kwidth(d)
     d.shot("ime", "横屏")
-    # landscape resized bigger too, half way up the screen so there is room under it to grow: rotate(1) makes every
-    # device's display 2340x1080 (wm size), so 540 px is half its height on all of them (review R26 F8493)
+    # half way up: rotate(1) makes every display 2340x1080, so 540 px is half its height
     h, _ = handle(d)
     drag(d, h, (h[0], 540))
     r = resizer(d)
@@ -559,9 +464,6 @@ def tb60(d):
 case("TB-61", needs="jvm:FloatingUatTest.itsSizeIsKeptShownAgainAndDockedAndFloatingAgain、FloatingStoreTest.neverKeptEitherWayItIsWhere060LeftIt、"
                "FloatingKeyboardTest.neverResizedItIsAsItWas")(lambda d: None)
 
-case("TB-62", needs="jvm:FloatingUatTest.resizedWhileTypingWhatIsTypedStays")(lambda d: None)
-
-case("TB-63", needs="jvm:FloatingUatTest.talkBacksBiggerAndSmallerATenthEachAndSaidAtTheLimit、BarIconsThemeTest.thePanelsButtonsDoingACommandsJobAreTheThemes")(lambda d: None)
 
 case("TB-64", needs="jvm:BarIconsThemeTest.aToggleOnDrawsItsIconInTheSelectedColour、BarIconsThemeTest.tradSimpsTwoStatesAreTwoNames、"
                "BarIconsThemeTest.aThemesIconNotReadYetIsNothingTillItIsNeverTheAppsFirst")(lambda d: None)

@@ -19,7 +19,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** The toolbar's 手写 (061-handwriting-toolbar §3.3, §3.4): where it is offered, when it writes, its ink and the letters faded. */
+/** The toolbar's 手写: where it is offered, when it writes, its ink and the letters faded. */
 class HandwritingModeTest {
 
     @Test
@@ -29,7 +29,7 @@ class HandwritingModeTest {
             assertTrue(im, HandwritingMode.offered(im, password = false))
             assertFalse(im, HandwritingMode.offered(im, password = true))
         }
-        // the user's Q3: English's keys are typed
+        // English's keys are typed
         assertFalse(HandwritingMode.offered(InputMethodCatalog.ENGLISH, password = false))
         // a keyboard not told its input method yet
         assertFalse(HandwritingMode.offered("", password = false))
@@ -56,7 +56,7 @@ class HandwritingModeTest {
             Row("a password field", password = true, writes = false),
             Row("快速输入 or Unicode", tempMode = true, writes = false),
             Row("the recognizer not loadable", loadable = false, writes = false),
-            // the user's Q7: TalkBack's single taps find keys
+            // TalkBack's single taps find keys
             Row("touch exploration", exploring = true, writes = false),
         ),
         { it.what },
@@ -95,5 +95,15 @@ class HandwritingModeTest {
         assertEquals(Argb(0x59000000), t.shadow?.color)
         assertEquals("q", t.text)
         assertEquals(Argb(0x2DFF0000), (out[2] as Op.Icon).tint)
+    }
+
+    // a sticker stands for its letter: faded with it, and so is the letter drawn while it decodes
+    @Test
+    fun aStickerFadesWithTheLetters() {
+        val black = Argb(0xFF000000.toInt())
+        val text = Op.Text("q", 5.0, 8.0, "system", 400, 20.0, black)
+        val out = HandwritingMode.faded(listOf(Op.Sticker("q.png", Box(0.0, 0.0, 10.0, 10.0), standIn = listOf(text)))).single() as Op.Sticker
+        assertEquals(HandwritingMode.LETTERS_FADED, out.alpha, 1e-9)
+        assertEquals(Argb(0x59000000), (out.standIn.single() as Op.Text).color)
     }
 }

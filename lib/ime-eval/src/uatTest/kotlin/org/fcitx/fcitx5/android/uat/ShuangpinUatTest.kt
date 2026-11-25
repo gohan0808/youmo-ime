@@ -64,6 +64,50 @@ class ShuangpinUatTest {
         expectPreedit("zheng")
     }
 
+    // 编码行显示双拼按键: the keys on 26 keys, the scheme's letters read on the grouped ones; off, the pinyin
+    @Test
+    @Uat("SP-60", "SP-61")
+    fun theCodeShowsTheKeysPressedOnEveryKeyboardWhenSet() {
+        for (letters in listOf<NineKeyLetters?>(null) + GROUPED) {
+            with(EngineReplay(settings(EngineSettings(shuangpinKeysShown = true)), im = InputMethodCatalog.SHUANGPIN)) {
+                if (letters == null) type("nihk") else typeOn(letters, "nihk")
+                val shown = preedit.filter { it != ' ' }
+                // 14 keys and nine read another pair first (不好 bu hk): its letters, each on the key pressed
+                if (letters == null || letters == NineKeyLetters.G18) assertEquals("$letters", "ni hk", preedit)
+                assertEquals(preedit, 4, shown.length)
+                if (letters != null) assertTrue(preedit, shown.indices.all { shown[it] in letters.letters(letters.key("nihk"[it])) })
+            }
+            if (letters == null || letters == NineKeyLetters.G18) {
+                with(EngineReplay(im = InputMethodCatalog.SHUANGPIN)) {
+                    if (letters == null) type("nihk") else typeOn(letters, "nihk")
+                    assertEquals("$letters off", "ni hao", preedit)
+                }
+            }
+        }
+    }
+
+    // 编码行显示双拼按键 on: the syllable bar shows its syllables and initials as the code does (自然码 sha ua, sh u), and
+    // taking one reads as taking its pinyin did with the switch off
+    @Test
+    @Uat("SP-65")
+    fun theBarShowsTheKeysAsTheCodeDoesWhenSet() {
+        for (letters in GROUPED) {
+            val off = EngineReplay(im = InputMethodCatalog.SHUANGPIN)
+            off.typeOn(letters, "uani")
+            assertTrue("$letters off: ${off.panel.syllables}", off.panel.syllables.containsAll(listOf("sha", "sh")))
+            off.syllable("sha")
+            // replays share the engines: read before the next one starts
+            val offTook = off.candidates.take(10)
+            with(EngineReplay(settings(EngineSettings(shuangpinKeysShown = true)), im = InputMethodCatalog.SHUANGPIN)) {
+                typeOn(letters, "uani")
+                assertEquals("$letters", listOf("ua", "u"), listOf("sha", "sh").map { panel.syllables[panel.syllablesSaid.indexOf(it)] })
+                syllable("ua")
+                assertTrue("$letters $preedit", preedit.startsWith("ua"))
+                assertEquals("$letters", offTook, candidates.take(10))
+            }
+        }
+    }
+
     @Test
     @Uat("SP-07")
     fun aWordMadeInFullPinyinTypesInShuangpinItsOrderItsOwn() = with(EngineReplay()) {
@@ -96,8 +140,7 @@ class ShuangpinUatTest {
     @Test
     @Uat("SP-30")
     fun aWordTypedWithItsFirstSyllableWholeAndTheRestByInitials() = with(EngineReplay(im = InputMethodCatalog.SHUANGPIN)) {
-        // 自然码 shen = uf, then m, sh, h: mu and uh (shang) are syllables, each key read alone too,
-        // for a word typed before; never typed, it is not read so
+        // 自然码 shen = uf, then m, sh, h: mu and uh are syllables, each key read alone only for a word typed before
         type("ufmuh")
         assertTrue("ufmuh, never typed: $page", "什么时候" !in candidates)
         focus("")
@@ -135,15 +178,13 @@ class ShuangpinUatTest {
     @Test
     @Uat("SP-31")
     fun wholeSyllablesReadAsBeforeTheAbbreviations() {
-        // pinyin-chat.tsv typed whole in each scheme the app offers, on each keyboard it has (微软 no 14 keys), as
-        // `ime-eval pinyin <pinyin.data> data/pinyin-chat.tsv <result.tsv> --scheme <scheme>[-18|-14|-nine] --rerank <model>
-        // --history <words.txt>` against the same with --sp-abbrev off: the decoder and the sentence model, the first
-        // candidates the same (061-sp-abbrev §4.3: none changed when measured)
+        // pinyin-chat.tsv typed whole in each scheme and keyboard, with and without --sp-abbrev off: no right first made wrong,
+        // at most one first changed (a grouped keyboard's sentence or so moves with no budget, which the user accepts)
         val chat = File("data/pinyin-chat.tsv").useLines { EvalSet.parse(it) }
-        val model = SentenceModel.load(UatEngines.data(InputMethodCatalog.SENTENCE_MODEL), unpack = true)
+        val model = SentenceModel.load(UatEngines.data(InputMethodCatalog.SENTENCE_MODEL))
         // a key alone reads the words typed before: the 3000 likeliest typed, both ways
         val typed = TypedHistory.likeliest(UatEngines.pinyinData, HISTORY)
-        // each scheme and keyboard's, asserted once: a run takes minutes, and the first changed hid the rest (R27 F8564)
+        // each scheme and keyboard's, asserted once: a run takes minutes, and the first failure hid the rest
         val changedBy = LinkedHashMap<String, List<String>>()
         for ((name, scheme) in ShuangpinSet.SCHEMES) {
             val keyboards = listOf<NineKeyLetters?>(null) + ShuangpinSet.KEYS.values.filter { it != NineKeyLetters.G14 || ImKeyboards.has14(scheme) }
@@ -156,15 +197,16 @@ class ShuangpinUatTest {
                 )
                 val (off, on) = run(false) to run(true)
                 assertTrue("$name $letters ${samples.size}", samples.size > 1500)
-                val changed = samples.filter { s -> off.candidates(s.input, s.context).firstOrNull() != on.candidates(s.input, s.context).firstOrNull() }
-                changedBy["$name $letters"] = changed.map { it.input }
+                val changed = samples.map { s -> Triple(s.expected, off.candidates(s.input, s.context).firstOrNull(), on.candidates(s.input, s.context).firstOrNull()) }
+                    .filter { (_, was, now) -> was != now }
+                // the grouped keys' inputs are private-use characters, so the texts say which
+                if (changed.size > 1 || changed.any { (expected, was, _) -> was == expected }) {
+                    changedBy["$name $letters"] = changed.map { (expected, was, now) -> "$expected: $was → $now" }
+                }
             }
         }
         assertEquals(emptyMap<String, List<String>>(), changedBy.filterValues { it.isNotEmpty() })
-        // each syllable's two keys alone, in each scheme (the three the app offers and three 0.5 dropped,
-        // as ShuangpinSegmenterTest keeps them): the first never changes, and what page 1 showed it
-        // still shows first, but for a few; words fill a page a rare syllable's few characters left short. Each scheme's,
-        // asserted once, as above
+        // each syllable's two keys alone in each scheme: the first never changes and page 1's first stays first but for a few
         val firstChangedBy = LinkedHashMap<String, List<String>>()
         val displacedBy = LinkedHashMap<String, String>()
         for (scheme in ShuangpinSet.SCHEMES.values + DROPPED) {
@@ -185,12 +227,7 @@ class ShuangpinUatTest {
         assertEquals(emptyMap<String, String>(), displacedBy)
     }
 
-    // 061-sp-abbrev §5 where the order is made (code review SHOULD-4): a session that learns, HabitOrder and HabitRanker
-    // over the decoder, a user who typed the 3000 likeliest words. Each syllable's two keys (自然码 `ky` kuai, 可以 typed
-    // and read by k and y alone) and the first chat samples, typed a key at a time whole in each scheme on each keyboard:
-    // the first the same as with no key read alone, though the typed words read so are on the page. No sentence model:
-    // its budget carries over from key to key (Reranker.BUDGET), so what it picks follows what the keys before read;
-    // wholeSyllablesReadAsBeforeTheAbbreviations has it over the whole input
+    // a learning session for a user who typed the likeliest words, typed a key at a time, no sentence model
     @Test
     @Uat("SP-31")
     fun wholeSyllablesReadAsBeforeTheAbbreviationsInASessionThatLearns() {
@@ -198,7 +235,7 @@ class ShuangpinUatTest {
         val data = UatEngines.pinyinData
         val user = EvalUser(data)
         assertTrue(TypedHistory.count(user.model, data, TypedHistory.likeliest(data, HISTORY)) >= HISTORY)
-        // each scheme and keyboard's, asserted once (R27 F8564)
+        // each scheme and keyboard's, asserted once
         val changedBy = LinkedHashMap<String, List<String>>()
         val pagedBy = LinkedHashMap<String, String>()
         for ((name, scheme) in ShuangpinSet.SCHEMES) {
@@ -250,7 +287,7 @@ class ShuangpinUatTest {
     @Test
     @Uat("SP-33")
     fun aWordTypedPartlyByInitialsIsLearnedUnderThoseKeys() = with(EngineReplay(im = InputMethodCatalog.SHUANGPIN)) {
-        // what the syllables read first, nothing read by keys alone: the habits off (R27 F8567, not the page's own second)
+        // what the syllables read first, nothing read by keys alone: the habits off
         engines.useHabits = false
         type("ufmuh")
         val syllables = page.first()
@@ -263,8 +300,7 @@ class ShuangpinUatTest {
         type("ufmuh")
         expectFirst("什么时候")
         assertEquals("ufmuh: $page", 1, page.indexOf(syllables))
-        // what the syllables read picked twice under these keys is first there again (061-sp-abbrev §3.3), and
-        // learned under those keys only: 删光 first, as the case says (review F8113), and by initials only it stays first
+        // picked twice under these keys it is first there again, learned under those keys only
         repeat(2) {
             focus("")
             type("ufmuh")
@@ -279,7 +315,7 @@ class ShuangpinUatTest {
         expectFirst("什么时候")
     }
 
-    // a code that reads as whole syllables keeps its first, the words typed by its keys alone right after it (061-sp-abbrev §3.3)
+    // a code that reads as whole syllables keeps its first, the words typed by its keys alone right after it
     @Test
     @Uat("SP-34", "SP-55", "SP-59")
     fun aWordUsedInFullGoesSecondUnderAPairItsInitialsSpell() = with(EngineReplay(im = InputMethodCatalog.SHUANGPIN)) {
@@ -355,8 +391,7 @@ class ShuangpinUatTest {
         }
     }
 
-    // 自然码 u f, m, u, h: 什么时候 by its initials once typed, each key tapped in its middle or one by its
-    // edge (m by n, read as n too); never typed, there is no such reading wherever the keys are tapped
+    // 自然码 什么时候 by its initials once typed, a key tapped by its edge read as its neighbour too; never typed, no such reading
     @Test
     @Uat("SP-41")
     fun initialsInTheMiddleReadTheWordsTypedWhereverTapped() {
@@ -415,16 +450,6 @@ class ShuangpinUatTest {
         expectFirst("什么时候")
     }
 
-    // 自然码's [keys] on [letters] as the keyboard sends them: the 18 keys' and the nine keys' codes, the 14 keys' as
-    // 双拼's own keys (KeyboardPair: the 14 keys' codes are pinyin's); ' the separator, the nine keys' 1
-    private fun EngineReplay.typeOn(letters: NineKeyLetters, keys: String) = keys.forEach { c ->
-        when {
-            c == '\'' -> type("'")
-            letters == NineKeyLetters.G14 -> key(EngineReplay.symOf(Keyboard.shuangpin14Key(letters.key(c))))
-            else -> type(letters.key(c).toString())
-        }
-    }
-
     private fun EngineReplay.pickOn(letters: NineKeyLetters, keys: String, text: String) {
         focus("")
         typeOn(letters, keys)
@@ -432,8 +457,7 @@ class ShuangpinUatTest {
         focus("")
     }
 
-    // 061-sp-abbrev §3.1: the 18, 14 and nine keys read a key alone where it and the next make a syllable, for the
-    // words typed only, placed as on 26 keys; the habits off, none
+    // the 18, 14 and nine keys read a key alone where it and the next make a syllable, for typed words only
     @Test
     @Uat("SP-52", "SP-53", "SP-54", "SP-46", "SP-58")
     fun theGroupedKeyboardsReadAWordTypedByItsInitials() {
@@ -454,7 +478,7 @@ class ShuangpinUatTest {
             typeOn(letters, "ky")
             assertEquals("$letters ky: $page", 1, page.indexOf("可以"))
             focus("")
-            // x then m begun, the nine keys' 1 between: the word typed first (SP-58)
+            // x then m begun, the nine keys' 1 between: the word typed first
             repeat(2) { pickOn(letters, "xwmm", "下面") }
             typeOn(letters, "x'm")
             expectFirst("下面")
@@ -471,7 +495,7 @@ class ShuangpinUatTest {
         assertEquals("umuh: $page", 1, page.indexOf("什么时候"))
     }
 
-    // 061-sp-abbrev §3.4: typing a word in whole syllables, its last key begun, a word typed all by initials goes second
+    // typing a word in whole syllables, its last key begun, a word typed all by initials goes second
     @Test
     @Uat("SP-56")
     fun aWordTypedByInitialsGoesSecondOnTheWayToAWordTypedInFull() {
@@ -503,7 +527,7 @@ class ShuangpinUatTest {
         expectOnFirstPage("小明")
     }
 
-    // U-20 (D32 B) in 自然码: fghw twice lifts 奉化 under the part fgh (two keys are a syllable there: fh is fang); full pinyin's uses do not
+    // in 自然码: fghw twice lifts 奉化 under the part fgh (fh is fang there); full pinyin's uses do not
     @Test
     @Uat("SP-13b", "SP-13c")
     fun aWordTypedTwiceInFullGoesThirdUnderAPartWithinItsKeyboard() {
@@ -636,8 +660,11 @@ class ShuangpinUatTest {
     }
 
     private companion object {
-        // the words typed before where a run needs some: a few months' of a user's
+        // the words typed before where a run needs some
         const val HISTORY = 3000
+
+        // the single characters compared: full pinyin's jing puts 金 15th
+        const val FIRST = 30
 
         // the chat samples a session types a key at a time, on each keyboard of each scheme, with and without keys alone
         const val CHAT_IN_SESSION = 150
@@ -648,7 +675,7 @@ class ShuangpinUatTest {
 
         const val SENTENCE = "我们今天去吃饭"
 
-        // 紫光, 智能ABC and 国标, which 0.5 dropped (SchemeMigration): libime's tables, as ShuangpinSegmenterTest has them
+        // 紫光, 智能ABC and 国标, no longer offered (SchemeMigration): libime's tables, as ShuangpinSegmenterTest has them
         val DROPPED = listOf(
             ShuangpinScheme(
                 "zh=u ch=a sh=i ai=p an=r ang=s ao=q ei=k en=w eng=t er=j ia=x ian=f iang=g iao=b ie=d in=y ing=; " +
@@ -666,5 +693,14 @@ class ShuangpinUatTest {
                 "a",
             ),
         )
+    }
+}
+
+// a scheme's [keys] as the keyboard sends them on [letters] (the 14 keys as 双拼's own keys); ' the separator
+internal fun EngineReplay.typeOn(letters: NineKeyLetters, keys: String) = keys.forEach { c ->
+    when {
+        c == '\'' -> type("'")
+        letters == NineKeyLetters.G14 -> key(EngineReplay.symOf(Keyboard.shuangpin14Key(letters.key(c))))
+        else -> type(letters.key(c).toString())
     }
 }

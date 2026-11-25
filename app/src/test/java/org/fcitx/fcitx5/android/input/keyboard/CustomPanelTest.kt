@@ -6,8 +6,10 @@ package org.fcitx.fcitx5.android.input.keyboard
 
 import android.graphics.Rect
 import android.text.InputType
+import androidx.core.view.isVisible
 import org.fcitx.fcitx5.android.FcitxApplication
 import org.fcitx.fcitx5.android.R
+import org.fcitx.fcitx5.android.Uat
 import org.fcitx.fcitx5.android.core.FcitxKeyMapping
 import org.fcitx.fcitx5.android.data.layout.CustomKeyboards
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
@@ -17,6 +19,7 @@ import org.fcitx.fcitx5.android.input.keyboard.canvas.BuiltInLayouts
 import org.fcitx.fcitx5.android.input.keyboard.canvas.KeyboardCanvasView
 import org.fcitx.fcitx5.android.input.keyboard.canvas.set
 import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneBoard
+import org.fcitx.fcitx5.android.scene.Op
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -33,11 +36,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.File
 
-/**
- * The number keyboard's and the symbol panel's layout of the user's (061-custom-layout §7, §8, L5): a number board drawn
- * for the pads it is for (`pads=`, 123's alone where it names none), the app's for the rest; the symbols' drawn as the
- * panel opens, a choice changed drawn the next time; one refused as it is read, the app's, the choice left.
- */
+/** A number board drawn for the pads it is for (`pads=`), the symbols' as the panel opens; one refused as read draws the app's. */
 @RunWith(RobolectricTestRunner::class)
 @Config(application = FcitxApplication::class)
 class CustomPanelTest {
@@ -66,7 +65,6 @@ class CustomPanelTest {
         prefs.symbolsPanelLayout.setValue("")
     }
 
-    // the app's board [base] made layout [id] of the user's, [attrs] on its root, [edit] done to its text, saved as its file
     private fun own(id: String, base: String, attrs: String = "", edit: (String) -> String = { it }): CustomChoice? {
         val text = edit(BuiltInLayouts(context).text(base)!!.replaceFirst("id=\"$base\"", "id=\"$id\" based-on=\"$base\"$attrs"))
         File(dir, "$id.xml").writeText(text)
@@ -74,7 +72,7 @@ class CustomPanelTest {
         return CustomKeyboards.choice(id)
     }
 
-    // the number board with its 1 shown as 壹 (it types 1 still)
+    // its 1 shown as 壹 (it types 1 still)
     private fun numbers(attrs: String = "", edit: (String) -> String = { it }) =
         own("my-num", "number", attrs) { edit(it.replace("label=\"1\" text-size=\"30\"", "label=\"壹\" text-size=\"30\"")) }
 
@@ -85,26 +83,24 @@ class CustomPanelTest {
         val mine = numbers(" pads=\"full phone\"")!!
         assertTrue(mine.drawn)
         assertEquals(listOf("full", "phone"), mine.pads)
-        // none chosen: the app's everywhere
         assertEquals(listOf("1"), shownOnes(InputType.TYPE_CLASS_NUMBER))
         prefs.numberKeyboardLayout.setValue(mine.id)
         assertEquals(listOf("壹"), shownOnes(InputType.TYPE_CLASS_NUMBER))
         assertEquals(listOf("壹"), shownOnes(InputType.TYPE_CLASS_PHONE))
-        // a decimal's pad, which it is not for: the app's, its point there
-        assertEquals(listOf("1"), shownOnes(InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL))
-        // the 123 key in a text field: the user's; its 1 sends the keypad's 1, as the app's
+        // a decimal field has the full pad, so the board for it; a date's is not the board's
+        assertEquals(listOf("壹"), shownOnes(InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL))
+        assertEquals(listOf("1"), shownOnes(InputType.TYPE_CLASS_DATETIME))
         h.start()
         h.tap(h.key("123"))
         assertTrue(h.texts().toString(), "壹" in h.texts())
         h.api.calls.clear()
         h.tap(h.key("壹"))
         assertTrue(h.api.calls.toString(), h.api.calls.any { it.startsWith("sendKey") && "sym=${FcitxKeyMapping.FcitxKey_KP_1}," in it })
-        // back on the app's: the next field shows it
         prefs.numberKeyboardLayout.setValue("")
         assertEquals(listOf("1"), shownOnes(InputType.TYPE_CLASS_NUMBER))
     }
 
-    // L5 review S2: one board for two pads is made once for each, not again at each field of the other
+    // made once for each pad, not again at each field of the other
     @Test
     fun aNumberBoardForTwoPadsIsMadeOnceForEach() {
         prefs.numberKeyboardLayout.setValue(numbers(" pads=\"full phone\"")!!.id)
@@ -130,12 +126,24 @@ class CustomPanelTest {
         assertEquals(listOf("1"), shownOnes(InputType.TYPE_CLASS_PHONE))
     }
 
+    // their fields have the full pad now
+    @Test
+    fun aBoardImportedForTheMergedPadsIsTheFullOnes() {
+        val mine = numbers(" pads=\"digits decimal\"")!!
+        assertTrue(mine.drawn)
+        assertEquals(listOf("full"), mine.pads)
+        prefs.numberKeyboardLayout.setValue(mine.id)
+        assertEquals(listOf("壹"), shownOnes(InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD))
+        assertEquals(listOf("壹"), shownOnes(InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_SIGNED))
+        assertEquals(listOf("1"), shownOnes(InputType.TYPE_CLASS_PHONE))
+    }
+
     @Test
     fun aFileReplacedIsDrawnAsTheNextFieldStarts() {
         val mine = numbers()!!
         prefs.numberKeyboardLayout.setValue(mine.id)
         assertEquals(listOf("壹"), shownOnes(InputType.TYPE_CLASS_NUMBER))
-        // the same id imported again, its 1 another: drawn anew (a new stamp), the old keyboard not kept
+        // the same id imported again: drawn anew, the old keyboard not kept
         own("my-num", "number") { it.replace("label=\"1\" text-size=\"30\"", "label=\"一\" text-size=\"30\"") }
         File(dir, "my-num.xml").setLastModified(System.currentTimeMillis() + 5_000)
         CustomKeyboards.forget("my-num")
@@ -144,14 +152,13 @@ class CustomPanelTest {
 
     @Test
     fun oneRefusedAsItIsReadDrawsTheAppsTheChoiceKept() {
-        // a key typing a direction override: let in by an older build, refused as it is read now
+        // a direction override: let in by an older build, refused as read now
         val mine = numbers { it.replaceFirst("<row>", "<row>\n    <key id=\"rlo\" width=\"1\" label=\"x\" send=\"commit:&#x202E;\" shortcut=\"my-num/rlo\"/>") }!!
         assertFalse(mine.drawn)
         prefs.numberKeyboardLayout.setValue(mine.id)
         assertNull(prefs.drawnPanelLayout(PanelLayouts.Panel.NUMBER))
         assertEquals(listOf("1"), shownOnes(InputType.TYPE_CLASS_NUMBER))
         assertEquals(mine.id, prefs.numberKeyboardLayout.getValue())
-        // a letters layout's id set there by hand: the app's
         val letters = own("my-qwerty", "qwerty")!!
         prefs.numberKeyboardLayout.setValue(letters.id)
         assertNull(prefs.drawnPanelLayout(PanelLayouts.Panel.NUMBER))
@@ -167,27 +174,23 @@ class CustomPanelTest {
         h.tap(h.key("符"))
         assertTrue(labels().toString(), back in labels())
         h.tap(h.key(back))
-        // chosen: the next time it opens
         prefs.symbolsPanelLayout.setValue(mine.id)
         h.tap(h.key("符"))
         assertTrue(labels().toString(), "回去" in labels() && back !in labels())
-        // its way back is the panel's
         h.tap(h.key("回去"))
         assertTrue(labels().toString(), "q" in labels())
-        // the app's again
         prefs.symbolsPanelLayout.setValue("")
         h.tap(h.key("符"))
         assertTrue(labels().toString(), back in labels())
     }
 
-    // L5 review S3: a board put in place of the one the panel was made with (opened once already): the categories and
-    // the grid go to its slots, here the other way round to the app's
+    // a board put in place of the one the panel was made with: the categories and grid go to its slots, found by kind
     @Test
     fun aPanelOpenedBeforeHasItsCategoriesAndGridInTheNewBoardsSlots() {
         val swapped = own("my-sym", "symbols") {
             it.replace(
                 "<slot id=\"categories\" kind=\"symbol-categories\" width=\"18\"/>\n    <slot id=\"grid\" kind=\"symbol-grid\" width=\"82\"/>",
-                "<slot id=\"grid\" kind=\"symbol-grid\" width=\"82\"/>\n    <slot id=\"categories\" kind=\"symbol-categories\" width=\"18\"/>",
+                "<slot id=\"symbols\" kind=\"symbol-grid\" width=\"82\"/>\n    <slot id=\"kinds\" kind=\"symbol-categories\" width=\"18\"/>",
             )
         }!!
         assertTrue(swapped.drawn)
@@ -208,12 +211,54 @@ class CustomPanelTest {
         assertTrue(panel.indexOfChild(panel.grid) > panel.indexOfChild(panel.embeddedKeyboard))
     }
 
-    // the board's own slot as its scene is now, in the panel's pixels
+    // a number layout of before 0.6.3, its own lock key beside 返回: tapped it locks, its icon and its words follow
+    @Test
+    @Uat("PAN-42")
+    fun aNumberLayoutsOwnLockKeyStillLocks() {
+        val mine = numbers { it.replace(OWN_BACK, OLD_BACK_AND_LOCK) }!!
+        assertTrue(mine.drawn)
+        prefs.numberKeyboardLayout.setValue(mine.id)
+        h.start(InputType.TYPE_CLASS_NUMBER)
+        val board = KeyboardHarness.find<NumberKeyboard>(h.inputView)!!
+        fun icons() = KeyboardHarness.find<KeyboardCanvasView>(board)!!.keyAt("lock")!!.ops(false).filterIsInstance<Op.Icon>().map { it.name }
+        assertEquals(listOf("lock-open"), icons())
+        assertEquals(context.getString(R.string.number_pad_lock), h.keyNamed("lock").description)
+        h.tap(h.keyNamed("lock"))
+        assertTrue(board.locked)
+        assertEquals(listOf("lock"), icons())
+        assertEquals(context.getString(R.string.number_pad_unlock), h.keyNamed("lock").description)
+        h.tap(h.keyNamed("lock"))
+        assertFalse(board.locked)
+    }
+
+    // a board without the grid: the grid hidden, the keys below it drawn and tapped
+    @Test
+    fun aPanelWithoutTheGridHidesItAndItsKeysAreTapped() {
+        val bare = own("my-sym", "symbols") { it.replace("<slot id=\"grid\" kind=\"symbol-grid\" width=\"82\"/>", "<gap width=\"82\"/>") }!!
+        assertTrue(bare.drawn)
+        prefs.symbolsPanelLayout.setValue(bare.id)
+        val back = h.service.getString(R.string.picker_back)
+        h.start()
+        h.tap(h.key("符"))
+        val panel = KeyboardHarness.find<PickerLayout>(h.inputView)!!
+        assertFalse(panel.grid.isVisible)
+        assertTrue(panel.side!!.isVisible)
+        h.tap(h.key(back))
+        assertTrue(h.keys().map { it.label }.toString(), "q" in h.keys().map { it.label })
+    }
+
+    private companion object {
+        const val OWN_BACK = """width="22" label="{back}" text-size="16" text-style="bold" send="layout:Text"
+         long-press="panel-lock"/>"""
+        const val OLD_BACK_AND_LOCK = """width="12" label="{back}" text-size="16" text-style="bold" send="layout:Text"/>
+    <key id="lock" role="lock" kind="function" width="10" icon="{lock-icon}" a11y="a11y_key_panel_lock" send="panel-lock"/>"""
+    }
+
     private fun cellOf(panel: PickerLayout, slot: String): Rect {
         val kb = panel.embeddedKeyboard
         val canvas = KeyboardHarness.find<KeyboardCanvasView>(kb)!!
         return Rect().apply {
-            set(canvas.scene!!.slots.single { it.id == slot }.bounds)
+            set(canvas.scene!!.slots.single { it.kind == slot }.bounds)
             offset(kb.left + canvas.left, kb.top + canvas.top)
         }
     }

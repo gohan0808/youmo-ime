@@ -4,8 +4,8 @@
  */
 package org.fcitx.fcitx5.android.host
 
+import org.fcitx.fcitx5.android.Uat
 import org.fcitx.fcitx5.android.assertRows
-import org.fcitx.fcitx5.android.engine.InputMethodCatalog
 import org.fcitx.fcitx5.android.engine.runtime.EngineEvent
 import org.fcitx.fcitx5.android.engine.runtime.EngineSettings
 import org.fcitx.fcitx5.android.engine.session.Action
@@ -17,10 +17,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * 联想's × (0.6.1): the bar's candidates say whether they are 联想's ([HostEvent.Candidates.predicting]), and
- * [HostCore.dropPredictions] puts those alone away; what is typed it leaves.
- */
+/** 联想's ×: [HostCore.dropPredictions] puts away only candidates marked [HostEvent.Candidates.predicting]; what is typed stays. */
 class DropPredictionsTest {
 
     // the session's answer to any key [next]; the ×'s and a reset's, nothing shown
@@ -36,10 +33,10 @@ class DropPredictionsTest {
         override fun settings(settings: EngineSettings) = Unit
     }
 
-    // a bar of its own for each row: what one row showed is never the next row's (review F8120)
+    // a bar of its own for each row: what one row showed is never the next row's
     private class Bar {
         val host = Host()
-        val core = HostCore(host, VirtualHostClock(), Profile.load(null, InputMethodCatalog.LISTED.map { it.name }.toSet(), "D"), firstRun = true).also {
+        val core = HostCore(host, VirtualHostClock(), testProfile("D"), firstRun = true).also {
             it.activate(1)
             it.setCapabilities(Capability.PREEDIT or Capability.COMMIT_STRING_WITH_CURSOR)
             it.focus(true)
@@ -54,7 +51,7 @@ class DropPredictionsTest {
         fun lastCandidates() = log.filterIsInstance<HostEvent.Candidates>().last()
     }
 
-    // named so (review F8300): the × sends no Escape and resets nothing, the bug DropPredictionsEnginesTest pins
+    // the × sends no Escape and resets nothing, the bug DropPredictionsEnginesTest pins
     @Test
     fun theCrossDropsThePredictionsAlone() {
         assertRows(
@@ -86,6 +83,24 @@ class DropPredictionsTest {
                     assertEquals(emptyList<Int>(), host.kinds)
                 }
             },
+        )
+    }
+
+    // 空格上屏联想词: the bar draws the prediction space takes as the first, none when space is a space
+    @Test
+    @Uat("PY-160")
+    fun theBarLeadsWithWhatSpaceTakes() {
+        fun row(why: String, shown: Snapshot, lead: Int) = why to {
+            with(Bar()) {
+                shown(shown)
+                assertEquals(lead, lastCandidates().lead)
+            }
+        }
+        assertRows(
+            row("off: the first, as ever", PREDICTING, lead = 0),
+            row("on: past an emoji, the one space takes", PREDICTING.copy(spacePicks = 1, spaceMarks = true), lead = 1),
+            row("on, space a space: none", PREDICTING.copy(spaceMarks = true), lead = -1),
+            row("typing: the first", COMPOSING, lead = 0),
         )
     }
 

@@ -1,7 +1,4 @@
-// youmo-layout-maker: what the layout maker's page does to a .layout (061-custom-layout §12), apart from the page so node
-// tests it. The page never reads or lays out a layout itself: each change is the engine's to read again (readOwnLayout),
-// check (checkLayout) and draw (buildScene). Here: a new layout from the app's boards, the file opened and saved, the
-// checker's findings in words, the preview's environment as the engine's EnvJson.
+// youmo-layout-maker: the page never reads or lays out a layout itself: each change goes back through the engine.
 (function (root) {
   'use strict';
 
@@ -12,38 +9,58 @@
 
   const ID = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
-  /** The app's boards one starts from (LayoutCheck.BASES), as the 新建 dialog names them. */
   const BASE_LABEL = { qwerty: '26 键', k14: '14 键', k18: '18 键', nine: '九键', number: '数字键盘', symbols: '符号面板' };
   const FAMILY_LABEL = { letters: '字母', grouped: '字母分组', nine: '九键', number: '数字', symbols: '符号' };
-  /** The number pads (LayoutReader.PADS): what a field asks for, the pad shown. */
   const PAD_LABEL = {
-    full: '完整', digits: '只有数字', signed: '数字和正负号', decimal: '数字和小数点', 'signed-decimal': '正负号和小数点',
-    phone: '电话', datetime: '日期时间',
+    full: '完整', phone: '电话', datetime: '日期时间',
   };
   const ROLE_LABEL = { symbols: '符', back: '返回', numbers: '123' };
-  /** LayoutCheck.kept's slots (LayoutReader's kinds) and keys (its roles, else a digit key's id) a board must keep. */
   const SLOT_LABEL = {
     'handwriting-pad': '手写区', 'nine-side': '九键左边的符号列', 'handwriting-candidates': '手写候选栏', 'symbol-categories': '符号面板的分类栏', 'symbol-grid': '符号面板的符号格子',
+    scroll: '滑动列',
   };
+  /** The scroll columns' categories (ScrollDefaults.IDS) as the settings name them. */
+  const SCROLL_LABEL = { nine: '九键', 'nine-english': '九键英文', url: '网址', email: '邮箱', number: '数字', phone: '电话', datetime: '日期时间' };
+  const DIRECTIONS = [['vertical', '竖'], ['horizontal', '横']];
   const KEY_LABEL = { backspace: '删除', enter: '回车', lang: '地球键' };
   const BOARD_LABEL = { Number: '数字键盘', Symbol: '符号面板' };
-  /** The app's boards a key's name is of (LayoutCheck's held), as the app's key page names them. */
   const APP_BOARD_LABEL = {
     qwerty: '全键盘', k14: '14 键', k18: '18 键', nine: '九键', zhuyin: '注音全键盘', 'zhuyin-nine': '注音九键', number: '数字键盘', symbols: '符号面板',
     emoji: '表情', emoticon: '颜文字', 'emoji-search': '表情搜索', 'expanded-side': '展开候选', 'number-row': '数字行',
   };
 
-  // ---- the checker's findings in words (LayoutCheck.KEYS: the test holds the table to the engine's list) ----
+  // LayoutCheck.KEYS in words: the test holds the table to the engine's list
 
   const q = (s) => '「' + s + '」';
-  // an app board's name amid Chinese, as the app's LayoutTexts.spaced writes it (R26 F8374): a space on a side where it
-  // starts or ends with a digit or a Latin letter (是 18 键的键), none beside a Chinese one (是数字行的键)
+  // as the app's LayoutTexts.spaced: a space beside a digit or a Latin letter, none beside a Chinese one
   const boardName = (board) => {
     const n = APP_BOARD_LABEL[board] || board;
     return (/^[0-9A-Za-z]/.test(n) ? ' ' : '') + n + (/[0-9A-Za-z]$/.test(n) ? ' ' : '');
   };
+  // as the app's LayoutTexts.lacks: [what, items, pads], what the board does without it; pads named only where the others have it
+  const LACKS = {
+    backspace: '没有 ⌫：删不了字，打拼音时打错的字母去不掉（不在打字时可以用工具栏的文本编辑面板删）',
+    enter: '没有回车：换不了行，也按不了发送、搜索',
+    back: '没有返回键：回字母键盘要收起键盘再点输入框；数字输入框里一直是这块',
+    'panel-back': '没有返回键：回字母键盘要收起键盘再点输入框',
+    lang: '没有地球键：换输入法要把空格键长按行为设成切换输入法',
+    'lang-no-space': '没有地球键：换输入法要把空格键长按行为设成切换输入法；也没有空格，空格长按也用不了',
+    space: '没有空格键：打不出空格',
+    shift: '没有 Shift：打不出大写',
+    'nine-side': '没有九键左列的位置：左列不显示',
+    'symbol-categories': '没有符号分类的位置：分类不显示',
+    'symbol-grid': '没有符号格子的位置：没有符号可选',
+  };
+  function lacks([what, items = '', pads = '']) {
+    const on = pads.split(' ').filter(Boolean).map((p) => PAD_LABEL[p] || p).join('、');
+    if (what === 'pad-digits') return on ? '数字键盘「' + on + '」打不出 ' + items + '：这种输入框里键盘直接是这块' : '数字输入框里键盘直接是这块，打不出 ' + items;
+    const said = what === 'digits' ? '没有数字键 ' + items
+      : what === 'letters' ? '没有字母 ' + items + '（密码框里也用这块键盘）'
+        : LACKS[what] || '少了键：' + [what, items, pads].filter(Boolean).join(' ');
+    return on ? said + '（数字键盘「' + on + '」）' : said;
+  }
+
   const WORDS = {
-    // errors
     read: ([msg]) => '读不进来：' + msg,
     newer: ([v]) => '需要幽默输入法 ' + v + ' 或更新（min-app）',
     'id-length': ([id, max]) => 'id' + q(id) + '太长：最多 ' + max + ' 个字符',
@@ -59,16 +76,15 @@
     'label-long': ([key, max]) => '键' + q(key) + '显示的字太长：最多 ' + max + ' 个字符',
     include: ([src]) => 'App 没有叫' + q(src) + '的片段（include 只能引用 App 自带的）',
     'layout-target': ([action]) => q(action) + '切换到的面板 App 没有',
-    base: ([why]) => '和底稿（based-on）对不上：' + why,
+    base: ([board]) => 'App 没有这块底稿：' + (APP_BOARD_LABEL[board] || board),
     scene: ([where, msg]) => '在「' + where + '」排不出来：' + msg,
     blank: ([key, where]) => '键' + q(key) + '在「' + where + '」什么都不显示（没有字也没有图标）',
     'name-no-slash': ([name]) => '按键名' + q(name) + '不是 App 的：新键的名字写成「布局 id/键 id」',
     'name-prefix': ([name]) => '按键名' + q(name) + '用了 App 的前缀，App 却没有这个键',
-    lacks: ([what]) => '少了必需的键：' + what,
+    lacks: (args) => lacks(args),
     groups: ([why]) => '字母分组不对：' + why,
     'hidden-chars': ([field]) => field + '里有看不见的字符（控制字符、方向字符、零宽字符或换行）',
     command: ([key, action]) => '键' + q(key) + '的 ' + action + ' 是命令：字母键和空格只能用底稿同一个键上有的命令',
-    // warnings
     'no-way': (boards) => '没有键能切到' + boards.map((b) => BOARD_LABEL[b] || b).join('、'),
     narrow: ([key]) => '键' + q(key) + '很窄，可能不好按',
     commits: ([n]) => n + ' 个键点按打出写死的文字（导入时 App 会列给用户看）',
@@ -78,18 +94,21 @@
     'held-letters': ([key, board]) => key + ' 是' + boardName(board) + '的键，长按跟它走，不按这里写的字母；要用这些字母，给它起个自己的键名',
     'held-popups': ([board]) => '这里写的 popups= 不起作用，跟' + boardName(board) + '一样',
     'gap-look': () => '空位（gap）的 look=、class= 不起作用',
-    'pad-lacks': ([pad, keys]) => '数字键盘「' + (PAD_LABEL[pad] || pad) + '」缺 ' + keys + '：这种输入框里打不出来',
+    // the full pad is every number field's, not one kind of field
+    'pad-lacks': ([pad, keys]) => (pad === 'full'
+      ? '数字键盘缺 ' + keys + '：数字框里打不出来（比如金额的负号、小数点）'
+      : '数字键盘「' + (PAD_LABEL[pad] || pad) + '」缺 ' + keys + '：这种输入框里打不出来'),
+    'pad-letters': ([key]) => '键' + q(key) + '打出的是字母：数字输入框多半不收字母',
     'bottom-left': ([want]) => '左下角通常是 ' + want.split(' ').map((r) => ROLE_LABEL[r] || r).join('、') + '（和 App 自带的一样）',
     'split-scaled': ([n, where]) => '分体时这一行在「' + where + '」有 ' + n + ' 个键，不是 9 或 10 个，分不成左右两半，只能整行缩小',
+    'scroll-tight': () => '滑动列太挤：一项不到 20 dp，减少 show= 或加宽',
   };
 
-  /** A finding of checkLayout (`{line, key, args}`) in words; one of a key the table lacks, as the engine has it. */
   function words(f) {
     const say = WORDS[f.key];
     return say ? say(Array.from(f.args || [])) : f.key + (f.args && f.args.length ? '：' + Array.from(f.args).join(' ') : '');
   }
 
-  /** A report's findings as the page lists them: `[{level, line, message}]`, errors first. */
   function findings(report) {
     const out = [];
     for (const f of report.errors || []) out.push({ level: 'error', line: f.line || 0, message: words(f) });
@@ -97,11 +116,9 @@
     return out;
   }
 
-  // ---- the <keyboard> and its <meta> ----
 
   const keyboardOf = (xml) => F.elements(xml, 'keyboard')[0] || null;
 
-  /** The <keyboard>'s id, name, family, based-on and <meta>'s attributes; null where there is no <keyboard>. */
   function info(xml) {
     const k = keyboardOf(xml);
     if (!k) return null;
@@ -110,7 +127,7 @@
     return { id: a.id ?? null, name: a.name ?? null, family: a.family ?? null, basedOn: a['based-on'] ?? null, meta: m ? Object.fromEntries(m.attrs) : {} };
   }
 
-  // a value written between double quotes: ' escaped as well, so no reader takes part of it for a quote of its own
+  // ' escaped too, so no reader takes part of the value for a quote
   const attrValue = (v) => escape(v).replace(/'/g, '&apos;');
 
   // [tag] with attribute [name] [value] (null: gone): changed in place, else added at its end. Its attributes gone
@@ -266,7 +283,9 @@
     { id: 'english', label: '英文', input: { ime: 'english' } },
   ];
   /** The fields a letters board is previewed in (LayoutCheck's); a number board's are its pads. */
-  const FIELDS = [['text', '普通'], ['url', '网址'], ['email', '邮箱']];
+  const FIELDS = [['text', '普通'], ['url', '网址'], ['email', '邮箱'], ['phone', '电话'], ['datetime', '日期']];
+  // a phone's or a date's field is a number field the app names its pad of
+  const FIELD_PADS = ['phone', 'datetime'];
   const SHIFTS = [['none', '关'], ['once', '一次'], ['lock', '锁定']];
   const FORMS = [['normal', '普通'], ['compact', '紧凑'], ['floating', '悬浮'], ['left', '单手（左）'], ['right', '单手（右）'], ['split', '分体']];
   /** Where the up and down swipes' marks go (EnvJson.AT): '' the app's default. */
@@ -328,6 +347,7 @@
     const ime = (IMES.find((x) => x.id === e.ime) || IMES[0]).input;
     const input = Object.assign({}, ime);
     if (family === 'number') Object.assign(input, { field: 'number', pad: e.pad || 'full' });
+    else if (FIELD_PADS.includes(e.field)) Object.assign(input, { field: 'number', fieldPad: e.field });
     else if (e.field && e.field !== 'text') input.field = e.field;
     out.input = input;
     const punctuation = ime.ime === 'english' ? null : M.ZH_PUNCTUATION;
@@ -390,7 +410,7 @@
     return out;
   }
 
-  // PackLayouts.convert's why in words (review S2); one not known here as it said it
+  // PackLayouts.convert's why in words; one not known here as it said it
   function refusal(why) {
     const w = why || '';
     let m;
@@ -403,9 +423,7 @@
     if ((m = /^its family is (.*), the app's (.*)$/.exec(w))) return '种类是 ' + m[1] + '，App 的这块是 ' + m[2];
     if ((m = /^the app's (.*) does not read$/.exec(w))) return 'App 自带的 ' + m[1] + ' 读不出来';
     if ((m = /^made one that does not take: (.*)$/.exec(w))) return '转出来的布局检查不过：' + m[1];
-    if ((m = /^its pads lack keys: (.*)$/.exec(w))) return '它写的数字键盘缺键：' + m[1].split(' ').map((p) => '「' + (PAD_LABEL[p] || p) + '」').join('、');
     if ((m = /^over (\S+) when= alternatives an include's and its rows' make$/.exec(w))) return '它用的片段和片段里的行，when= 条件合起来超过 ' + m[1] + ' 种';
-    if (w === 'it serves no pad') return '哪种数字键盘都缺键，一种也用不了';
     if ((m = /^it has no slot \[(.*)\]$/.exec(w))) return '少了 App 这块必有的位置：' + m[1].split(', ').map((k) => SLOT_LABEL[k] || k).join('、');
     if ((m = /^it has no key \[(.*)\]$/.exec(w))) return '少了 App 这块必有的键：' + m[1].split(', ').map((k) => KEY_LABEL[k] || k).join('、');
     return w || '转不出来';
@@ -416,7 +434,7 @@
    * of [bases] (the app's listed boards, in their order) its `layouts/` has a file of, made one of the user's as the
    * app makes it on import (E.convertPackLayout, PackLayouts.convert, with the pack's fragments): `{board, ok, id, name,
    * text}`, or `{board, ok: false, why}`. [theme] the pack's theme read (its name and `<meta>` the layout's); [version]
-   * the app's. The conversion's `renames` (the user's settings of a key renamed carried over, L6) are the app's alone:
+   * the app's. The conversion's `renames` (the user's settings of a key renamed carried over) are the app's alone:
    * the page has none to carry.
    */
   function themeBoards(E, d, theme, bases, version) {
@@ -431,7 +449,7 @@
   }
 
   root.YoumoLayoutMaker = {
-    BASE_LABEL, FAMILY_LABEL, PAD_LABEL, IMES, SHIFTS, FIELDS, FORMS, AT, ENV, WORDS,
+    BASE_LABEL, FAMILY_LABEL, PAD_LABEL, SLOT_LABEL, SCROLL_LABEL, DIRECTIONS, IMES, SHIFTS, FIELDS, FORMS, AT, ENV, WORDS,
     words, findings, info, withAttr, setKeyboard, setMeta, idProblem, nameProblem, suggested, fromBuiltin, fromExample, openText, fileName, saveCheck,
     restoreEnv, shape, envJson, check, themeBoards, refusal,
   };

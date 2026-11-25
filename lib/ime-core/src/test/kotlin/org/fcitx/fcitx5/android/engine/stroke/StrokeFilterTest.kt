@@ -8,12 +8,15 @@ import org.fcitx.fcitx5.android.Uat
 import org.fcitx.fcitx5.android.engine.assertRows
 import org.fcitx.fcitx5.android.engine.data.CodeTable
 import org.fcitx.fcitx5.android.engine.learn.control.Why
+import org.fcitx.fcitx5.android.engine.pinyin.PinyinSegmenter
 import org.fcitx.fcitx5.android.engine.reading.WordReading
 import org.fcitx.fcitx5.android.engine.session.Action
 import org.fcitx.fcitx5.android.engine.session.Choice
 import org.fcitx.fcitx5.android.engine.session.Offer
+import org.fcitx.fcitx5.android.engine.session.PinyinSession
 import org.fcitx.fcitx5.android.engine.session.Session
 import org.fcitx.fcitx5.android.engine.session.Snapshot
+import org.fcitx.fcitx5.android.engine.session.sessionTestData
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -42,19 +45,13 @@ class StrokeFilterTest {
 
     private val strokes = Strokes(CodeTable.load(ByteBuffer.wrap(Strokes.read(dict.reader().buffered(), "stroke").build().toByteArray()))) { 0f }
 
-    /**
-     * Pinyin as far as the filter sees it: the input typed, its candidates by input, a candidate picked
-     * committed whole, or its first character only where [partial] has it (我 of women leaves men); one
-     * forgotten or blocked is gone from the input's. A key that ends the input (not a letter, or `;`, read
-     * as a 双拼 scheme's key but never where it stands here) leaves as PinyinSession does: its own first
-     * candidate committed, what that did not read as typed, the key not handled. Every action it is
-     * given is recorded, and every index it is asked why of. A pick and a leave each delete [deletes]
-     * before the cursor (English's space after a word does).
-     */
+    /** Pinyin as far as the filter sees it: candidates by input, a pick committed whole or as its first character ([partial]); every action recorded. */
     private class FakePinyin(
         words: Map<String, List<String>>,
         private val partial: Map<String, String> = emptyMap(),
         private val deletes: Int = 0,
+        private val bar: List<String> = emptyList(),
+        private val said: List<String> = emptyList(),
     ) : Session {
         val words = words.toMutableMap()
         val actions = ArrayList<Action>()
@@ -109,7 +106,7 @@ class StrokeFilterTest {
 
         fun shown(commit: String = "") = Snapshot(
             commit, input, all().take(PAGE), 0, hasPreviousPage = false, hasNextPage = all().size > PAGE,
-            handled = true, predicting = false, total = all().size, actionable = true,
+            handled = true, predicting = false, total = all().size, actionable = true, syllables = bar, syllablesSaid = said,
         )
 
         override fun candidates(from: Int, count: Int): List<Choice> {
@@ -147,7 +144,6 @@ class StrokeFilterTest {
         assertEquals(listOf("养", "羊", "🐑"), s.candidates)
         assertTrue(s.hasNextPage)
         assertEquals(listOf("养", "羊", "🐑", "望"), all())
-        // the hints are the session's
         assertEquals(listOf("hint-养", "hint-羊", "hint-🐑"), s.hints)
         assertTrue(filter.filtering)
     }
@@ -157,18 +153,15 @@ class StrokeFilterTest {
         type("yang")
         filter.apply(Action.Stroke('n'))
         assertEquals(listOf("养", "羊", "🐑"), filter.apply(Action.Stroke('p')).candidates)
-        // 望 is hszph too: h then s finds it beside 样 and 杨
         filter.apply(Action.Backspace)
         filter.apply(Action.Backspace)
         filter.apply(Action.Stroke('h'))
         assertEquals(listOf("样", "杨", "望"), filter.apply(Action.Stroke('s')).candidates)
-        assertEquals("yang 一丨", filter.apply(Action.Refine).preedit)
     }
 
     @Test
     fun aCharacterTheMainlandWritesGoesByThatOrderAloneOneItDoesNotByAny() {
-        // 望 as the mainland writes it is nzphhsh: its other order (rime-stroke's Taiwan one) keeps it no longer (ST-120's 艳);
-        // 样 and 杨, which it does not know, by the table's
+        // 望 in the mainland order; its Taiwan order keeps it no longer, 样 and 杨 by the table's
         val mainland = mapOf('望'.code to "nzphhsh")
         val f = StrokeFilter(FakePinyin(mapOf("yang" to yang)), { strokes }, pageSize = 3, mainland = { cp, drawn -> mainland[cp]?.startsWith(drawn) })
         "yang".forEach { f.apply(Action.Key(it)) }
@@ -212,7 +205,6 @@ class StrokeFilterTest {
         assertEquals(Action.Forget(4), pinyin.actions.last())
         assertEquals("yang 丶", s.preedit)
         assertTrue(filter.filtering)
-        // 羊 gone: kept again, 🐑 now after 养
         assertEquals(listOf("养", "🐑", "望"), s.candidates)
         filter.apply(Action.Block(2))
         assertEquals(Action.Block(6), pinyin.actions.last())
@@ -246,18 +238,15 @@ class StrokeFilterTest {
     }
 
     @Test
-    fun aRefineThatChangesNothingLooksThroughNothingAgainAReadAlways() {
+    fun aRereadIsLookedThroughAgain() {
         type("yang")
         filter.apply(Action.Stroke('z'))
         val looked = pinyin.asked.size
         assertTrue(looked > 0)
-        assertEquals("yang 乛", filter.apply(Action.Refine).preedit)
-        assertEquals(looked, pinyin.asked.size)
         // a reread may change the order anywhere: looked through again, the same as before
         assertEquals("yang 乛", filter.reread()?.preedit)
         val reread = pinyin.asked.size
         assertTrue(reread > looked)
-        // read again into another order: kept again
         pinyin.words["yang"] = listOf("望", "王")
         val s = filter.reread()!!
         assertEquals(emptyList<String>(), s.candidates)
@@ -266,23 +255,53 @@ class StrokeFilterTest {
         assertEquals(listOf("望"), filter.apply(Action.Stroke('n')).candidates)
     }
 
+    @Uat("PY-157")
     @Test
-    fun theOrderRefinedUnderTheStrokesIsFilteredAgainOnTheSamePage() {
+    fun aCandidateGoneFromTheSessionUnderTheStrokesPutsNothingUpAndIsLookedForAgain() {
         val p = FakePinyin(mapOf("yang" to yang))
         val f = StrokeFilter(p, { strokes }, pageSize = 3)
         "yang".forEach { f.apply(Action.Key(it)) }
         f.apply(Action.Stroke('n'))
-        assertEquals(listOf("望"), f.apply(Action.NextPage).candidates)
-        assertEquals(listOf("羊", "🐑"), f.candidates(1, 2).map { it.text })
-        // the sentence models' order comes in under the strokes: 望 first now, the second page still shown
-        p.words["yang"] = listOf("望", "王", "养", "样", "羊", "🐑")
-        val s = f.apply(Action.Refine)
-        assertEquals("yang 丶", s.preedit)
-        assertEquals(listOf("🐑"), s.candidates)
-        assertEquals(1, s.page)
-        assertEquals(listOf("望", "养", "羊", "🐑"), f.candidates(0, 10).map { it.text })
-        f.apply(Action.Select(0))
-        assertEquals(Action.Pick(5), p.actions.last())
+        assertEquals("羊", f.candidates(1, 1).single().text)
+        p.words["yang"] = yang - "羊"
+        val actions = p.actions.size
+        assertEquals("", f.apply(Action.Pick(1)).commit)
+        assertEquals(actions, p.actions.size)
+        assertTrue(f.filtering)
+        assertEquals(listOf("养", "🐑", "望"), f.candidates(0, 10).map { it.text })
+    }
+
+    @Uat("PY-157")
+    @Test
+    fun aCandidateTheSessionMovedUnderTheStrokesIsPickedAndPressedWhereItIsNow() {
+        val p = FakePinyin(mapOf("yang" to yang))
+        val f = StrokeFilter(p, { strokes }, pageSize = 3)
+        "yang".forEach { f.apply(Action.Key(it)) }
+        f.apply(Action.Stroke('n'))
+        // the session's list moved with nothing told: each kept is one place down
+        p.words["yang"] = listOf("王") + yang
+        f.why(1)
+        assertEquals(listOf(5), p.whys)
+        f.apply(Action.Forget(2))
+        assertEquals(Action.Forget(6), p.actions.last())
+        val q = FakePinyin(mapOf("yang" to yang))
+        val g = StrokeFilter(q, { strokes }, pageSize = 3)
+        "yang".forEach { g.apply(Action.Key(it)) }
+        g.apply(Action.Stroke('n'))
+        q.words["yang"] = listOf("王") + yang
+        assertEquals("羊", g.apply(Action.Pick(1)).commit)
+        assertEquals(Action.Pick(5), q.actions.last())
+    }
+
+    // were it dropped, TalkBack would read 双拼's keys on the bar (ua) under the strokes, not their pinyin
+    @Test
+    fun theBarAndItsPinyinForTalkBackStayUnderTheStrokes() {
+        val p = FakePinyin(mapOf("yang" to yang), bar = listOf("yd", "y"), said = listOf("yang", "y"))
+        val f = StrokeFilter(p, { strokes }, pageSize = 3)
+        "yang".forEach { f.apply(Action.Key(it)) }
+        val s = f.apply(Action.Stroke('n'))
+        assertEquals(listOf("yd", "y"), s.syllables)
+        assertEquals(listOf("yang", "y"), s.syllablesSaid)
     }
 
     @Test
@@ -317,7 +336,6 @@ class StrokeFilterTest {
         assertEquals("我", s.commit)
         assertEquals("men", s.preedit)
         assertEquals(listOf("们"), s.candidates)
-        // a pick is the session's: handled
         assertTrue(s.handled)
         assertFalse(filter.filtering)
     }
@@ -330,7 +348,6 @@ class StrokeFilterTest {
         assertEquals(emptyList<String>(), s.candidates)
         assertEquals(0, s.total)
         assertFalse(s.hasNextPage)
-        // nothing to pick: space picks nothing, the strokes stay
         assertEquals("yang 乛", filter.apply(Action.Select(0)).preedit)
         assertEquals(yang.take(FakePinyin.PAGE), filter.apply(Action.Backspace).candidates)
     }
@@ -352,7 +369,6 @@ class StrokeFilterTest {
         assertTrue(s.handled)
         assertTrue(pinyin.actions.isEmpty())
         assertFalse(filter.filtering)
-        // nor with no strokes to read
         val none = StrokeFilter(pinyin, { null })
         "yang".forEach { none.apply(Action.Key(it)) }
         assertEquals("yang", none.apply(Action.Stroke('n')).preedit)
@@ -410,7 +426,6 @@ class StrokeFilterTest {
         assertEquals("我", s.commit)
         assertEquals("men", s.preedit)
         assertEquals(listOf("们"), s.candidates)
-        // taken, so the host does not type the mark itself
         assertTrue(s.handled)
         assertFalse(filter.filtering)
         assertFalse(Action.Key('，') in pinyin.actions)
@@ -428,8 +443,6 @@ class StrokeFilterTest {
         assertEquals(2, s.deleteBefore)
     }
 
-    // the character card and 候选词注音 ask of a place in the list shown: a kept candidate's is
-    // the session's of its own place, not of the place it now has
     @Test
     @Uat("PY-113")
     fun readingsAndLookupsOfAKeptCandidateAreOfItsOwnPlace() {
@@ -445,8 +458,7 @@ class StrokeFilterTest {
         assertEquals(s.candidates, s.candidates.indices.map { filter.readingOf(it)?.single()?.text })
     }
 
-    // 首页单字: after a stroke the first stays, the first [singles] characters alone come right after it with their
-    // emoji, the words they pass after them in their order. 王 is h: every candidate here starts with it
+    // 首页单字: the first stays, then [singles] characters with their emoji, then the words they pass
     private fun singles(words: List<String>, singles: Int, pageSize: Int = 3): Pair<FakePinyin, StrokeFilter> {
         val pinyin = FakePinyin(mapOf("x" to words))
         val filter = StrokeFilter(pinyin, { strokes }, pageSize = pageSize, singles = singles)
@@ -469,7 +481,6 @@ class StrokeFilterTest {
             val (_, filter) = singles(wang, n)
             assertEquals(expected, filter.candidates(0, 100).map { it.text })
         }
-        // the page shows them: the first, then 王 and its 🙂
         val pinyin = FakePinyin(mapOf("x" to wang))
         val filter = StrokeFilter(pinyin, { strokes }, pageSize = 3, singles = 2)
         filter.apply(Action.Key('x'))
@@ -496,8 +507,6 @@ class StrokeFilterTest {
         val words = (1..20).map { "王$it" } + "样"
         val (pinyin, filter) = singles(words, 1, pageSize = 5)
         assertEquals(listOf("王1", "样", "王2", "王3", "王4"), filter.candidates(0, 5).map { it.text })
-        assertEquals(listOf("王1", "样", "王2", "王3", "王4"), filter.apply(Action.Refine).candidates)
-        // picked at its place shown: the session's own
         assertEquals("样", filter.apply(Action.Select(1)).commit)
         assertEquals(Action.Pick(20), pinyin.actions.last())
     }
@@ -513,7 +522,6 @@ class StrokeFilterTest {
         val filter = StrokeFilter(session, { strokes }, pageSize = 3, singles = 2)
         filter.apply(Action.Key('x'))
         filter.apply(Action.Stroke('h'))
-        // shown second: 王, the session's fourth
         assertEquals("王", filter.lookedUp(1))
         assertEquals("王", filter.readingOf(1)?.single()?.text)
         assertEquals(setOf(Offer.FORGET), filter.offers(1))
@@ -535,7 +543,6 @@ class StrokeFilterTest {
         val (_, filter) = singles(wang, 2)
         // the second page: the second alone, then the words passed in their order
         assertEquals(listOf("样", "王国", "样子"), filter.apply(Action.NextPage).candidates)
-        // 一丨: 王 is hhsh, 样 杨 hs...; 望 hs too. 王者 and 王国 go, 样子 first
         assertEquals(listOf("样子", "样", "杨"), filter.apply(Action.Stroke('s')).candidates)
         assertEquals(listOf("样子", "样", "杨", "杨树", "望"), filter.candidates(0, 9).map { it.text })
         assertEquals(listOf("王者", "王", "🙂"), filter.apply(Action.Backspace).candidates)
@@ -545,5 +552,22 @@ class StrokeFilterTest {
     fun noSinglesTheSessionsOrder() {
         val (_, filter) = singles(wang, 0)
         assertEquals(wang.take(3), filter.candidates(0, 3).map { it.text })
+    }
+
+    // the strokes move the session's first off the filter's first page: a tap on a later page commits what it showed
+    @Uat("PY-157")
+    @Test
+    fun aFilterThatReordersPastTheFirstPageLeavesATapTheCandidateTapped() {
+        val data = sessionTestData()
+        val session = PinyinSession(data, PinyinSegmenter(), pageSize = 1, prediction = false)
+        val drawn = "...\n你\thh\n拟\tss"
+        val filter = StrokeFilter(session, { Strokes(CodeTable.load(ByteBuffer.wrap(Strokes.read(drawn.reader().buffered(), "stroke").build().toByteArray()))) { 0f } }, pageSize = 1)
+        "nizai".forEach { filter.apply(Action.Key(it)) }
+        assertEquals(listOf("你在", "你再", "拟再", "拟在", "你", "拟"), session.candidates(0, 10).map { it.text })
+        assertEquals(listOf("拟再"), filter.apply(Action.Stroke('s')).candidates)
+        assertEquals(listOf("拟再", "拟", "拟在"), filter.candidates(0, 10).map { it.text })
+        filter.apply(Action.NextPage)
+        assertEquals(listOf("拟在"), filter.apply(Action.NextPage).candidates)
+        assertEquals("拟在", filter.apply(Action.Select(0)).commit)
     }
 }

@@ -12,14 +12,7 @@ import org.fcitx.fcitx5.android.engine.reading.CardReading
 import org.fcitx.fcitx5.android.input.voice.VoiceEdits
 import org.fcitx.fcitx5.android.input.voice.VoiceHomophones
 
-/**
- * [HostApi] whose engine calls go to a real [engines]: what a settings page reads and changes
- * (readings, the user's words, English's words, imports, learning) is the engine's own answer, not
- * a table a test fills in, as [FakeHostApi.readings] is. Everything else is [fake]'s: the config,
- * the input methods, the keys (recorded in [FakeHostApi.calls]), the panel; typing through the
- * engine is lib/ime-eval's EngineReplay. [im] is the input method a learning op acts in, as
- * Fcitx's does in the one in use.
- */
+/** [HostApi] whose lexicon and learning calls go to a real [engines]; the rest is [fake]'s. [im] is the input method a learning op acts in. */
 class EngineBackedHostApi(
     val engines: Engines,
     val fake: FakeHostApi = FakeHostApi(),
@@ -44,14 +37,15 @@ class EngineBackedHostApi(
     override suspend fun wordBoundaries(texts: List<String>) = engines.wordBoundaries(texts)
     override suspend fun logProbs(texts: List<String>) = engines.logProbs(texts)
     override suspend fun voiceHomophones(words: List<UserWord>) = engines.voiceHomophones(words)
-    override suspend fun voiceHomophonesAllowed(spans: List<VoiceHomophones.Span>) = engines.voiceHomophonesAllowed(spans)
+    override suspend fun voicePick(homophones: VoiceHomophones, text: String, before: String, blocked: List<String>) = engines.voicePick(homophones, text, before, blocked)
+    override suspend fun voiceStretches(texts: List<String>) = engines.voiceStretches(texts)
     override suspend fun addUserWord(text: String, pinyin: String) = engines.addWord(text, pinyin)
     override suspend fun voiceSaid(text: String, before: String?, hinted: Boolean) = engines.voiceSaid(text, before, hinted)
     override suspend fun voicePutIn(text: String) = engines.voicePutIn(text)
     override suspend fun voiceConfirm(before: String?, after: String?) = engines.voiceConfirm(before, after)
     override suspend fun voiceEditsEnd() = engines.voiceEditsEnd()
     override suspend fun voiceRemember(ask: VoiceEdits.Ask) = engines.voiceRemember(ask)
-    override suspend fun voiceForget(word: String) = engines.voiceForget(word)
+    override suspend fun voiceForget(ask: VoiceEdits.Ask) = engines.voiceForget(ask)
     override suspend fun blockUserWord(text: String, pinyin: String) = engines.blockWord(text, pinyin)
     override suspend fun removeUserWords(words: List<UserWord>) = engines.removeWords(words)
     override suspend fun englishWords() = engines.englishWords()

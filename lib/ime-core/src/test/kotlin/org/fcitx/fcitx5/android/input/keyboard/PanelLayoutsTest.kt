@@ -13,10 +13,10 @@ import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-// the number keyboard's and the symbol panel's layout of the user's (061-custom-layout §7, §8, L5)
+// the number keyboard's and the symbol panel's user layout
 class PanelLayoutsTest {
 
-    private val numbers = CustomChoice("my-num", "大数字", "number", "number", pads = listOf("full", "decimal"))
+    private val numbers = CustomChoice("my-num", "大数字", "number", "number", pads = listOf("full", "datetime"))
     private val symbols = CustomChoice("my-sym", "符号", "symbols", "symbols")
 
     @Test
@@ -54,7 +54,7 @@ class PanelLayoutsTest {
     @Test
     fun aNumberBoardDrawsThePadsItIsFor() {
         assertTrue(PanelLayouts.draws(numbers, NumberPad.FULL))
-        assertTrue(PanelLayouts.draws(numbers, NumberPad.DECIMAL))
+        assertTrue(PanelLayouts.draws(numbers, NumberPad.DATETIME))
         assertFalse(PanelLayouts.draws(numbers, NumberPad.PHONE))
         assertFalse(PanelLayouts.draws(null, NumberPad.FULL))
     }

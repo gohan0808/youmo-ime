@@ -8,22 +8,20 @@ import org.fcitx.fcitx5.android.assertRows
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog
 import org.fcitx.fcitx5.android.engine.data.PinyinDataBuilder
 import org.fcitx.fcitx5.android.engine.data.ReadingSource
+import org.fcitx.fcitx5.android.engine.data.syl
 import org.fcitx.fcitx5.android.engine.pinyin.Syllables
 import org.fcitx.fcitx5.android.engine.runtime.UserWord.Kind.ADDED
+import org.fcitx.fcitx5.android.engine.runtime.UserWord.Kind.LEARNED
 import org.fcitx.fcitx5.android.input.voice.VoiceHomophones
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.nio.ByteBuffer
-import kotlin.coroutines.Continuation
-import kotlin.coroutines.EmptyCoroutineContext
-import kotlin.coroutines.startCoroutine
 
 /** EngineAssets' glue for VoiceHomophones: the readings, tones and counts it gives from pinyin data. */
 class EngineAssetsHomophonesTest : EnginesFixture() {
 
     private val data = PinyinDataBuilder()
         .unigram("<unk>", -7f, 0f)
-        // log10, as COMMON_WORD (-5.5): 公式 common, 攻势 not
         .unigram("公式", -4.7f, 0f).entry("公式", syl("gong", "shi"))
         .unigram("攻势", -6f, 0f).entry("攻势", syl("gong", "shi"))
         .apply {
@@ -43,11 +41,9 @@ class EngineAssetsHomophonesTest : EnginesFixture() {
 
     private val assets = EngineAssets({ if (it == InputMethodCatalog.PINYIN_DATA) ByteBuffer.wrap(data) else load(it) }, { throw it }, null)
 
-    private fun replaced(word: String, pinyin: String, text: String): String {
-        val h = assets.voiceHomophones(listOf(UserWord(word, pinyin, ADDED)))
-        var out: Result<String>? = null
-        suspend { h.hold().replace(text) { assets.voiceHomophonesAllowed(it) } }.startCoroutine(Continuation(EmptyCoroutineContext) { out = it })
-        return out!!.getOrThrow()
+    private fun replaced(word: String, pinyin: String, text: String, kind: UserWord.Kind = ADDED): String {
+        val h = assets.voiceHomophones(listOf(UserWord(word, pinyin, kind, LEARNED_TAKES)))
+        return assets.voicePick(h, text, "", emptyList())
     }
 
     @Test
@@ -55,8 +51,15 @@ class EngineAssetsHomophonesTest : EnginesFixture() {
         "a tone the tone table has not is the character's reading's" to { assertEquals("找徐婧", replaced("徐婧", "xu jing", "找徐静")) },
         "the tones must match: 许 is xu3" to { assertEquals("找许静", replaced("徐婧", "xu jing", "找许静")) },
         "a character of several readings matches by any" to { assertEquals("掌掌", replaced("掌掌", "zhang zhang", "长长")) },
-        "a common word by the model's log10 count is left" to { assertEquals("这个公式", replaced("攻势", "gong shi", "这个公式")) },
+        // 攻势 is 1.3 less likely than 公式 by the model's log10 counts
+        "a learned word 1.3 less likely than what was heard is past its 1: left" to { assertEquals("这个公式", replaced("攻势", "gong shi", "这个公式", LEARNED)) },
+        "an added word (by hand or 记住) within its 1.5: put in over the common word" to { assertEquals("这个攻势", replaced("攻势", "gong shi", "这个公式")) },
         "a rare word of the dictionary read as the user's (攻势 gong1 shi4) is replaced" to { assertEquals("这个公式", replaced("公式", "gong shi", "这个攻势")) },
         "a word typed with a syllable it has no reading in takes no part" to { assertEquals("找徐静", replaced("徐婧", "xu qing", "找徐静")) },
     )
+
+    private companion object {
+        // a learned word takes part once typed more than LEARNED_MIN times
+        const val LEARNED_TAKES = VoiceHomophones.LEARNED_MIN + 1
+    }
 }

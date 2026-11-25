@@ -21,12 +21,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.file.Files
 
-/**
- * uat/15-privacy-backup.md, the engine's half: a field that asks not to learn, 不用我的输入习惯
- * with an imported base dictionary, 清掉最近, and the learning backups (restore merged, 退回恢复前,
- * this install's automatic ones, blocks first). The pages' buttons are HostApi's `learning(op)`;
- * here they are those ops.
- */
+/** uat/15-privacy-backup.md, the engine's half, through HostApi's `learning(op)` as the pages' buttons. */
 class PrivacyUatTest {
 
     private fun EngineReplay.backups(op: BackupOp) = engines.learning(null, op) as BackupResult
@@ -74,7 +69,7 @@ class PrivacyUatTest {
         engines.learning(im, LearningOp.Pin(4, c))
         assertTrue(engines.learning(null, LearningOp.ClearRecent(LearningOp.Span.HOUR)) is LearningResult.Cleared)
         val after = taDl(null)
-        assertEquals("带来", after.first())
+        assertEquals("的脸", after.first())
         assertTrue("$after", after.getOrNull(1) != "点了")
         assertEquals(c, typed("shi").first())
     }
@@ -123,7 +118,7 @@ class PrivacyUatTest {
         assertEquals("$after", 1, after.size)
         assertTrue(after.single().name != before.single().name)
         assertTrue(backups(BackupOp.RestoreKept(after.single().name)).ok)
-        assertEquals("带来", taDl(null).first())
+        assertEquals("的脸", taDl(null).first())
     }
 
     @Test

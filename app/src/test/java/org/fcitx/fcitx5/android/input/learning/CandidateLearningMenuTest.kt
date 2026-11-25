@@ -7,7 +7,10 @@ package org.fcitx.fcitx5.android.input.learning
 import kotlinx.coroutines.test.runTest
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.core.FakeHostConnection
+import org.fcitx.fcitx5.android.engine.InputMethodCatalog
+import org.fcitx.fcitx5.android.engine.learn.Code
 import org.fcitx.fcitx5.android.engine.learn.HabitRanker
+import org.fcitx.fcitx5.android.engine.learn.Kinds
 import org.fcitx.fcitx5.android.engine.learn.control.BlockScope
 import org.fcitx.fcitx5.android.engine.learn.control.LearningOp
 import org.fcitx.fcitx5.android.engine.learn.control.LearningResult
@@ -25,14 +28,13 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 
-/** [CandidateLearningMenu]: the engine's menu worded, a block asked first, the reason shown, an act sent. */
 @RunWith(RobolectricTestRunner::class)
 class CandidateLearningMenuTest {
     // the app's strings are not in a unit test's resources: each answered by its id
     private val context = PlaceholderStrings(RuntimeEnvironment.getApplication())
 
-    private fun menu(kind: WordKind) = LearningResult.Menu(
-        "指导", kind, listOf(MenuItem.DELETE, MenuItem.BLOCK, MenuItem.PIN, MenuItem.WHY), Why(HabitRanker.Tier.USED, 3), BlockScope.EVERYWHERE
+    private fun menu(kind: WordKind, why: Why = Why(HabitRanker.Tier.USED, 3)) = LearningResult.Menu(
+        "指导", kind, listOf(MenuItem.DELETE, MenuItem.BLOCK, MenuItem.PIN, MenuItem.WHY), why, BlockScope.EVERYWHERE
     )
 
     @Test
@@ -47,21 +49,28 @@ class CandidateLearningMenuTest {
             listOf(R.string.learning_forget, R.string.learning_block, R.string.learning_pin, R.string.learning_why).map(::placeholder),
             lines.map { it.label.toString() },
         )
-        // the block asks first, saying where it reaches
         val confirm = lines[1].pick()!!
         assertFalse(confirm[0].enabled)
         assertEquals(placeholder(R.string.learning_block_everywhere), confirm[0].label)
-        // never under the finger that picked the row (review-E-ui S1): a cancel there, it below
+        // never under the finger that picked the row: a cancel there
         assertEquals(placeholder(android.R.string.cancel), confirm[1].label)
         assertEquals(placeholder(R.string.learning_block_confirm), confirm[2].label)
-        // the cancel closes the menu and blocks nothing: a slow double tap is no block (C18)
+        // a slow double tap is no block
         assertNull(confirm[1].pick())
         testScheduler.advanceUntilIdle()
-        // the reason, with what to copy
         val why = lines[3].pick()!!
         assertEquals(placeholder(R.plurals.learning_why_used), why[0].label)
         assertEquals(placeholder(R.string.learning_copy_report), why[1].label)
         assertEquals(listOf<LearningOp>(LearningOp.Menu(2, "指导")), ops)
+    }
+
+    @Test
+    fun aTablesRememberedWordSaysSo() = runTest {
+        val connection = FakeHostConnection(this)
+        val why = Why(HabitRanker.Tier.USED, 2, Code(Kinds.table(InputMethodCatalog.WUBI), "iije"), remembered = true)
+        connection.api.learned = { menu(WordKind.DICTIONARY, why) }
+        val lines = CandidateLearningMenu(context, connection, this) { _, _ -> error("not shown") }.lines(1, "汪小明", paged = false)!!
+        assertEquals(placeholder(R.plurals.learning_why_remembered), lines.last().pick()!![0].label)
     }
 
     @Test
@@ -93,7 +102,7 @@ class CandidateLearningMenuTest {
         assertNull(lines[1].pick()!![2].pick())
         testScheduler.advanceUntilIdle()
         assertEquals(placeholder(R.string.learning_done_block) to 7L, said.single())
-        // shown converted (指導), the engine's text (指导) named: the engine finds the word it has (R20 F5887)
+        // shown converted (指導), the engine's text (指导) named: the engine finds the word it has
         assertEquals("learning(Menu(index=2, text=指導))", connection.api.calls.first())
         assertEquals("learning(Block(index=2, text=指导))", connection.api.calls.last())
     }
@@ -118,9 +127,8 @@ class CandidateLearningMenuTest {
         val menu = CandidateLearningMenu(context, connection, this) { _, token -> said += token }
         assertTrue(menu.forget(0, "指導", paged = true))
         testScheduler.advanceUntilIdle()
-        // nothing to take it back with: the chip shows no 撤销
         assertEquals(listOf(LearningResult.NO_UNDO), said)
-        // shown converted (指導), the engine's text (指导) named: the engine finds the word it has (R20 F5887)
+        // shown converted, the engine's text named
         assertEquals("learning(OnPage(op=Delete(index=0, text=指导)))", connection.api.calls.last())
     }
 }

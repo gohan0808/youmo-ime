@@ -7,9 +7,12 @@ package org.fcitx.fcitx5.android.engine.runtime
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog
 import org.fcitx.fcitx5.android.engine.assertRows
 import org.fcitx.fcitx5.android.engine.data.PinyinDataBuilder
+import org.fcitx.fcitx5.android.engine.data.syl
 import org.fcitx.fcitx5.android.engine.pinyin.Fuzzy
 import org.fcitx.fcitx5.android.engine.rerank.Reranker
-import org.fcitx.fcitx5.android.engine.session.Snapshot
+import org.fcitx.fcitx5.android.engine.rerank.SentenceModel
+import org.fcitx.fcitx5.android.engine.rerank.SentencePicker
+import org.fcitx.fcitx5.android.engine.rerank.TinyModel
 import org.fcitx.fcitx5.android.engine.user.UserModel
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -21,24 +24,19 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.FileNotFoundException
 import java.io.IOException
+import java.lang.ref.WeakReference
 import java.nio.ByteBuffer
+import java.util.Random
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executor
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /** What [EngineAssets] keeps for the pinyins' sessions to share, and when it makes it anew. */
 class EngineAssetsTest : EnginesFixture() {
 
     private val assets = EngineAssets(::load, { throw it }, null)
-
-    /** What a pause after [typed] ends with, refined slice by slice; [between] after the first, if there are more. */
-    private fun Engines.refined(im: String, typed: Snapshot, between: () -> Unit = {}): List<String> {
-        var s = typed
-        var slices = 0
-        while (s.refines) {
-            s = onEvent(im, EngineEvent.REFINE, 0)
-            if (++slices == 1 && s.refines) between()
-            assertTrue("never done", slices < MAX_SLICES)
-        }
-        return s.candidates
-    }
 
     @Test
     fun theLookAheadIsOneArrayTillDroppedThenANewOne() {
@@ -53,8 +51,6 @@ class EngineAssetsTest : EnginesFixture() {
         assertTrue(fresh.all { it == null })
     }
 
-    // kept across a setting while the one user model's counts are as they were when it was made:
-    // a node filled since would be filled alike now (S15 N2)
     @Test
     fun theLookAheadIsKeptTillTheCountsItReadMoveOrTwoModelsShareIt() {
         val data = assets.pinyinData
@@ -67,7 +63,6 @@ class EngineAssetsTest : EnginesFixture() {
         assets.dropDecoderExtensionsIfLearned()
         val again = assets.decoderExtensions(user)
         assertNotSame(held, again)
-        // a pair, the counts made again, each moves them too
         user.setPair(0, 1, 1f)
         assets.dropDecoderExtensionsIfLearned()
         val third = assets.decoderExtensions(user)
@@ -85,7 +80,6 @@ class EngineAssetsTest : EnginesFixture() {
         assets.dropDecoderExtensionsIfLearned()
         val forgotten = assets.decoderExtensions(user)
         assertNotSame(read, forgotten)
-        // nothing learned since it was made: kept
         assets.dropDecoderExtensionsIfLearned()
         assertSame(forgotten, assets.decoderExtensions(user))
         // asked for by another model's sessions too: whose counts it read is not known
@@ -95,14 +89,9 @@ class EngineAssetsTest : EnginesFixture() {
         assertEquals(7, assets.extensionsMade)
     }
 
-    /**
-     * The look-ahead's picks are the model's alone, whatever the user typed in full (D32: a short
-     * edge scores no counts, look-ahead arcs included), in the sessions made after a change to the
-     * user's words too.
-     */
+    /** The look-ahead's picks are the model's alone, whatever the user typed. */
     @Test
     fun theLookAheadIsTheModelsThoughTheWordAheadWasTypedInFull() {
-        // 拟 may go on to 拟好, under 拟 alone till learned
         val data = PinyinDataBuilder()
             .unigram("<unk>", -7f, 0f)
             .unigram("你", -2.2f, 0f)
@@ -116,7 +105,6 @@ class EngineAssetsTest : EnginesFixture() {
             .build()
             .toByteArray()
         val engines = Engines({ if (it == InputMethodCatalog.PINYIN_DATA) ByteBuffer.wrap(data) else load(it) }, null)
-        // the decoder's reading alone
         engines.settings = EngineSettings(modelLevel = ModelLevel.LOW)
         assertEquals(listOf("你", "拟"), engines.type(InputMethodCatalog.PINYIN, "n").candidates.take(2))
         repeat(PICKS) {
@@ -127,7 +115,6 @@ class EngineAssetsTest : EnginesFixture() {
         engines.onEvent(InputMethodCatalog.PINYIN, EngineEvent.RESET, 0)
         assertEquals(listOf("你", "拟"), engines.type(InputMethodCatalog.PINYIN, "n").candidates.take(2))
         assertTrue(engines.addWord("号", "hao"))
-        // made again: 拟 as the model scores 拟好, not as learned
         assertEquals(listOf("你", "拟"), engines.type(InputMethodCatalog.PINYIN, "n").candidates.take(2))
     }
 
@@ -151,11 +138,6 @@ class EngineAssetsTest : EnginesFixture() {
             .toByteArray()
     }
 
-    /**
-     * A setting keeps the decoders' look-ahead while nothing was learned since it was made, and
-     * drops it once something was: a node filled before the learning picks then as a fresh one
-     * would (the user's counts in its scores), as it did when every setting dropped it (S15 N2).
-     */
     @Test
     fun aSettingKeepsTheLookAheadTillSomethingWasLearned() {
         Engines({ if (it == InputMethodCatalog.PINYIN_DATA) ByteBuffer.wrap(niDing) else load(it) }, null).use { engines ->
@@ -163,7 +145,6 @@ class EngineAssetsTest : EnginesFixture() {
             engines.type(InputMethodCatalog.PINYIN, "n")
             assertEquals(1, engines.extensionsMade)
             assertTrue(engines.lookAheadPicks().contains("拟定"))
-            // nothing learned: kept, its picks as they were
             engines.settings = engines.settings.copy(pageSize = 5)
             engines.type(InputMethodCatalog.PINYIN, "n")
             assertEquals(1, engines.extensionsMade)
@@ -173,7 +154,6 @@ class EngineAssetsTest : EnginesFixture() {
                 engines.type(InputMethodCatalog.PINYIN, "nihao")
                 engines.onEvent(InputMethodCatalog.PINYIN, EngineEvent.PICK, engines.candidates(InputMethodCatalog.PINYIN, 0, 20).indexOfFirst { it.text == "拟好" })
             }
-            // learned, then a setting: made anew, 拟 now going on to 拟好
             engines.settings = engines.settings.copy(pageSize = 6)
             engines.type(InputMethodCatalog.PINYIN, "n")
             assertEquals(2, engines.extensionsMade)
@@ -182,8 +162,6 @@ class EngineAssetsTest : EnginesFixture() {
         }
     }
 
-    // what keeping it rests on: no setting changes how a node's look-ahead is scored, so the array kept
-    // across one picks as an array made under the new setting does
     @Test
     fun noSettingChangesWhatTheLookAheadPicks() {
         val base = EngineSettings(modelLevel = ModelLevel.LOW)
@@ -215,13 +193,8 @@ class EngineAssetsTest : EnginesFixture() {
         }
     }
 
-    /**
-     * A word whose first character reads in it as it never does alone is read as the word, whole or inside a text not read
-     * whole, for the settings and an import; piecewise for what a table asks as it is typed in, which the walk for it would hold up.
-     */
     @Test
     fun aWordIsReadAsItsFirstCharacterNeverIsAlone() {
-        // 了 alone le, liao in 了解
         val data = PinyinDataBuilder()
             .unigram("<unk>", -7f, 0f)
             .unigram("了", -2f, 0f)
@@ -236,11 +209,8 @@ class EngineAssetsTest : EnginesFixture() {
         val liao = EngineAssets(pinyin, { throw it }, null)
         assertEquals("liao jie", liao.pinyinOf("了解", strayFirst = true))
         assertEquals("le liao jie", liao.pinyinOf("了了解", strayFirst = true))
-        // a phrase a table saves, what a long press offers: walked with no stray first, the pieces'
-        // reading, not the word's (a word of the model's so read is read again, with a stray first).
-        // This pins the walk's cost, not a reading wanted: a walk as cheap that reads it liao jie should change it
+        // pins the walk's cost, not a wanted reading: a walk as cheap reading liao jie may change it
         assertEquals("le jie", liao.pinyinOf("了解"))
-        // what the settings guess
         assertEquals("liao jie", Engines(pinyin, null).pinyinOf("了解"))
     }
 
@@ -251,7 +221,6 @@ class EngineAssetsTest : EnginesFixture() {
         // 了解了 read whole though its 解了 was not found; 了解x not, its x no word; "" no text to read
         val offsets = mapOf("了解了" to intArrayOf(0, 1, 2, 3), "了解x" to intArrayOf(0, 1, 2, 3), "" to null)
         assertEquals(setOf("解x", "了解x"), assets.strayPieces(offsets, found))
-        // each read whole: no walk again
         assertEquals(emptySet<String>(), assets.strayPieces(offsets - "了解x", found))
     }
 
@@ -276,32 +245,238 @@ class EngineAssetsTest : EnginesFixture() {
         assertNotNull(reranker)
         assertSame(reranker, model.reranker(Reranker.LIMIT))
         // the one made would compare as many readings as the first caller asked for
-        assertThrows(IllegalStateException::class.java) { model.reranker(Reranker.REFINE_LIMIT) }
+        assertThrows(IllegalStateException::class.java) { model.reranker(2) }
         // dropped, as when turned off, it is made again for whichever limit comes first
         model.drop()
-        assertNotNull(model.reranker(Reranker.REFINE_LIMIT))
+        assertNotSame(reranker, model.reranker(2))
     }
 
-    /** The pinyins' sessions share one reranker and one refiner: typing in another halfway through a refine changes nothing of its end. */
-    @Test
-    fun aRefineHalfDoneWhileAnotherPinyinIsTypedEndsAsItWouldAlone() {
-        val alone = Engines(::load, null)
-        val expected = alone.refined(InputMethodCatalog.PINYIN, alone.type(InputMethodCatalog.PINYIN, "nihao"))
-        val engines = Engines(::load, null)
-        var interrupted = false
-        val refined = engines.refined(InputMethodCatalog.PINYIN, engines.type(InputMethodCatalog.PINYIN, "nihao")) {
-            val typed = engines.type(InputMethodCatalog.SHUANGPIN, "ni")
-            // through the refiner the pinyin's refine is half way through
-            assertTrue("shuangpin refines", typed.refines)
-            engines.refined(InputMethodCatalog.SHUANGPIN, typed)
-            interrupted = true
+    // models wide enough to read a context, the large unlike the small
+    private val small = TinyModel(window = 32).bytes()
+    private val large = TinyModel(window = 32, seed = 7).bytes()
+
+    /** Assets whose large model [read] gives, the reads of it counted in [reads]. */
+    private fun models(reads: AtomicInteger = AtomicInteger(), errors: MutableList<IOException> = ArrayList(), read: () -> ByteArray = { large }) =
+        EngineAssets({
+            when (it) {
+                InputMethodCatalog.SENTENCE_MODEL -> ByteBuffer.wrap(small)
+                InputMethodCatalog.LARGE_MODEL -> ByteBuffer.wrap(read()).also { reads.incrementAndGet() }
+                else -> load(it)
+            }
+        }, { errors += it }, null)
+
+    /** Random keys: each a few readings a key longer than the last, after one of a few contexts, with the decoder's scores. */
+    private fun keys(seed: Long): List<Triple<String, List<String>, List<Float>>> {
+        val random = Random(seed)
+        val texts = listOf("我", "你", "好", "的", "天")
+        val word = { (1..1 + random.nextInt(4)).joinToString("") { texts[random.nextInt(texts.size)] } }
+        return (0 until PICKS).flatMap {
+            val set = List(5) { word() }
+            val context = listOf("", "的", "我你好", "天天的我好你我的你好")[random.nextInt(4)]
+            (1..set.maxOf { it.length }).map { k ->
+                Triple(context, set.map { it.take(k) }, List(5) { -5f - random.nextInt(4) * 0.1f })
+            }
         }
-        assertTrue("refined in one slice", interrupted)
-        assertEquals(expected, refined)
     }
 
-    // engine-13: an optional file that does not make sense (IllegalArgumentException, as a sentence model's has it)
-    // falls back as one not in the pack does, the stroke lookup's too: told once, none, never thrown
+    private fun picks(picker: SentencePicker?, keys: List<Triple<String, List<String>, List<Float>>>) =
+        keys.map { (context, readings, scores) -> picker?.pick(context, readings, scores) }
+
+    @Test
+    fun eachLevelPicksWithItsModels() {
+        val keys = keys(1)
+        val reads = AtomicInteger()
+        val assets = models(reads)
+        assertNull(assets.picker(ModelLevel.LOW, nineKeys = false))
+        val medium = picks(Reranker(SentenceModel.load(ByteBuffer.wrap(small))), keys)
+        assertEquals(medium, picks(assets.picker(ModelLevel.MEDIUM, nineKeys = false), keys))
+        assertEquals(0, reads.get())
+        // the large model where the small is unsure: some picks change
+        val high = picks(assets.picker(ModelLevel.HIGH, nineKeys = false), keys)
+        assertEquals(1, reads.get())
+        assertTrue(high != medium)
+        // no small model, no picker
+        val none = EngineAssets({ if (it == InputMethodCatalog.SENTENCE_MODEL) throw FileNotFoundException(it) else load(it) }, {}, null)
+        assertNull(none.picker(ModelLevel.HIGH, nineKeys = false))
+    }
+
+    /** Read ahead at high only where the small model reads (the large one is asked only through it); then each model reads a commit's context there, the picks the same. */
+    @Test
+    fun aLargeModelIsReadAheadOnlyWhereTheSmallReads() {
+        val ran = AtomicInteger()
+        val background = Executor {
+            ran.incrementAndGet()
+            it.run()
+        }
+        val reads = AtomicInteger()
+        val noSmall = EngineAssets({
+            when (it) {
+                InputMethodCatalog.SENTENCE_MODEL -> throw FileNotFoundException(it)
+                InputMethodCatalog.LARGE_MODEL -> ByteBuffer.wrap(large).also { reads.incrementAndGet() }
+                else -> load(it)
+            }
+        }, {}, null)
+        assertNull(noSmall.picker(ModelLevel.HIGH, nineKeys = false, background))
+        assertEquals(0, ran.get())
+        assertEquals(0, reads.get())
+        val picker = models(reads).picker(ModelLevel.HIGH, nineKeys = false, background)!!
+        assertEquals("read ahead before any key", 1, reads.get())
+        val keys = keys(5)
+        val expected = picks(models().picker(ModelLevel.HIGH, nineKeys = false), keys)
+        val before = ran.get()
+        assertEquals(expected, keys.map { (context, readings, scores) -> picker.prewarm(context).let { picker.pick(context, readings, scores) } })
+        assertTrue(ran.get() > before)
+    }
+
+    /** Each model reads a commit's context on the executor for reads, the large model itself on the background one. */
+    @Test
+    fun aCommitsContextGoesToTheReadsAndTheLargeModelToTheBackground() {
+        fun counting(n: AtomicInteger) = Executor {
+            n.incrementAndGet()
+            it.run()
+        }
+        val background = AtomicInteger()
+        val reads = AtomicInteger()
+        val picker = models().picker(ModelLevel.HIGH, nineKeys = false, counting(background), counting(reads))!!
+        assertEquals("the large model read ahead", 1, background.get())
+        assertEquals(0, reads.get())
+        picker.prewarm("天天的我好你")
+        assertEquals("one read per model", 2, reads.get())
+        assertEquals(1, background.get())
+    }
+
+    /** Each high-level session makes a picker: the large model handed to the background once. */
+    @Test
+    fun theLargeModelGoesToTheBackgroundOnceHoweverManyPickers() {
+        val background = AtomicInteger()
+        val ran = Executor {
+            background.incrementAndGet()
+            it.run()
+        }
+        val assets = models()
+        repeat(3) { assertNotNull(assets.picker(ModelLevel.HIGH, nineKeys = it == 1, ran)) }
+        assertEquals(1, background.get())
+    }
+
+    /** Lowered from high, the large model read ahead is let go, so lowering the level gives back its memory. */
+    @Test
+    @Suppress("ExplicitGarbageCollectionCall") // whether the model is let go shows only once the GC has run
+    fun aLargeModelReadAheadIsLetGoWhenDropped() {
+        val assets = models()
+        val read = readAhead(assets)
+        assets.largeModel.drop()
+        var tries = 0
+        while (read.get() != null && tries++ < 100) {
+            System.gc()
+            Thread.sleep(10)
+        }
+        assertNull("held after the drop", read.get())
+        // kept reachable till here: the model is let go by the assets, not with them
+        assertNotNull(assets.picker(ModelLevel.MEDIUM, nineKeys = false))
+    }
+
+    // the large model read ahead at high, nothing but [assets] holding it
+    private fun readAhead(assets: EngineAssets): WeakReference<SentencePicker> {
+        assertNotNull(assets.picker(ModelLevel.HIGH, nineKeys = false, inPlace))
+        return WeakReference(assets.largeModel.handle(Reranker.LIMIT).loaded()!!)
+    }
+
+    /** A large model that does not read, a file missing or memory short, leaves every pick the medium level's, to the bit; told once. */
+    @Test
+    fun aLargeModelThatCannotBeReadPicksAsMedium() {
+        val keys = keys(2)
+        val medium = picks(models().picker(ModelLevel.MEDIUM, nineKeys = false), keys)
+        for (failure in listOf<() -> ByteArray>({ throw FileNotFoundException("gone") }, { throw OutOfMemoryError("25M") }, { byteArrayOf(1, 2, 3) })) {
+            val errors = ArrayList<IOException>()
+            val assets = models(errors = errors, read = failure)
+            for (nineKeys in listOf(false, true)) assertEquals(medium, picks(assets.picker(ModelLevel.HIGH, nineKeys), keys))
+            assertEquals(errors.toString(), 1, errors.size)
+            assertTrue(InputMethodCatalog.LARGE_MODEL in errors[0].message.orEmpty())
+        }
+    }
+
+    /** Read ahead on another thread while a key needs it: read once, the key waiting for that read. */
+    @Test
+    fun aModelReadAheadAndNeededAtOnceIsReadOnce() {
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val reads = AtomicInteger()
+        val assets = models(reads) {
+            started.countDown()
+            assertTrue(release.await(1, TimeUnit.MINUTES))
+            large
+        }
+        val pool = Executors.newSingleThreadExecutor()
+        try {
+            assets.largeModel.preload(Reranker.LIMIT, pool)
+            assertTrue(started.await(1, TimeUnit.MINUTES))
+            val handle = assets.largeModel.handle(Reranker.LIMIT)
+            assertNull("not read yet", handle.loaded())
+            release.countDown()
+            val read = handle.get()
+            assertNotNull(read)
+            assertSame(read, handle.loaded())
+            assertSame(read, assets.largeModel.reranker(Reranker.LIMIT))
+            // a read ahead after it finds it read
+            assets.largeModel.preload(Reranker.LIMIT, pool)
+        } finally {
+            pool.shutdown()
+            assertTrue(pool.awaitTermination(1, TimeUnit.MINUTES))
+        }
+        assertEquals(1, reads.get())
+    }
+
+    /** Dropped while still reading, as when the level is lowered, and raised again: the old read comes to nothing, a new one is made. */
+    @Test
+    fun aModelDroppedWhileReadingIsReadAnewWhenRaised() {
+        val keys = keys(3)
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val reads = AtomicInteger()
+        var first = true
+        val assets = models(reads) {
+            if (first) {
+                first = false
+                started.countDown()
+                assertTrue(release.await(1, TimeUnit.MINUTES))
+            }
+            large
+        }
+        val pool = Executors.newSingleThreadExecutor()
+        try {
+            val before = assets.picker(ModelLevel.HIGH, nineKeys = false)
+            assets.largeModel.preload(Reranker.LIMIT, pool)
+            assertTrue(started.await(1, TimeUnit.MINUTES))
+            assets.largeModel.drop()
+            release.countDown()
+            // the dropped one's picker is the medium level's
+            assertEquals(picks(assets.picker(ModelLevel.MEDIUM, nineKeys = false), keys), picks(before, keys))
+            val again = picks(assets.picker(ModelLevel.HIGH, nineKeys = false), keys)
+            assertEquals(picks(models().picker(ModelLevel.HIGH, nineKeys = false), keys), again)
+        } finally {
+            pool.shutdown()
+            assertTrue(pool.awaitTermination(1, TimeUnit.MINUTES))
+        }
+        assertEquals(2, reads.get())
+    }
+
+    /** Full pinyin and the nine keys in turn share the models, each picking as it would alone. */
+    @Test
+    fun fullPinyinAndTheNineKeysInTurnPickAsEachAlone() {
+        val keys = keys(4)
+        val reads = AtomicInteger()
+        val assets = models(reads)
+        val full = assets.picker(ModelLevel.HIGH, nineKeys = false)!!
+        val nine = assets.picker(ModelLevel.HIGH, nineKeys = true)!!
+        val mixed = keys.mapIndexed { i, (context, readings, scores) -> (if (i % 2 == 0) full else nine).pick(context, readings, scores) }
+        val fullAlone = picks(models().picker(ModelLevel.HIGH, nineKeys = false), keys)
+        val nineAlone = picks(models().picker(ModelLevel.HIGH, nineKeys = true), keys)
+        assertEquals(keys.indices.map { if (it % 2 == 0) fullAlone[it] else nineAlone[it] }, mixed)
+        assertTrue(fullAlone != nineAlone)
+        assertEquals(1, reads.get())
+    }
+
+    // told once, never thrown
     @Test
     fun anOptionalFileThatDoesNotReadFallsBackOneWay() {
         val errors = ArrayList<IOException>()
@@ -312,7 +487,6 @@ class EngineAssetsTest : EnginesFixture() {
     }
 
     private companion object {
-        const val MAX_SLICES = 10_000
         const val PICKS = 20
     }
 }

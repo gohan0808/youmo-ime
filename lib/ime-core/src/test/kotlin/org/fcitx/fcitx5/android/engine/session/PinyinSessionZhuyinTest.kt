@@ -4,34 +4,50 @@
  */
 package org.fcitx.fcitx5.android.engine.session
 
+import org.fcitx.fcitx5.android.Uat
 import org.fcitx.fcitx5.android.engine.assertRows
 import org.fcitx.fcitx5.android.engine.data.PinyinData
+import org.fcitx.fcitx5.android.engine.data.pinyinDataOf
+import org.fcitx.fcitx5.android.engine.learn.Code
+import org.fcitx.fcitx5.android.engine.learn.FakeClock
+import org.fcitx.fcitx5.android.engine.learn.Habits
 import org.fcitx.fcitx5.android.engine.learn.Kinds
+import org.fcitx.fcitx5.android.engine.learn.LearnRecord
 import org.fcitx.fcitx5.android.engine.learn.SpelledForm
 import org.fcitx.fcitx5.android.engine.learn.LearnTo
+import org.fcitx.fcitx5.android.engine.learn.Learner
 import org.fcitx.fcitx5.android.engine.learn.RecordingHabits
+import org.fcitx.fcitx5.android.engine.learn.Row
+import org.fcitx.fcitx5.android.engine.learn.Take
+import org.fcitx.fcitx5.android.engine.learn.backup.BackupHead
+import org.fcitx.fcitx5.android.engine.learn.backup.LearnBackup
+import org.fcitx.fcitx5.android.engine.learn.row
 import org.fcitx.fcitx5.android.engine.pinyin.Syllables
 import org.fcitx.fcitx5.android.engine.pinyin.T9Segmenter
 import org.fcitx.fcitx5.android.engine.pinyin.ZhuyinKeys
 import org.fcitx.fcitx5.android.engine.runtime.EngineEvent
 import org.fcitx.fcitx5.android.engine.runtime.Keyboard
 import org.fcitx.fcitx5.android.engine.session.Action.Key
+import org.fcitx.fcitx5.android.engine.user.UserModel
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Pinyin typed in zhuyin (design 051 §3.3): 大千's and 注音九键's sessions on the session's test data. */
+/** Pinyin typed in zhuyin: 大千's and 注音九键's sessions on the session's test data. */
 class PinyinSessionZhuyinTest {
 
     private val data = sessionTestData()
 
     private fun session(
         nine: Boolean = false,
-        habits: RecordingHabits? = null,
+        habits: Habits? = null,
         toneAllows: ((Int, Int, Int) -> Boolean)? = null,
+        user: UserModel? = null,
+        data: PinyinData = this.data,
     ) = PinyinSession(
-        data, T9Segmenter(abbreviations = false, letters = if (nine) ZhuyinKeys.NINE else ZhuyinKeys.DACHEN, toneAllows = toneAllows), spell = true, prediction = false,
+        data, T9Segmenter(abbreviations = false, letters = if (nine) ZhuyinKeys.NINE else ZhuyinKeys.DACHEN, toneAllows = toneAllows), spell = true, prediction = false, user = user,
         learnTo = LearnTo(habits ?: RecordingHabits(), if (nine) Kinds.ZHUYIN_NINE else Kinds.ZHUYIN_DACHEN),
     )
 
@@ -58,8 +74,7 @@ class PinyinSessionZhuyinTest {
         assertEquals("ㄋㄧ ㄏㄠ", out.preedit)
     }
 
-    // the bar's syllables in zhuyin as the code row is (design 051 §3.2), never pinyin's letters; one
-    // tapped still settles its syllable
+    // the bar's syllables in zhuyin as the code row is, never pinyin's letters; one tapped still settles its syllable
     @Test
     fun theNineKeysOfferTheSyllablesInZhuyin() {
         val keyboard = Keyboard(session(nine = true), nineKeys = true)
@@ -73,7 +88,6 @@ class PinyinSessionZhuyinTest {
         assertTrue(taken.preedit, taken.preedit.startsWith("ㄇㄧ") && taken.preedit.endsWith("ㄏㄠ") && taken.preedit.none { it in 'a'..'z' })
     }
 
-    // design 051 Q3 A: a space gives a syllable with no tone its first, then picks the first candidate
     @Test
     fun dachensSpaceIsTheFirstToneThenThePick() {
         val keyboard = Keyboard(session(), nineKeys = true)
@@ -85,8 +99,7 @@ class PinyinSessionZhuyinTest {
         assertEquals("中", picked.commit)
     }
 
-    // a tone ends a syllable: with nothing typed it ends nothing, typed nothing, and the next
-    // syllable starts clean (it was kept unseen, then shown as its code before ㄋㄧ)
+    // with nothing typed a tone types nothing, and the next syllable starts clean
     @Test
     fun aToneWithNothingTypedIsNotTyped() {
         for (nine in listOf(false, true)) {
@@ -110,13 +123,10 @@ class PinyinSessionZhuyinTest {
         assertTrue(out.commit.none { it in ZhuyinKeys.BLOCK })
     }
 
-    // design 051 Q4 A: a tone the reading has not puts the word after, never out. The Ext-B rows: a
-    // character outside the BMP (two chars, one syllable), alone and in a word with one inside it,
-    // its tone read as one code point a syllable, not passed over as a length that does not match
+    // a tone the reading has not puts the word after, never out; a non-BMP character's tone is read as one code point
     @Test
     fun aToneTheReadingHasNotPutsTheWordAfter() {
         val ni = Syllables.id("ni")
-        // 你 is ni3 alone here; 拟 any
         val niThird = { cp: Int, syllable: Int, tone: Int -> !(cp == '你'.code && syllable == ni && tone != 3) }
         val extB = "\uD840\uDC00" // U+20000
         val extBData = pinyinDataOf(
@@ -158,7 +168,7 @@ class PinyinSessionZhuyinTest {
         }
     }
 
-    // zhuyin's keys spell no pinyin letters: its kinds link no spellings (U-20), their keys filed by the code
+    // zhuyin's keys spell no pinyin letters: its kinds link no spellings, their keys filed by the code
     @Test
     fun theZhuyinKindsLinkNoSpellings() {
         assertTrue(Kinds.isZhuyin(Kinds.ZHUYIN_NINE) && Kinds.isZhuyin(Kinds.ZHUYIN_DACHEN))
@@ -169,8 +179,6 @@ class PinyinSessionZhuyinTest {
     private fun Keyboard.take(syllables: List<String>, id: Int, shown: String) =
         onEvent(EngineEvent.CHAR, Keyboard.syllableKey(syllables.indexOf(shown).also { assertTrue(syllables.toString(), it >= 0) }, id).code)
 
-    // ㄓ is zhi whole and zh's initial alike: the bar has it once, as the initial (taken, the symbol
-    // typed as itself), not twice where none could tell them apart
     @Test
     fun aWholeSyllableShownAsItsInitialIsOnTheBarOnceAsTheInitial() {
         for (symbol in "ㄓㄔㄕㄖㄗㄘㄙ") {
@@ -187,7 +195,6 @@ class PinyinSessionZhuyinTest {
         }
     }
 
-    // the initial taken goes on into a final typed next (ㄓ ㄨㄥ, 中); none after, its whole syllable (ㄖ, ri)
     @Test
     fun anInitialTakenGoesOnIntoTheFinalOrIsItsWholeSyllable() {
         val zhong = Keyboard(session(nine = true), nineKeys = true)
@@ -200,9 +207,7 @@ class PinyinSessionZhuyinTest {
         val r = riqi.type(nine("ㄖ"))
         riqi.take(r.syllables, r.syllablesId, "ㄖ")
         assertEquals("日期", riqi.type(nine("ㄑㄧ")).candidates[0])
-        // every initial is taken so, not only the seven a whole syllable shares: ㄋ (of ㄇㄋㄜ) taken is ㄋ picked
-        // off its key, as a long press picks it, and the keys after go on from it (ㄋ ㄧ ㄏㄠ, 你好). The zhuyin
-        // keyboards have no 简拼 (abbreviations off), so an initial alone is not a word's first syllable
+        // every initial is taken so; the zhuyin keyboards have no 简拼, so an initial alone is no word's first syllable
         val nh = Keyboard(session(nine = true), nineKeys = true)
         val n = nh.type(nine("ㄋ"))
         assertEquals("ㄋ", nh.take(n.syllables, n.syllablesId, "ㄋ").preedit)
@@ -212,7 +217,6 @@ class PinyinSessionZhuyinTest {
             k.take(m.syllables, m.syllablesId, "ㄋ")
             k.type(nine("ㄏ")).candidates[0]
         })
-        // given back by ⌫ right after: the key as it was
         val s = session(nine = true)
         val back = Keyboard(s, nineKeys = true)
         val typed = back.type(nine("ㄓ"))
@@ -221,5 +225,142 @@ class PinyinSessionZhuyinTest {
         assertEquals(typed.preedit, undone.preedit)
         // the group key's, not ㄓ's alone: the group's other initial offered again
         assertTrue(undone.syllables.toString(), "ㄗ" in undone.syllables)
+    }
+
+    private fun typed(nine: Boolean, symbols: String, tone: Int = 0) =
+        (if (nine) nine(symbols) else dachen(symbols)) + if (tone == 0) emptyList() else listOf(if (nine) Keyboard.zhuyinNineTone(tone) else Keyboard.zhuyinTone(tone))
+
+    // each pick in a field of its own: none follows another
+    private fun Session.pick(text: String) {
+        apply(Action.Pick(candidates(0, 50).indexOfFirst { it.text == text }.also { check(it >= 0) { text } }))
+        apply(Action.Reset)
+    }
+
+    // the first offered for a fresh input, left empty again
+    private fun Keyboard.firstFor(s: Session, codes: List<Int>) = type(codes).candidates[0].also { s.apply(Action.Reset) }
+
+    private class LastCommit(private val inner: Habits) : Habits by inner {
+        var last: LearnRecord.Commit? = null
+        override fun record(rows: List<Row>, takes: List<Take>, flags: Int) = inner.record(rows, takes, flags).also { last = it }
+    }
+
+    private fun kind(nine: Boolean) = if (nine) Kinds.ZHUYIN_NINE else Kinds.ZHUYIN_DACHEN
+
+
+    @Test
+    @Uat("PY-161")
+    fun aWordTypedWithAToneAndWithoutLearnsAsOne() {
+        for (nine in listOf(false, true)) {
+            val learner = Learner(data)
+            val log = learner.log
+            val s = session(nine, learner.habits, user = learner.model)
+            val keyboard = Keyboard(s, nineKeys = true)
+            assertNotEquals("拟", keyboard.firstFor(s, typed(nine, "ㄋㄧ")))
+            keyboard.type(typed(nine, "ㄋㄧ", tone = 3))
+            s.pick("拟")
+            keyboard.type(typed(nine, "ㄋㄧ"))
+            s.pick("拟")
+            assertEquals("拟", keyboard.firstFor(s, typed(nine, "ㄋㄧ")))
+            assertEquals("拟", keyboard.firstFor(s, typed(nine, "ㄋㄧ", tone = 3)))
+            val codes = log.state.stats.keys.filter { it.text == "拟" }.map { it.code }.toSet()
+            assertEquals(codes.toString(), 1, codes.size)
+            assertTrue(codes.single().kind == kind(nine) && codes.single().keys.none { ZhuyinKeys.toneOf(it) > 0 })
+        }
+    }
+
+    @Test
+    @Uat("PY-161")
+    fun aTonedPickUndoesAndForgetsFromTheOneRecord() {
+        for (nine in listOf(false, true)) {
+            val learner = Learner(data)
+            val log = learner.log
+            val habits = LastCommit(learner.habits)
+            val s = session(nine, habits, user = learner.model)
+            val keyboard = Keyboard(s, nineKeys = true)
+            repeat(2) {
+                keyboard.type(typed(nine, "ㄋㄧ", tone = 3))
+                s.pick("拟")
+            }
+            assertEquals("拟", keyboard.firstFor(s, typed(nine, "ㄋㄧ")))
+            assertTrue(habits.undo(habits.last!!))
+            assertNotEquals("拟", keyboard.firstFor(s, typed(nine, "ㄋㄧ")))
+            habits.forget("拟")
+            assertTrue(log.state.stats.keys.none { it.text == "拟" })
+        }
+    }
+
+    // a code of a tone, written before tones were dropped: no input reads it again, yet it is kept, backed up and forgotten as any
+    @Test
+    @Uat("PY-161")
+    fun anOldTonedRecordIsKeptButReadNoMore() {
+        for (nine in listOf(false, true)) {
+            val learner = Learner(data)
+            val log = learner.log
+            val s = session(nine, learner.habits, user = learner.model)
+            val keyboard = Keyboard(s, nineKeys = true)
+            keyboard.type(typed(nine, "ㄋㄧ"))
+            val committed = s.apply(Action.Select(0)).commit
+            val untoned = log.state.stats.keys.first { it.text == committed }.code.keys
+            val toned = Code(kind(nine), untoned + ZhuyinKeys.toneCode(3))
+            repeat(2) { log.record(listOf(row(toned.keys, "拟", "ni", flags = Row.PICK or Row.WHOLE or Row.CORRECTED, kind = toned.kind, how = 'B'))) }
+            log.pin(Code(kind(nine), untoned + ZhuyinKeys.toneCode(4)), "逆", "ni", on = true)
+            assertTrue(log.state.stats.keys.any { it.code == toned && it.text == "拟" })
+            for (tone in listOf(0, 3, 4)) {
+                val first = keyboard.firstFor(s, typed(nine, "ㄋㄧ", tone))
+                assertTrue(first, first != "拟" && first != "逆")
+            }
+            val head = BackupHead(FakeClock.START, 1, 1L, BackupHead.SAVED, "0.6.3")
+            assertEquals(log.state.dump(), LearnBackup.read(LearnBackup.bytes(head, log.state, emptyList(), emptyList())).state.dump())
+            log.forget("拟")
+            assertTrue(log.state.stats.keys.none { it.text == "拟" })
+        }
+    }
+
+    // 妈 mā, 马 mǎ, 吗 ma: the tones each may take (the rest any)
+    private val maData = pinyinDataOf(Triple("妈", "ma", -2f), Triple("马", "ma", -3f), Triple("吗", "ma", -3.5f),
+        Triple("好", "hao", -2.5f), Triple("你", "ni", -2f), Triple("好马", "hao ma", -6f),
+    )
+    private val maTones = mapOf('妈'.code to 1, '马'.code to 3, '吗'.code to 5)
+    private val maAllows = { cp: Int, _: Int, tone: Int -> maTones[cp]?.let { it == tone } ?: true }
+
+    @Test
+    @Uat("PY-161")
+    fun aWordLearnedFirstGivesWayToATypedToneItHasNot() {
+        for (nine in listOf(false, true)) {
+            val learner = Learner(maData)
+            val s = session(nine, learner.habits, maAllows, learner.model, maData)
+            val keyboard = Keyboard(s, nineKeys = true)
+            assertEquals("妈", keyboard.firstFor(s, typed(nine, "ㄇㄚ")))
+            repeat(2) {
+                keyboard.type(typed(nine, "ㄇㄚ"))
+                s.pick("马")
+            }
+            assertEquals("no tone typed: learned first as before", "马", keyboard.firstFor(s, typed(nine, "ㄇㄚ")))
+            assertEquals("its tone: first", "马", keyboard.firstFor(s, typed(nine, "ㄇㄚ", tone = 3)))
+            assertEquals("a tone it has not: after, as unlearned", "妈", keyboard.firstFor(s, typed(nine, "ㄇㄚ", tone = 1)))
+        }
+    }
+
+    @Test
+    @Uat("PY-161")
+    fun aPinGivesWayToATypedToneItHasNot() {
+        for (nine in listOf(false, true)) {
+            val learner = Learner(maData)
+            val s = session(nine, learner.habits, maAllows, learner.model, maData)
+            val keyboard = Keyboard(s, nineKeys = true)
+            val shown = keyboard.type(typed(nine, "ㄇㄚ")).candidates
+            keyboard.onEvent(EngineEvent.PIN, shown.indexOf("马"))
+            s.apply(Action.Reset)
+            assertEquals("no tone typed: pinned first as before", "马", keyboard.firstFor(s, typed(nine, "ㄇㄚ")))
+            assertEquals("its tone: first", "马", keyboard.firstFor(s, typed(nine, "ㄇㄚ", tone = 3)))
+            assertEquals("a tone it has not: not in front", "妈", keyboard.firstFor(s, typed(nine, "ㄇㄚ", tone = 1)))
+            // a pinned word in a sentence is put in only where no typed tone disagrees
+            val word = typed(nine, "ㄏㄠ") + typed(nine, "ㄇㄚ")
+            keyboard.onEvent(EngineEvent.PIN, keyboard.type(word).candidates.indexOf("好马"))
+            s.apply(Action.Reset)
+            assertEquals("好妈你", keyboard.firstFor(s, typed(nine, "ㄏㄠ", tone = 3) + typed(nine, "ㄇㄚ", tone = 1) + typed(nine, "ㄋㄧ", tone = 3)))
+            assertEquals("好马你", keyboard.firstFor(s, word + typed(nine, "ㄋㄧ")))
+            assertEquals("好马你", keyboard.firstFor(s, typed(nine, "ㄏㄠ", tone = 3) + typed(nine, "ㄇㄚ", tone = 3) + typed(nine, "ㄋㄧ", tone = 3)))
+        }
     }
 }

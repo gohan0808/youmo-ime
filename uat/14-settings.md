@@ -27,7 +27,7 @@
 ### ST-32 [P1] 输入法页和实体键盘页保存时不改通用输入的设置
 - **前提**：B0-设置。**通用输入** 里勾选 **模糊音** 的 z↔zh，把 **性能档位** 设成低档。
 - **操作**：打开 **输入法 → 拼音**，关掉 **中英混输**；返回，打开 **实体键盘**，把 **每页候选数** 设成 5；返回，打开 **通用输入**；再回测试页打 z o n g g u o。
-- **预期**：通用输入里 z↔zh 仍勾着，性能档位仍是低档；打字时候选里有「中国」。
+- **预期**：通用输入里 z↔zh 仍勾着，性能档位仍是低档（摘要是「低档：只按词频和搭配，最省电」，后面不带本机的档）；打字时候选里有「中国」。
 - **JVM**：`SettingsUatTest.anInputMethodsPageAndTheHardwareKeyboardsSavedLeaveTheSharedOptions`（拼音页关中英混输、实体键盘页每页 5 个，各自存进宿主的 EngineOptions 后 z↔zh 仍勾着、档位仍是低档，通用输入页照此显示）、`PinyinUatTest.fuzzyZZh`（:lib:ime-eval:uatTest，真数据：z↔zh 时 zongguo 有「中国」）；设备上不跑。
 
 ### ST-33 [P2] 设置页巡检
@@ -37,14 +37,14 @@
 - **预期**：
   - **词库与短语**：最上面一句说明候选怎么排（"用户词库的词排得靠前，选得越多越靠前；……"）；分组依次是"用户词库"（一行"用户词库"）、"基础词库"（一行"内置词库"，说明"常用词和近几年的新词，随应用更新 · 只读"）、"导入"（"导入词库"）、"短语"（"自定义短语"）；没有"新词"分组。
   - **用户词库**：页顶两个开关 **用我的输入习惯**（开）、**自动备份**（开）；页里有 **清空学到的**、**学习备份**（点进去是 **从备份恢复**、**另存一份到看得见的文件夹**、**退回恢复前**）、**英文词库**（和 **输入法 → 英文 → 英文词库** 是同一页）、**导出**。
-  - **通用输入**：三个分组依次是"所有输入法""中文输入法""拼音（全拼、双拼、九键）"；**表情候选** 和"中文输入法"组里的 **自带的日期时间** 的说明写着手写写的字没有（没有"不适用"那一句），**在键上划** 下面只显示选了哪个（默认"关"），没有"不适用"；"所有输入法"后面是"手写"一组（**停笔多久算写完一个字**）；**纠正错拼和按偏的键** 的说明是"按在键的边上、靠着旁边哪个键，也按那个键读（点在键中间不改）；全拼还认 gn 当成 ng 这类错拼，双拼全键盘还认 j、q、x、y 后的 u 按成了 ü 的键"，没有"不适用"那一句（拼音的九键、14 键、18 键，双拼的分组键盘和两种注音键盘都按落点纠按偏的键；注音九键 11-16 起，用户定）；"中文输入法"一节里没有"不适用：英文"；**模糊音** 的勾选框里 u↔v 下面一整行是"不适用：拼音 · 九键、双拼 · 九键"，但仍能勾选（全拼、双拼用得上）。
+  - **通用输入**：三个分组依次是"所有输入法""中文输入法""拼音（全拼、双拼、九键）"；**表情候选** 和"中文输入法"组里的 **自带的日期时间** 的说明写着手写写的字没有（没有"不适用"那一句），**在键上划** 下面只显示选了哪个（默认"关"），没有"不适用"；"所有输入法"后面是"手写"一组（**停笔多久算写完一个字**）；**性能档位** 的摘要第一行是「自动：根据 CPU 性能推荐（本机：…）」（括号里是本机定成的档，不写原因），点开四项依次是自动、低档、中档、高档，自动选着，只有自动一项写本机的档，低中高三项后面不带括号；**纠正错拼和按偏的键** 的说明是"按在键的边上、靠着旁边哪个键，也按那个键读（点在键中间不改）；全拼还认 gn 当成 ng 这类错拼，双拼全键盘还认 j、q、x、y 后的 u 按成了 ü 的键"，没有"不适用"那一句（拼音的九键、14 键、18 键，双拼的分组键盘和两种注音键盘都按落点纠按偏的键；注音九键 11-16 起，用户定）；"中文输入法"一节里没有"不适用：英文"；**模糊音** 的勾选框里 u↔v 下面一整行是"不适用：拼音 · 九键、双拼 · 九键"，但仍能勾选（全拼、双拼用得上）。
   - **拼音**：最上面一行是"通用输入设置"（点它进 **通用输入**），下面有"中英混输"等拼音自己的选项；没有"每页候选数""联想下一个词""性能档位""纠正错拼和按偏的键""模糊音"。
   - **英文**：最上面一行是"通用输入设置"，下面是"键盘"（九键）和一栏"九键"（"九键英文打法""连按选字母""按键字母"；九键的长按在 **按键 → 按键字符和快捷键** 的九键里），再是英文自己的其余选项；九键英文打法的说明最后是"总是连按"，说明里没有"密码"。
-  - **双拼**：有"方案"，没有"中英混输"。
+  - **双拼**：有"方案"和"编码行显示双拼按键"（关），没有"中英混输"。
   - **5 个码表**：每页都有 **恢复码表顺序**，**调频** 都是关，没有"最长造多少字的词""造出的词何时记住"；五笔页最上面一行是"通用输入设置"，"只有一个候选时直接上屏"开、"显示编码提示"开；仓颉的"显示编码提示"关。
   - **实体键盘**：有"显示候选窗口"（根据输入设备而定）、"实体键盘快捷键"（开）、"候选词列表方向"（自动）、"浮动候选窗字号"（20 sp），最后是"每页候选数"（7，说明里写着所有输入法都用）。
   - 首页的入口仍是 10 项，没有新增。
-- **JVM**：`SettingsUatTest.pagesFromTopToBottom`（用户词库两个开关和四项入口、实体键盘前四项，图）、`SettingsUatTest.everyInputMethodsPageAndTheSharedOnes`（各页的选项来自宿主的 EngineOptions：词库与短语的说明和四组、学习备份三项、通用输入三组和各项的「不适用」、模糊音 u↔v 那一行、拼音/九键/双拼/5 个码表各自的项和开关、实体键盘最后是每页 7 个）、`SettingsUatTest.theHomePage`（首页十项）；设备上不跑。
+- **JVM**：`SettingsUatTest.pagesFromTopToBottom`（用户词库两个开关和四项入口、实体键盘前四项，图）、`SettingsUatTest.everyInputMethodsPageAndTheSharedOnes`（各页的选项来自宿主的 EngineOptions：词库与短语的说明和四组、学习备份三项、通用输入三组和各项的「不适用」、模糊音 u↔v 那一行、拼音/九键/双拼/5 个码表各自的项和开关、实体键盘最后是每页 7 个）、`SettingsUatTest.theHomePage`（首页十项）、`DeviceSummaryTest.theLevelSaysWhatAutoIsHere`（性能档位四项的字：只有自动写「（本机：中）」，低中高三项不带括号）；设备上不跑。
 
 ### ST-34 [P1] 通用输入的开关对码表也生效
 - **前提**：B0-五笔（**输入法** 里添加"五笔"，切到五笔），另外在 **通用输入** 里关掉 **联想下一个词**，回测试页点「普通文本」框。
@@ -116,7 +116,7 @@
 ### ST-101 [P1] 主题：导入别的输入法的皮肤（百度 .bds），坏的皮肤说清原因
 - **前提**：B0-设置，**外观 → 大小与样式** 里 **跟随系统深色模式** 关掉；"下载"里有脚本现做的百度皮肤 `uat-skin.bds`（不放第三方皮肤：面板是蓝色，字母键是橙色的图，名字「UAT 皮肤」，作者 `uat`）和一个坏的 `uat-bad.ssf`（开头是搜狗加密皮肤的 `Skin` 头，后面是乱码）。
 - **操作**：**主题 → 新增主题** 选 `uat-skin.bds`，看确认框，点 **导入**；在主题列表里点它，回测试页看键盘，按住空格和一个字母看键；**大小与样式** 的 **键盘高度** 选 **紧凑** 再看，再改回 **标准**。**新增主题** 选脚本用同样的文件另打的 `uat-skin-mac.zip`（像 macOS 访达压缩一个文件夹那样：文件都在一个顶层文件夹里，带 `__MACOSX/` 和 `._` 开头的项），看到确认框后按返回。再 **新增主题** 选 `uat-bad.ssf`。
-- **预期**：选 `.bds` 弹出「导入主题 UAT 皮肤？」确认框，作者是 `uat`，下面列出「从别的输入法的皮肤转换而来。以下没有转过来：」和「按键的位置和大小」；导入后主题列表最前面是它，选用后键盘上是橙色的键、蓝色的底（候选栏也是面板的蓝色），橙色键面上没有细线（键面图是九宫格拼起来的，拼缝处不透出底下的蓝色；按住的键也一样，脚本从 g 和按住的退格的键中心向上下左右走到键缝，查 1–2 px 宽、从键面色偏向底色的细线；z 按住时有气泡盖着键面，不量）；按住的空格和字母键变暗（皮肤没有按下的样子时也有按下的颜色，设备上看截图；脚本截按住 z 的图（截图约一秒，z 的长按气泡可能也弹出），空格手动看：按住空格久了会进语音）；紧凑时上下键缝比标准时窄（缩到约四成，至少留 1 dp），左右键缝不变。选 `uat-skin-mac.zip` 同样弹出「导入主题 UAT 皮肤？」确认框。访达打包的单个 FlorisBoard `.flex`（`__MACOSX/._x.flex` 不算第二个）只由 JVM 查：ime-core `SkinZipTest.aFinderZipOfOneFlexIsUnpackedLikeAnyOther`。选 `uat-bad.ssf` 弹出「这个搜狗皮肤是加密的……」，主题列表不变。
+- **预期**：选 `.bds` 弹出「导入主题 UAT 皮肤？」确认框，作者是 `uat`，下面列出「从别的输入法的皮肤转换而来。以下没有转过来：」和「按键的位置和大小」；导入后主题列表最前面是它，选用后键盘上是橙色的键、蓝色的底（候选栏也是面板的蓝色），橙色键面上没有细线（键面图是九宫格拼起来的，拼缝处不透出底下的蓝色；按住的键也一样，脚本从 g 和按住的退格的键中心向上下左右走到键缝，查 1–2 px 宽、从键面色偏向底色的细线；z 按住时有气泡盖着键面，不量）；按住的空格和字母键变暗（皮肤没有按下的样子时也有按下的颜色，设备上看截图；脚本截按住 z 的图（截图约一秒，z 的长按气泡可能也弹出），空格手动看：按住空格久了会进语音）；紧凑时上下键缝比标准时窄（缩到约四成，至少留 1 dp），左右键缝不变。选 `uat-skin-mac.zip` 同样弹出「导入主题 UAT 皮肤？」确认框。访达打包的单个 FlorisBoard `.flex`（`__MACOSX/._x.flex` 不算第二个）只由 JVM 查：ime-core `SkinZipTest.aFinderZipOfOneFlexIsUnpackedLikeAnyOther`。选 `uat-bad.ssf` 弹出「这个搜狗皮肤读不出来（文件可能不完整或是新的格式）」，主题列表不变（加密的搜狗皮肤能导入，见 ST-203）。
 - 另：环境变量 `UAT_SKINS=<目录>` 指向一批真皮肤（`.bds`、`.bdi`、`.ssf`、同文的 `.yaml`、FlorisBoard 的 `.flex`、装着它们的 `.zip`，不进仓库）时，每个都导入一次：收下的选用后截 26 键、九键、符号面板三张图，再删掉；拒绝的截下提示。图要人看，脚本只查导入成没成。
 
 ### ST-35 [P1] App 里不做主题：新增主题导入或去网页制作，长按看信息、导出或删除
@@ -145,9 +145,9 @@
 
 ### ST-143 [P1] 已装的主题包在升级后第一次启动时 ⇧ 变分词，之后导入的不变
 - **前提**：B0-设置，模拟器、debug 包，**跟随系统深色模式** 关；「下载」里有 `uat-shift060.theme`、`uat-shift060b.theme`（内置 Nord 改名，带 `uat/fixtures/theme-shift060/qwerty.xml`：0.6.0 内置的 26 键原文，⇧ 写 `when="!table"`，没有分词键；脚本 `push_shift060_pack` 打包）。
-- **操作**：导入 `uat-shift060`（确认框里 **一起导入** 去掉勾）并选用，测试页打 `xi` 看 ⇧ 那格。`adb shell run-as <包名> rm no_backup/theme-separator-added no_backup/theme-layouts-listed`、`am force-stop <包名>`（等于从 0.6.0 升级后第一次启动），看 **外观 → 布局**，再打 `xi`，点那格，再打 `an`，看编码行；换五笔打一个码、换英文打 `he`，看那格。再导入 `uat-shift060b`（**一起导入** 勾着），在 **输入法 → 拼音 → 键盘** 选「uat-shift060b · 旧 26 键（自定义）」，打 `xi`。导出 `uat-shift060`，解开看 `layouts/qwerty.xml`。
-- **预期**：导入后打字时那格是「分词」：0.6.1 起主题带的 26 键不再顶替（061-custom-layout §11），画的是自带的。重启后包里的 26 键先改上分词，再放进 外观 → 布局（「uat-shift060 · 旧 26 键」），拼音、英文、码表换成用它（ST-175）；打字时那格是「分词」，编码 `xi'an`；五笔时是「拼」，英文时是 ⇧。后导入的 `uat-shift060b` 放进列表的那块照包里写的，没有分词键，拼音选它打字时那格仍是 ⇧，点了字母变大写。导出的文件里 ⇧ 是 `when="!table !composing"`，紧跟一行分词键（`when="composing !table"`），其余和原文一字不差。
-- **JVM**：`ThemeSeparatorMigrationTest`（改完的那块转成自己的布局时带着分词、改一次、`theme.xml` 时间不变、之后导入的不改、新装直接记下、存储不可写时不做、一个包出错其余照改、中途被杀下次接着改、启动中途出 Error 只多跑一次、不是 UTF-8 的不改、BOM 保留、连 BOM 改完超限的不改、App 不用的文件不改、导出带着改后的）；keyboard-scene `PackSeparatorTest`（0.6.0 的 26 键改完等于现在内置的、条件穷举、照抄的属性、各种写法、行条件、两个 ⇧（按键条件和按行条件）、包自己片段里的 ⇧ 不改、不改的情况、改完的检查）；设备上脚本 `st143` 查导入后、重启后、之后导入的三处和 `xi'an`，**五笔时是「拼」、英文时是 ⇧ 和导出那步手工看**（脚本不查）。
+- **操作**：导入 `uat-shift060`（确认框里 **一起导入** 去掉勾）并选用，测试页打 `xi` 看 ⇧ 那格。`adb shell run-as <包名> rm no_backup/theme-separator-added no_backup/theme-layouts-listed`、`am force-stop <包名>`（等于从 0.6.0 升级后第一次启动），看 **外观 → 布局**，再打 `xi`，点那格，再打 `an`，看编码行；换五笔打一个码、换英文打 `he`，看那格。再导入 `uat-shift060b`（**一起导入** 勾着），**外观 → 布局** 点「uat-shift060b · 旧 26 键」→ **用在…** 勾 **拼音**、点 **确定**（0.6.3 起主题带的布局要这样打开才进拼音的 **键盘**，勾上就换成它），打 `xi`。导出 `uat-shift060`，解开看 `layouts/qwerty.xml`。
+- **预期**：导入后打字时那格是「分词」：0.6.1 起主题带的 26 键不再顶替（061-custom-layout §11），画的是自带的。重启后包里的 26 键先改上分词，再放进 外观 → 布局（「uat-shift060 · 旧 26 键」），拼音、英文、码表换成用它（ST-175）；打字时那格是「分词」，编码 `xi'an`；五笔、英文时是 ⇧。后导入的 `uat-shift060b` 放进列表的那块照包里写的，没有分词键，拼音选它打字时那格仍是 ⇧，点了字母变大写。导出的文件里 ⇧ 是 `when="!table !composing"`，紧跟一行分词键（`when="composing !table"`），其余和原文一字不差。
+- **JVM**：`ThemeSeparatorMigrationTest`（改完的那块转成自己的布局时带着分词、改一次、`theme.xml` 时间不变、之后导入的不改、新装直接记下、存储不可写时不做、一个包出错其余照改、中途被杀下次接着改、启动中途出 Error 只多跑一次、不是 UTF-8 的不改、BOM 保留、连 BOM 改完超限的不改、App 不用的文件不改、导出带着改后的）；keyboard-scene `PackSeparatorTest`（0.6.0 的 26 键改完等于现在内置的、条件穷举、照抄的属性、各种写法、行条件、两个 ⇧（按键条件和按行条件）、包自己片段里的 ⇧ 不改、不改的情况、改完的检查）；设备上脚本 `st143` 查导入后、重启后、之后导入的三处和 `xi'an`，**五笔、英文时是 ⇧ 和导出那步手工看**（脚本不查）。
 
 ### ST-51 [P1] 键盘高度：紧凑
 - **前提**：B0-设置，**外观 → 大小与样式**；**按键 → 按键字符和快捷键** 里把 q 的下滑设成文字「你好」。
@@ -319,16 +319,28 @@
 ### ST-31 [P1] 关于
 - **前提**：B0-设置，**⋮ → 关于**。
 - **操作**：看页面；点"第三方库许可证"。
-- **预期**：有版本号、提交时间、内置数据的版本、源代码、隐私政策、许可；许可证页列出第三方库。
-- **JVM**：`SettingsMenuUatTest.aboutListsVersionsSourceAndLicenses`（有版本号、提交、编译时间、内置数据、源代码、隐私政策、许可，许可证页打得开）；设备上不跑。
+- **预期**：有版本号、提交时间、内置数据的版本、本机处理器、源代码、隐私政策、许可；许可证页列出第三方库。
+- **JVM**：`SettingsMenuUatTest.aboutListsVersionsSourceAndLicenses`（有版本号、提交、编译时间、内置数据、本机处理器、源代码、隐私政策、许可，许可证页打得开）；设备上不跑。
+
+### ST-199 [P1] 关于页的「本机处理器」和性能档位的自动一致，重启后不变
+- **前提**：B0-设置（新装，性能档位没改过）。
+- **操作**：打开 **⋮ → 关于**，记下 **本机处理器** 一行；打开 **通用输入**，看 **性能档位** 的摘要；`adb shell am force-stop <包名>` 后再打开这两页。
+- **预期**：本机处理器写着「X档 · N 核（M 大）· 有/无 dotprod · 内核 …」（各核一样快时没有「（M 大）」，检测时有核离线、因此定为中档时末尾写「检测时 K 核离线」，读不到处理器信息时是「中档 · … · 读不到处理器信息」，连核数也读不到时没有「N 核」）；性能档位摘要是「自动：根据 CPU 性能推荐（本机：X）」，两处的 X 相同（读不到处理器信息时也是「（本机：中）」，原因只在关于页写）；重启后两行都不变。logcat 里有一行 `device: auto=… source=probed`（第一次）或 `source=stored`（之后）。
+- **JVM**：`DeviceSummaryTest`（6T 的画像：「中档 · 8 核（4 大）· 无 dotprod · 内核 MLAL」，摘要「自动：根据 CPU 性能推荐（本机：中）」；读不到 MIDR 的画像：「中档 · 8 核（4 大）· 无 dotprod · 内核 MLAL · 读不到处理器信息」，摘要同样是「自动：根据 CPU 性能推荐（本机：中）」）、`DeviceProfilesTest.aProfileIsDecidedOnceAndReadBackWhileTheKeyHolds`（存下后再启动读存储，不再探测）；模拟器上手工做。
 
 ## 拼音的键盘
 
 ### ST-40 [P1] 拼音页的「键盘」
 - **前提**：B0-设置。
 - **操作**：**输入法 → 拼音** 看「键盘」和「拆字」「中英混输」；**通用输入** 看「纠正错拼和按偏的键」；回到拼音页把「键盘」改成「14 键」，回测试页点「普通文本」框。
-- **预期**：「键盘」默认是「全键盘」，说明写着实体键盘仍按全拼打。「拆字」「中英混输」的说明里各有一行「不适用：……拼音 14 键」，都没有隐藏；「纠正错拼和按偏的键」的说明里没有拼音 14 键、双拼 14 键（都按落点纠；11-16 起注音九键也纠，这一项没有「不适用」了）。回到框里马上就是 14 键，不用重启。
-- **JVM**：`SettingsUatTest.pinyinsKeyboardOnItsPageAndTheSharedOptionsSayingFourteenKeys`（默认全键盘、说明写实体键盘、拆字和中英混输的说明里有拼音 14 键、纠错的说明里没有拼音 14 键和双拼 14 键，改成 14 键存下）、`KeyboardChoiceUatTest.theFourteenKeysChosenAreThereAtTheNextFocus`（下一次聚焦就是 14 键，编码行 32dp）；设备上不跑。
+- **预期**：「键盘」默认是「全键盘」，说明写着实体键盘仍按全拼打。「拆字」的说明里有一行「不适用：……拼音 14 键」，没有隐藏（「中英混输」见 ST-198）；「纠正错拼和按偏的键」的说明里没有拼音 14 键、双拼 14 键（都按落点纠；11-16 起注音九键也纠，这一项没有「不适用」了）。回到框里马上就是 14 键，不用重启。
+- **JVM**：`SettingsUatTest.pinyinsKeyboardOnItsPageAndTheSharedOptionsSayingFourteenKeys`（默认全键盘、说明写实体键盘、拆字的说明里有拼音 14 键、中英混输的说明里只有注音两种、纠错的说明里没有拼音 14 键和双拼 14 键，改成 14 键存下）、`KeyboardChoiceUatTest.theFourteenKeysChosenAreThereAtTheNextFocus`（下一次聚焦就是 14 键，编码行 32dp）；设备上不跑。
+
+### ST-198 [P1] 「中英混输」九键、14 键、18 键都适用
+- **前提**：B0-设置。
+- **操作**：**输入法 → 拼音** 看「中英混输」的说明。
+- **预期**：说明里写着九键、14 键、18 键上也能打；最后一行是「不适用：拼音 · 注音九键、拼音 · 注音全键盘。」，没有拼音九键、14 键、18 键；开关没有隐藏。
+- **JVM**：`SettingsUatTest.pinyinsKeyboardOnItsPageAndTheSharedOptionsSayingFourteenKeys`（中英混输的说明以只列注音九键、注音全键盘的「不适用」一行结尾）；设备上不跑。
 
 ### ST-41 [P1] 选了 14 键，只在拼音里编码行变高
 - **前提**：B0-设置，添加「五笔」「双拼」。
@@ -428,9 +440,9 @@
 
 ### ST-194 [P2] 码表的 键盘 一行：有带码表键的导入布局时才搜得到
 - **前提**：B0-设置。
-- **操作**：点 🔍，输入「键盘」，看结果里有没有码表的；**外观 → 布局** 导入 `uat/fixtures/layouts/uat-qwerty-1.0.layout`（改自 26 键，带码表要的 `;`、`*` 键），再搜「键盘」，点五笔下面那条；返回，删掉这个布局，再搜。
-- **预期**：没有导入布局时结果里没有码表页的「键盘」（那一行这时不显示）；导入后五个码表页各有一条「键盘」，点五笔那条打开五笔的设置页，**键盘** 那一行显示着；删掉布局后又搜不到。
-- **JVM**：`SettingsIndexTest.theTablesKeyboardIsFoundWhileALayoutOfTheUsersHasItsKeys`（没有用户布局时搜不到；有带码表键的布局时五个码表页各一条，每页上这一行都显示；删掉后又没有）；设备上不跑。
+- **操作**：点 🔍，输入「键盘」，看结果里有没有码表的；**外观 → 布局** 导入 `uat/fixtures/layouts/uat-qwerty-1.0.layout`（改自 26 键，带码表要的 `;`、`*` 键），「现在就用在」先都不勾、点 **先不用**，再搜「键盘」；点它的卡片 → **用在…** 勾 **码表**，再搜「键盘」，点五笔下面那条；返回，删掉这个布局，再搜。
+- **预期**：没有导入布局时结果里没有码表页的「键盘」（那一行这时不显示）；导入了但没给码表打开时也没有；给码表打开后五个码表页各有一条「键盘」，点五笔那条打开五笔的设置页，**键盘** 那一行显示着；删掉布局后又搜不到。
+- **JVM**：`SettingsIndexTest.theTablesKeyboardIsFoundWhileALayoutOfTheUsersOnForThemHasItsKeys`（没有用户布局时搜不到；有带码表键的布局、没给码表打开时也搜不到；打开后五个码表页各一条，每页上这一行都显示；删掉后又没有）；设备上不跑。
 
 ### ST-48 [P0] 编码行浮在键盘上方：打字时出现，点得到，浮条外点到应用
 - **前提**：B0（新装，**外观 → 大小与样式 → 编码行** 是默认的「浮在键盘上方」）。
@@ -457,11 +469,11 @@
 - **预期**：四项默认都是「跟随主题」。选直角后键角是方的；有边框后键成一块块的；宽松后键间距变大；改回跟随主题后回到主题的平铺、大圆角；导入的导出主题还是平铺、大圆角（设置没写进主题），主题列表的缩略图一直照主题画。Pixel 深色选无边框后键平铺、候选栏是栏色，改回后键成块、候选栏透明。
 - **JVM**：`KeyStyleThemeTest.aChoiceIsOverTheThemeAndFollowingIsTheThemesOwn`（选了的盖过主题、主题自己的不变、改回跟随主题是主题的 look）、`changingOneTellsTheKeyboardOnce`（改一项键盘重画一次）、`theKeyboardDrawnIsSquareWhenChosen`（画布上的键直角；圆角时有圆角）；ime-core `KeyStyleChoiceTest`（含无边框的候选栏规则）；要上面做的主题文件（.theme）、看样子，真机或模拟器上手工跑。
 
-### ST-72 [P1] 主题包带的 26 键、18 键：导入时一起放进 外观 → 布局，不再顶替；坏的那块不放
-- **前提**：B0-设置；**外观 → 大小与样式** 里 **跟随系统深色模式** 关掉。"下载"里有 `uat-layouts.theme`（脚本做）：内置 Nord 的 `theme.xml`（`lib/keyboard-scene/src/commonMain/themes/nord.xml`，`name` 改成 `uat-layouts`），`layouts/` 里三个布局：`qwerty.xml` 是自带 26 键把 `name` 改成「主题 26 键」、q 键的 `send` 改成 `commit:你好`；`k18.xml` 是自带 18 键把 `name` 改成「主题 18 键」；`k14.xml` 只有 `<keyboard/>`（读不出）。
-- **操作**：**主题 → 新增主题** 选它，看确认框（**一起导入** 勾着），点 **导入**；在主题列表里点它。回测试页用拼音点 q。看 **外观 → 布局**，点「uat-layouts · 主题 26 键」卡片的 **用在…** 勾 **拼音**、点 **确定**，回测试页点 q。**输入法 → 拼音** 的 **键盘** 打开看选项。删掉这个主题和两张卡片，把手机转成横屏，再选它导入：在确认框里往下滚到 **一起导入**，取消勾选，点 **导入**。
-- **预期**：确认框写「这个主题带 2 个布局：uat-layouts · 主题 26 键、uat-layouts · 主题 18 键，导入后在 外观 → 布局 里。」，下面有勾着的 **一起导入**；另一行「不会使用的布局（读不出、缺键盘必需的键，或不是已有的键盘）：k14」；没有「此主题包含自定义布局」那一行（这几块不再顶替）。用这个主题时拼音仍是自带全键盘，点 q 是拼音的 q。布局页字母键盘段里有「uat-layouts · 主题 26 键」「uat-layouts · 主题 18 键」两张卡片，没有 k14 的。用在拼音上后点 q 框里是「你好」。键盘选项里没有「（主题：…）」，有「uat-layouts · 主题 26 键（自定义）」。确认框里还有一行「其中 1 个动作直接输入布局里写的文字。」（q 的 `commit:你好`）。同一个主题再导入一次（新版）时确认框写「替换已有的『uat-layouts · 主题 26 键』…」；那块之后改过的不写、不替换，新版另存为「…-2」（只在 JVM 上断言）。横屏时确认框能滚到 **一起导入**，勾选框整个显示、点得到（不被说明文字挤掉）；取消勾选后只导入主题，布局页没有这两张卡片。横屏这一段脚本不跑，JVM 上断言，设备上手工看。布局列表已满（100 块）时再导入带布局的主题，主题照样导入，提示「它的布局没有全部放进 外观 → 布局（列表已满，或有的没能转成）。」（只在 JVM 上断言）。
-- **JVM**：`ThemePackDialogsTest.whatIsUnderALongTextIsReachedOnALowScreen`（横屏低屏：长说明下面的 **一起导入** 滚得到、整个显示）、`ThemeLayoutsToListTest.onePackImportedUntickedIsRecordedNotListed`（不勾 **一起导入**：只记下，不放进列表）、`ThemePackLayoutsTest.theImportTellsTheLayoutsItWouldList`（确认框列出放进去的布局和其中写死文字的动作数、不合格的列为不用、包里的底排不算没用的片段）、`ThemeLayoutsToListTest.anImportListsAloneOnceAndOneImportedAgainUpdatesTheSameLayout`（一起导入只放进列表不换选择、同一个包不重复放、再导入新版更新同一个布局、记录里每个包只留最新一行）、`ThemeLayoutsToListTest.aPackImportedAgainReplacesOnlyTheLayoutItMadeAsItIs`（确认框说替换哪块；用户改过的、别的主题撞上散列的、用户自己同 id 的都不覆盖，新版另存 `-2`）、`ThemeLayoutsToListTest.aListFullTakesNoNewOneThePackRecordedAllTheSame`（满了不放新的，确认框先说，导入后提示没有全部放进去）；ime-core `CustomLayoutFilesTest`（替换还是另存的判断、记录的读写和去重）；keyboard-scene `PackConvertTest`（怎么转：id、名字、based-on、抄片段、改不合规的键名（含 `<defaults>` 给的）、比 App 新的不转、0.6.0 数字键盘写上它能用的全部 pad、数写死文字的动作，JVM 和 JS 一样）；设备上走一遍导入、布局页、用在拼音上、点按。
+### ST-72 [P1] 主题包带的 26 键、18 键、九键：导入时一起放进 外观 → 布局，不再顶替；缺键的照样放并写出缺什么，坏的那块不放
+- **前提**：B0-设置；**外观 → 大小与样式** 里 **跟随系统深色模式** 关掉。"下载"里有 `uat-layouts.theme`（脚本做）：内置 Nord 的 `theme.xml`（`lib/keyboard-scene/src/commonMain/themes/nord.xml`，`name` 改成 `uat-layouts`），`layouts/` 里四个文件：`qwerty.xml` 是自带 26 键把 `name` 改成「主题 26 键」、q 键的 `send` 改成 `commit:你好`；`k18.xml` 是自带 18 键把 `name` 改成「主题 18 键」；`nine.xml` 是自带九键把 `name` 改成「主题九键」、0 键换成同宽的空隙；`k14.xml` 只有 `<keyboard/>`（读不出）。
+- **操作**：**主题 → 新增主题** 选它，看确认框（**一起导入** 勾着），点 **导入**；在主题列表里点它。回测试页用拼音点 q；看 **输入法 → 拼音** 的 **键盘** 的选项。看 **外观 → 布局**，点「uat-layouts · 主题 26 键」卡片的 **用在…** 勾 **拼音**、点 **确定**，回测试页点 q。**输入法 → 拼音** 的 **键盘** 打开看选项。删掉这个主题和三张卡片，把手机转成横屏，再选它导入：在确认框里往下滚到 **一起导入**，取消勾选，点 **导入**。
+- **预期**：确认框写「这个主题带 3 个布局：uat-layouts · 主题 26 键、uat-layouts · 主题 18 键、uat-layouts · 主题九键，导入后在 外观 → 布局 里，要用时点它 → 用在…。」，下面有勾着的 **一起导入**；有一行「uat-layouts · 主题九键 缺键（在 外观 → 布局 里照样能用）：」，下面一行「· 没有数字键 0」（0.6.3 起主题包的布局和自己导入的一样，缺键只提醒）；另一行「不会使用的布局（读不出、缺键盘必需的键，或不是已有的键盘）：k14」；没有「此主题包含自定义布局」那一行（这几块不再顶替）。用这个主题时拼音仍是自带全键盘，点 q 是拼音的 q；**输入法 → 拼音** 的 **键盘**（和 ⋯ → 键盘 同一份）里没有这三块（0.6.3 起要 **用在…** 打开）。布局页字母键盘段里有「uat-layouts · 主题 26 键」「uat-layouts · 主题 18 键」「uat-layouts · 主题九键」三张卡片（九键和自带的一样在字母键盘段），没有 k14 的。用在拼音上后点 q 框里是「你好」。键盘选项里没有「（主题：…）」，有「uat-layouts · 主题 26 键（自定义）」。确认框里还有一行「其中 1 个动作直接输入布局里写的文字。」（q 的 `commit:你好`）。同一个主题再导入一次（新版）时确认框写「替换已有的『uat-layouts · 主题 26 键』…」；那块之后改过的不写、不替换，新版另存为「…-2」（只在 JVM 上断言）。横屏时确认框能滚到 **一起导入**，勾选框整个显示、点得到（不被说明文字挤掉）；取消勾选后只导入主题，布局页没有这三张卡片。横屏这一段脚本不跑，JVM 上断言，设备上手工看。布局列表已满（100 块）时再导入带布局的主题，主题照样导入，提示「它的布局没有全部放进 外观 → 布局（列表已满，或有的没能转成）。」（只在 JVM 上断言）。
+- **JVM**：`ThemePackDialogsTest.whatIsUnderALongTextIsReachedOnALowScreen`（横屏低屏：长说明下面的 **一起导入** 滚得到、整个显示）、`ThemeLayoutsToListTest.onePackImportedUntickedIsRecordedNotListed`（不勾 **一起导入**：只记下，不放进列表）、`ThemePackLayoutsTest.theImportTellsTheLayoutsItWouldList`（确认框列出放进去的布局和其中写死文字的动作数、缺键的照样列并逐条写出缺什么、不合格的列为不用、包里的底排不算没用的片段）、`ThemeLayoutsToListTest.aPacksBoardLackingKeysIsListedAtTheFirstStartNotChosen`（从 0.6.0 升级或恢复它的备份时缺键的那块只放进列表、不换上去；缺字母的全键盘也一样，缺字母的 14/18 键 0.6.0 画的是它，照样换上：`ThemeLayoutsToListTest.aPacksBoardLackingWhat060RefusedIsListedNotChosen`、keyboard-scene `PackConvertTest.whatLacking060RefusedTheBoardForIsMarked`）、`ThemeLayoutsToListTest.anImportListsAloneOnceAndOneImportedAgainUpdatesTheSameLayout`（一起导入只放进列表不换选择、同一个包不重复放、再导入新版更新同一个布局、记录里每个包只留最新一行）、`ThemeLayoutsToListTest.aPackImportedAgainReplacesOnlyTheLayoutItMadeAsItIs`（确认框说替换哪块；用户改过的、别的主题撞上散列的、用户自己同 id 的都不覆盖，新版另存 `-2`）、`ThemeLayoutsToListTest.aListFullTakesNoNewOneThePackRecordedAllTheSame`（满了不放新的，确认框先说，导入后提示没有全部放进去）；ime-core `CustomLayoutFilesTest`（替换还是另存的判断、记录的读写和去重）；keyboard-scene `PackConvertTest`（怎么转：id、名字、based-on、抄片段、改不合规的键名（含 `<defaults>` 给的）、比 App 新的不转、0.6.0 数字键盘写上它能用的全部 pad、数写死文字的动作，JVM 和 JS 一样）；设备上走一遍导入、布局页、用在拼音上、点按。
 
 ### ST-79 [P2] 主题包只给九键的回车键换图片，全键盘的回车键不变
 - **前提**：B0-设置，**跟随系统深色模式** 关掉；一个 4.0 主题包：按键样式 `@keyboard=nine */enter` 不显示字、给九键的回车键一张自己的图片，其他不改。
@@ -546,7 +558,7 @@
 - **JVM**：设置与动效的规则见 `KeyboardCanvasViewTest`、`MotionTest`（lib/keyboard-scene 的 `scene.MotionTest` 和 lib/ime-core 的 `input.motion.MotionTest`）；动效看的是画面，真机或模拟器上手工跑，不在自动跑里。
 
 ### ST-74 [P1] 主题包自带字母分组的键盘上打拼音
-- **前提**：B0-设置；"下载"里有 0.6.0 的示例主题包「薄荷 17 键」（带自己的 `layouts/k18.xml`；0.6.1 起网页示例拆成「薄荷（动效）」主题和布局制作页的「17 键」，旧包留作测试数据 `lib/keyboard-scene/src/commonTest/data/mint-k17`，把 `theme.xml` 和 `layouts/k18.xml` 打成 zip 改名 `.theme`），导入（**一起导入** 勾着）并选用；**输入法 → 拼音** 的 **键盘** 选「薄荷 17 键 · 17 键（自定义）」（0.6.1 起主题带的 17 键放在 外观 → 布局 里，不再顶替 18 键）。
+- **前提**：B0-设置；"下载"里有 0.6.0 的示例主题包「薄荷 17 键」（带自己的 `layouts/k18.xml`；0.6.1 起网页示例拆成「薄荷（动效）」主题和布局制作页的「17 键」，旧包留作测试数据 `lib/keyboard-scene/src/commonTest/data/mint-k17`，把 `theme.xml` 和 `layouts/k18.xml` 打成 zip 改名 `.theme`），导入（**一起导入** 勾着）并选用；**外观 → 布局** 点「薄荷 17 键 · 17 键」→ **用在…** 勾 **拼音**、点 **确定**，拼音就换成它（0.6.1 起主题带的 17 键放在 外观 → 布局 里，不再顶替 18 键；0.6.3 起要 **用在…** 打开才进拼音的 **键盘**）。
 - **操作**：回测试页按分组打 n i h a o（H 和 JK 并成了一个键），看候选；点「你好」。再打一次，长按候选「你好」选 **固定首位**；打开 **词库与短语 → 用户词库 → 固定的词** 看这一条。
 - **预期**：键盘是 17 键（H、JK 一个键）；长按 HJK 弹出的是 h、j、k（它转成了自己的键，不跟自带 18 键的 H 走），**外观 → 布局** 导入这块时的确认框和卡片信息里没有「g18/h 是 18 键的键」的提醒；「你好」在前三个候选里，点了上屏「你好」；固定的词里这一条标「拼音 自己的分组」，按键按这块布局的键组显示，不是自带 18 键的分组。
 - **JVM**：主题带的布局转成自己的布局见 `ThemeLayoutsToListTest`、keyboard-scene `PackConvertTest`（HJK 改名、长按 hjk：`aKeyOfTheAppsNameWithLettersOfItsOwnIsAKeyOfItsOwn`）；按布局的分组打拼音、学到的按键显示没有 JVM 测试，真机或模拟器上手工跑，不在自动跑里。
@@ -720,19 +732,13 @@
 - **前提**：0.5.2 导出的备份（`popup_overrides` 是 `q ! 1 Q` 和 `, 。 ？` 两行，`t9_symbols` 是 `1 . ,`）。和 JVM 测试用的是同一份数据；uat/fixtures 里没有 0.5.2 的备份，设备上跑要先在 0.5.2 上照这些设好再导出。
 - **操作**：**备份与恢复** 导入这份备份，重启 App；长按全键盘 q、各键盘的 ，、九键 1；打开 **按键字符和快捷键 → 功能键**。
 - **预期**：q 弹出 `! 1 Q`；所有键盘的 ， 弹出 `。？`；九键 1 的符号是 `. ,`（按中英文标点转换显示）；功能键里 ， 有"改过"的描边。0.5 给符号面板格子设的长按不再生效（ime-core `KeyListsMigrationTest` 管）。
-- **JVM**：app `KeyListsUpgradeTest.v052sLongPressesMoveOverAndTheOldOnesStay`、`.beta2sNamedListsMoveOverToo`、`.aBackupImportedIsMigratedAtTheStartAfterOr0_6sKept`。
+- **JVM**：app `KeyListsUpgradeTest.v052sLongPressesMoveOverAndTheOldOnesStay`、`.aBackupImportedIsMigratedAtTheStartAfterOr0_6sKept`。
 
 ### ST-109 [P1] 数字键盘的键能在编辑器里改
 - **前提**：B0。
 - **操作**：**按键字符和快捷键** 选 **数字键盘**，给 `5` 添加 `½`；回到数字键盘长按 5。
 - **预期**：有数字键盘卡片；长按 5 弹出 `½`。
 - **JVM**：app `PopupOverridesFragmentTest$Dialog.numberPage`。
-
-### ST-110 [P1] beta3 存的长按升级后照旧
-- **前提**：一台装着 0.6.0-beta3 的机器（或模拟器），在 beta3 的 **按键字符和快捷键** 里给九键 2 加 `#`、14 键 QW 加 `①` 并把 `①` 设为首选，**输入法 → 拼音** 的 **键盘** 选「14 键」，然后覆盖安装这一版。
-- **操作**：长按九键 2（拼音的键盘换成九键）、上滑 2；换回 14 键，长按 QW、上滑 QW；再打开编辑器看这两个键。
-- **预期**：九键 2 弹出 `A B C 2 a b c` 一行、`#` 在符号里，键角和上滑是 `2`；QW 弹出 `Q W 1 q w` 一行、`①` 在上面，键角和上滑是 `①`；编辑器里两个键的列表就是弹出的那些，都显示改过。
-- **JVM**：ime-core `KeyListsMigrationTest.upgradeAsTheEditorShowsIt`（九键 2 一行、符号在后、数字首选那一行）、app `KeyListsUpgradeTest.aBeta3ListIsUpgradedAtTheStart`；设备上要 beta3 的包，发版时手动。
 
 ### ST-111 [P2] 按键音音量是滑块：最左系统默认，松手响一声，按键音禁用时变灰
 - **前提**：B0-设置，按键音 **启用**，模拟器或手机开着媒体声音。
@@ -759,7 +765,7 @@
 - **JVM**：`PopupOverridesFragmentTest$Row.anEmptiedListIsOffItsRowGoneToo`（删光后没有那一行）；点按设备上跑。
 
 ### ST-115 [P1] 主题包的布局读得出、摆不下：画 App 自带的那个键盘，照常打字
-- **前提**：B0-设置；**输入法 → 拼音** 的 **键盘** 选「14 键」。导入一个主题包，`layouts/k14.xml` 读得出、键也齐，但有一行的键宽加起来超过 100（比如自带 14 键里键最多的那一行，每个键的宽都改成 30）。0.6.1 起这块放进 外观 → 布局（ST-72），要在拼音的 **键盘** 里选「主题名 · 14 键（自定义）」才用它；注音的两块照旧由主题顶替，同样摆不下时也画 App 自带的。
+- **前提**：B0-设置；**输入法 → 拼音** 的 **键盘** 选「14 键」。导入一个主题包，`layouts/k14.xml` 读得出、键也齐，但有一行的键宽加起来超过 100（比如自带 14 键里键最多的那一行，每个键的宽都改成 30）。0.6.1 起这块放进 外观 → 布局（ST-72），要在 外观 → 布局 点「主题名 · 14 键」→ **用在…** 勾 **拼音** 才用它；注音的两块照旧由主题顶替，同样摆不下时也画 App 自带的。
 - **操作**：在主题列表里点这个主题；回测试页看键盘，点 b n 所在的键（打 ni）看候选。
 - **预期**：键盘不是空白：画的是 App 自带的 14 键（不是包里那个），点按照自带的分组打，ni 出「你」一类候选，和内置主题一样。
 - **JVM**：`PackLayoutRefusedTest.aLayoutTheEngineRefusesDrawsTheAppsOwnOfItsId`（引擎摆放时拒绝的布局换成自带的同名布局画出来）、`PackLayoutRefusedTest.theAppsOwnLayoutDrawnInsteadIsTypedAsTheBuiltInGroups`（换上的自带 14 键按内置分组打字，被拒布局的分组不告诉引擎）、`PackLayoutRefusedTest.aLayoutRefusedIsNotMadeAgainAsWhatTheKeysShowChanges`（拒过的布局按布局和摆放它的环境记住：尺寸、输入框、输入法、Shift 这些，键上显示的东西变了也不再摆一次、不再记日志）、`PackLayoutRefusedTest.aRefusalInUseIsKeptThroughManyOthersAndLoggedOnce`（拒过的按最近用到的留 64 条，别的环境再多，在用的那个也不被挤掉：不再摆一次、不再记日志）、`PackLayoutRefusedTest.aLayoutRefusedInOneStateIsDrawnInAnotherAtTheSameSize`（在一种状态下拒过，同样尺寸的另一种状态照样画包里的布局）、`PackLayoutRefusedTest.theKeysTypedOnBeforeTheLayoutDrawnChangedSendTheDrawnLayoutsCodes`（打过字以后换成自带的布局画，或反过来，每个键都发画出来的那个布局的码，不留着上一个布局的）、`PackLayoutRefusedTest.aZhuyinKeyWhoseFaceChangedSendsTheSymbolItShows`（同一个根因在注音键上：包里的 `<variant>` 改了键面的注音键，发出的是键上显示的那个符号，不是上一个键面的）；导入时就读不出的布局见 ST-72；设备上不跑。
@@ -820,10 +826,10 @@
 - **JVM**：`BarIconsThemeTest.aThemesBarIconsAreDrawnTheOnesItDoesNotWriteTheApps`（写了的画主题的、没写的画自带的、剪贴板条）、`BarIconsThemeTest.aBuiltInThemeDrawsTheAppsAgain`；ime-core `BarIconsTest.everyToolbarButtonAndTheMenuKeyHaveANameAThemeMayWrite`（每个按钮都有名字）；设备上不跑。
 
 ### ST-129 [P1] 主题换 `undo`：工具栏的撤销和键上的撤销快捷键一起换
-- **前提**：B0-设置，跟随系统深色模式关；一个只带 `<icon name="undo">` 的主题包（0.6.0 做的、换过 `undo` 的主题也是这样）；**按键字符和快捷键** 里 z 的上滑设成 **撤销**。
-- **操作**：导入并点这个主题，看 z 键角的撤销图标；点开工具栏看撤销按钮。
-- **预期**：两处是同一张主题的图（一个名字一个意思）；升级到 0.6.1 后 0.6.0 的这种主题，工具栏的撤销也换成主题的图（CHANGELOG 写明）。
-- **JVM**：`BarIconsThemeTest.aThemesUndoIsTheToolbarsAndTheShortcutsAlike`；ime-core `BarIconsTest.aNameIsOneThingDone`（和快捷键同名的正好是做同一件事的 10 个）；设备上不跑。
+- **前提**：B0-设置，跟随系统深色模式关；一个只带 `<icon name="undo">` 的主题包（0.6.0 做的、换过 `undo` 的主题也是这样）；**按键字符和快捷键** 里 z 的上滑设成 **撤销**，**滑动列** 里给「数字键盘」那一类 **加命令…** 加上 **撤销**、**复制**。
+- **操作**：导入并点这个主题，看 z 键角的撤销图标；点开工具栏看撤销按钮；到测试页普通框点 **123**，把左列滑到最下面看撤销、复制。
+- **预期**：三处的撤销是同一张主题的图（一个名字一个意思）；列里的复制是 App 自己的图标（主题没带 `copy`），不空着；列里的图标不先闪 App 的再换成主题的。升级到 0.6.1 后 0.6.0 的这种主题，工具栏的撤销也换成主题的图（CHANGELOG 写明）。
+- **JVM**：`BarIconsThemeTest.aThemesUndoIsTheToolbarsAndTheShortcutsAlike`；`ScrollColumnIconTest.aCommandDrawsTheThemesIconElseTheApps`（列里的命令：主题有就画主题的，没有画 App 的，还没读出来时什么都不画、读出来再画主题的）；ime-core `BarIconsTest.aNameIsOneThingDone`（和快捷键同名的正好是做同一件事的 10 个）；设备上不跑。
 
 ### ST-130 [P2] 只换菜单键的一态；没换 `hide-keyboard` 时栏上和键上的收起图标各是各的
 - **前提**：B0-设置，跟随系统深色模式关；一个只带 `<icon name="toolbar-expand">` 的主题包；一个只带 `undo` 的主题包。
@@ -943,9 +949,9 @@
 
 ### ST-162 [P1] 点卡片「用在…」：勾上、去掉
 - **前提**：B0-设置；导入了 `uat-qwerty-1.0.layout`，导入后点了 **先不用**。
-- **操作**：**外观 → 布局** 点「UAT 26 键」卡片，点底下提示条的 **用在…**；勾 **拼音**、**英文**，点 **确定**；到测试页用拼音点 a；回来再点卡片 **用在…**，去掉 **拼音**，点 **确定**；再用拼音点 a。
-- **预期**：没用在输入法上时卡片下没有「用在：」。点卡片上方预览换成它，底下出带 **用在…** 的提示条；「「UAT 26 键」用在」里有拼音、双拼、英文，用着的打勾。勾后卡片写「用在：拼音、英文」，拼音的 a 打出「哈哈」。去掉拼音后卡片写「用在：英文」，拼音换回全键盘（a 打 a）。
-- **JVM**：`ImKeyboardsTest.aLayoutsCardSaysWhoUsesItAndWhoMay`（谁在用、谁能用、勾和去勾后各存什么）。
+- **操作**：看 **输入法 → 拼音** 的 **键盘** 的选项；**外观 → 布局** 点「UAT 26 键」卡片，点底下提示条的 **用在…**；勾 **拼音**、**英文**，点 **确定**；到测试页用拼音点 a，再看拼音 **键盘** 的选项；回来再点卡片 **用在…**，去掉 **拼音**，点 **确定**；再用拼音点 a。
+- **预期**：没用在输入法上时卡片下没有「用在：」，拼音的 **键盘**（和 ⋯ → 键盘 同一份）里没有「UAT 26 键（自定义）」。点卡片上方预览换成它，底下出带 **用在…** 的提示条；「「UAT 26 键」用在」里有拼音、双拼、英文，用着的打勾。勾后卡片写「用在：拼音、英文」，拼音的 a 打出「哈哈」，拼音的 **键盘** 里有「UAT 26 键（自定义）」。去掉拼音后卡片写「用在：英文」，拼音换回全键盘（a 打 a）。
+- **JVM**：`ImKeyboardsTest.aLayoutsCardSaysWhoUsesItAndWhoMay`（谁在用、谁能用、勾和去勾后各存什么）、`CustomKeyboardTest.anImportedLayoutIsOfferedOnlyWhereTurnedOn`（先不用的不在键盘选单里，勾上才有）。
 
 ### ST-163 [P1] 删掉正在用的布局：说清楚换回什么
 - **前提**：B0-设置；导入 `uat-qwerty-1.0.layout` 时用在了拼音上。
@@ -973,9 +979,9 @@
 
 ### ST-170 [P1] 导入数字键盘布局并用上：只管它写的那几种
 - **前提**：B0-设置，没导入过布局；「下载」里有 `uat/fixtures/layouts/uat-number-1.0.layout`（1 键上写「壹」，打出的仍是 1；`pads="full phone"`）。
-- **操作**：**外观 → 布局 → + → 导入布局文件** 选它，看确认框，点 **导入**；问「现在就用作数字键盘吗？」时点 **用**；看卡片；到测试页普通框点 **123**，点「壹」；再到电话框、数字框看数字键盘。
-- **预期**：确认框写「数字键盘：123、电话」。导入后问「现在就用作数字键盘吗？」（不问用在哪些输入法），点 **用** 后提示「数字键盘现在用「UAT 数字」」，「UAT 数字」卡片在数字键盘段，下写「用在：数字键盘」。普通框点 123 出的数字键盘 1 键写「壹」，点了打出 1；电话框的数字键盘也是它；数字框（不是它写的那种）还是 App 自带的，1 键写 1。
-- **JVM**：`CustomPanelTest.aNumberBoardIsDrawnForThePadsItIsForTheAppsForTheRest`、`CustomPanelTest.aNumberBoardNamingNoPadsIs123sAlone`、`CustomPanelTest.aNumberBoardForTwoPadsIsMadeOnceForEach`、`KeyboardNamesTest`、`LayoutImportTest.theUatsPanelLayoutsAreTakenWithNoWarning`、`PanelLayoutsTest`。
+- **操作**：**外观 → 布局 → + → 导入布局文件** 选它，看确认框，点 **导入**；问「现在就用作数字键盘吗？」时点 **用**；看卡片；到测试页普通框点 **123**，点「壹」；再到电话框、数字框，输入测试台的日期框看数字键盘。
+- **预期**：确认框写「数字键盘：123、电话」。导入后问「现在就用作数字键盘吗？」（不问用在哪些输入法），点 **用** 后提示「数字键盘现在用「UAT 数字」」，「UAT 数字」卡片在数字键盘段，下写「用在：数字键盘」。普通框点 123 出的数字键盘 1 键写「壹」，点了打出 1；电话框、数字框（各种数字框都用 123 那块）的数字键盘也是它；日期框（不是它写的那种）还是 App 自带的，1 键写 1。
+- **JVM**：`CustomPanelTest.aNumberBoardIsDrawnForThePadsItIsForTheAppsForTheRest`、`CustomPanelTest.aNumberBoardNamingNoPadsIs123sAlone`、`CustomPanelTest.aNumberBoardForTwoPadsIsMadeOnceForEach`、`CustomPanelTest.aBoardImportedForTheMergedPadsIsTheFullOnes`、keyboard-scene `NumberPadsTest.anOlderCopyWithTheMergedPadsConditionsIsLaidOutAsTheAppsPads`、`KeyboardNamesTest`、`LayoutImportTest.theUatsPanelLayoutsAreTakenWithNoWarning`、`PanelLayoutsTest`。
 
 ### ST-171 [P1] 点卡片「数字键盘用这个」：换回内置的、再换上
 - **前提**：B0-设置；导入了 `uat-number-1.0.layout`，导入后点了 **先不用**。
@@ -995,11 +1001,24 @@
 - **预期**：确认框写「删除「UAT 数字」吗？数字键盘正在用它，删掉后换回内置的。」。删后卡片不见，自带的「数字」卡片下写「用在：数字键盘」；123 的 1 键写 1。（文件读不出时选择留着，先画自带的，卡片下写「用在：数字键盘（读不出，暂用内置的）」；选的文件不见了，自带的卡片下写「用在：数字键盘（选的布局不见了，暂用内置的）」：JVM 测。）
 - **JVM**：`CustomPanelTest.oneRefusedAsItIsReadDrawsTheAppsTheChoiceKept`、`PanelLayoutsTest.thePanelsUsingALayoutGoBackOnTheAppsAsItIsDeleted`、`PanelLayoutsTest.aChoiceNotReadIsListedUnderItsPanelOneGoneOnTheAppsCard`、`CustomLayoutFilesTest.aBackupsFileIsRestoredOnlyAsTheLayoutItsNameSays`。
 
+### ST-197 [P1] 导入缺键的布局：照样导入，要注意的地方写清楚
+<!-- 063-layout-relax §2、§4 -->
+- **前提**：B0-设置，没导入过布局；「下载」里有 `uat/fixtures/layouts/uat-nine-big-enter.layout`（设计里的样例「九键大回车」，只改了 id 和名字：右列没有 0，回车占右下两行）、`uat-k17-no-m.layout`（`uat-k17-1.0` 去掉 M 键）、`uat-symbols-no-grid.layout`（`uat-symbols-1.0` 去掉符号格子的槽）。
+- **操作**：
+  1. 导入 `uat-nine-big-enter.layout`，看确认框，点 **导入**，问用在哪时只勾 **拼音**；到测试页点「普通文本」框，按 64426，点「你好」；点大回车的下半；点 **123** 打 0。
+  2. 导入 `uat-k17-no-m.layout`，看确认框，用在 **拼音**；到测试页看键盘，按 BN IO HJK A IO 打。
+  3. 导入 `uat-symbols-no-grid.layout`，问「现在就用作符号面板吗？」时点 **用**；到测试页打几个字，点 **符**，点 ⌫，再点「回去」。
+- **预期**：
+  1. 确认框只有一条提醒「没有数字键 0」，没有错误；导入后键盘就是这块：右列没有 0，回车占两行。64426 的候选第一个是「你好」，点了上屏；点回车下半换行；123 的数字键盘有 0，打得出 0。
+  2. 确认框只提醒「没有字母 m（密码框里也用这块键盘）」；键盘画的是这块 17 键（第 3 行 M 的地方空着），不是自带的 18 键；「你好」在前三个候选里。
+  3. 确认框只提醒「没有符号格子的位置：没有符号可选」；面板上分类栏在，格子那块空着，什么都不盖在键上；⌫ 删掉一个字，「回去」回到字母键盘。
+- **JVM**：`LayoutImportTest.theUatsLayoutsLackingKeysAreTakenAndTold`（三个文件导入、各只提醒少了什么）、`LayoutLacksTest.theNineKeysWithNoZeroAreTakenWithOneWarning`、`LayoutLacksTest.whatABoardLacksIsToldOnceAndTaken`、`CustomKeyboardTest.oneLackingKeysIsDrawnAsItIs`、`GroupedKeyboardOwnGroupsTest.theSampleLackingALetterIsDrawnAsItIs`、`CustomPanelTest.aPanelWithoutTheGridHidesItAndItsKeysAreTapped`、`EnginesOwnKeysTest.theKeysOfALayoutLackingALetterTypePinyin`。
+
 ### ST-175 [P1] 升级到 0.6.1：正在用的主题带的 18 键放进 外观 → 布局，拼音换成它，看到的不变，提示一次
 - **前提**：B0-设置，模拟器、debug 包，**跟随系统深色模式** 关；「下载」里有 0.6.0 的示例主题包「薄荷 17 键」（同 ST-74，脚本用 `lib/keyboard-scene/src/commonTest/data/mint-k17` 打包成 `uat-mint.theme`）；**输入法 → 拼音** 的 **键盘** 选「18 键」。
 - **操作**：导入它（**一起导入** 去掉勾）并选用；`adb shell run-as <包名> rm no_backup/theme-layouts-listed`、`am force-stop <包名>`（等于从 0.6.0 升级后第一次启动）；看 **外观 → 布局**、**输入法 → 拼音 → 键盘**；到测试页点「普通文本」框看键盘上方；用拼音按 17 键的分组打 n i h a o。再 `am force-stop` 一次，回测试页。
-- **预期**：第一次弹出键盘时提示「主题「uat-mint」带的17 键已放进 外观 → 布局，拼音正在用」，停约 4 秒，只这一次（再重启不再提示）。转换在后台，启动不卡；转完前弹出的键盘先是自带的 18 键，转完自己换成 17 键（布局页等转换和换选择都做完才列出，脚本在这之后才看选择和键盘）。主题带数字键盘时，数字键盘的选择同时换上，但要到下一次开始打字才用它（L5），第一次弹出的数字键盘可能还是自带的。转换中途应用被关，下次启动接着做（最多 3 次）。布局页有「uat-mint · 17 键」，卡片下写「用在：拼音」；拼音的 **键盘** 是「uat-mint · 17 键（自定义）」，键盘是 17 键（H、JK 一个键），和 0.6.0 用这个主题时一样，「你好」在前三个候选里。双拼选着 18 键时不换（17 键的分组双拼打不了，0.6.0 里双拼画的也是自带的 18 键；只在 JVM 上断言）。
-- **JVM**：`ThemeLayoutsToListTest.atTheFirstStartThePacksBoardsAreListedAndThoseChosenSwitchedOnce`（放进列表、拼音英文码表换上、双拼不换、没在用的主题只放进列表、提示的字、只一次）、`ThemeLayoutsToListTest.aStartThatEndedInTheMiddleIsTriedAgainThreeTimesAtMost`（启动中途被杀，下次接着做并换上；第 3 次还没做完就放弃）、`aStartCountsItsTry`、`theStartListsOffTheMainThreadAndSwitchesOnItAfter`（后台转换、之后主线程换上；之间什么都没换、键名设置没拷、导入只等转换、这期间恢复记下的留给下次）、`aStartKilledBetweenItsListingAndItsSwitchSwitchesAtTheNext`（转完、换之前被杀，标记都没写，下次按记录的 id 换上）、`theSwitchIsPlannedOnTheSettingsAsItIsMade`（换时按当时的设置算）、`aPanelSetToALayoutGoneCountsAsNone`（数字键盘选的布局已删，按没选算）、`KotlinHostTest.theThemeLayoutsChosenAreToldOnce`（提示看到为止、只一次）、`EngineNoticesTest.newsUntilSeenSaysTheTimeItAsks` 和 ime-core `NoticeStateTest`（这条提示 4 秒，其余的时长不变）；ime-core `ThemeLayoutSwitchTest`（每个输入法换不换：显示的那块、双拼的分组、微软双拼没有 14 键、码表要额外键、数字和符号）；设备上走一遍重启、提示、布局页和打字。
+- **预期**：第一次弹出键盘时提示「主题「uat-mint」带的17 键已放进 外观 → 布局，拼音正在用」，停约 4 秒，只这一次（再重启不再提示）。转换在后台，启动不卡；转完前弹出的键盘先是自带的 18 键，转完自己换成 17 键（布局页等转换和换选择都做完才列出，脚本在这之后才看选择和键盘）。主题带数字键盘时，数字键盘的选择同时换上，但要到下一次开始打字才用它（L5），第一次弹出的数字键盘可能还是自带的。转换中途应用被关，下次启动接着做（最多 3 次）。布局页有「uat-mint · 17 键」，卡片下写「用在：拼音」；拼音的 **键盘** 是「uat-mint · 17 键（自定义）」，键盘是 17 键（H、JK 一个键），和 0.6.0 用这个主题时一样，「你好」在前三个候选里。双拼选着 18 键时不换（17 键的分组双拼打不了，0.6.0 里双拼画的也是自带的 18 键；只在 JVM 上断言）。主题的那块缺 ⌫、回车、地球键或数字（比如 17 键少了 ⌫，0.6.0 不用它、画的是自带的）时只放进列表，拼音仍是「18 键」，不提示；只缺 ⇧ 的 26 键 0.6.0 照用，英文照样换上（只在 JVM 上断言）。缺字母的 26 键（比如删掉了 `q` 键，0.6.0 读不出那块、画的是自带的）也只放进列表、不换上、不提示；缺字母的 14 键、18 键 0.6.0 画的是它，照样换上（只在 JVM 上断言）。
+- **JVM**：`ThemeLayoutsToListTest.atTheFirstStartThePacksBoardsAreListedAndThoseChosenSwitchedOnce`（放进列表、拼音英文码表换上、双拼不换、没在用的主题只放进列表、提示的字、只一次）、`aPacksBoardLackingKeysIsListedAtTheFirstStartNotChosen`（缺 ⌫ 的那块只放进列表、不换、不提示；只缺 ⇧ 的照样换）、`ThemeLayoutsToListTest.aPacksBoardLackingWhat060RefusedIsListedNotChosen`（缺字母的 26 键只放进列表、不换；按 keyboard-scene `PackConvertTest.whatLacking060RefusedTheBoardForIsMarked` 标出的 0.6.0 拒收的那块，缺字母的 14/18 键不算）、`ThemeLayoutsToListTest.aStartThatEndedInTheMiddleIsTriedAgainThreeTimesAtMost`（启动中途被杀，下次接着做并换上；第 3 次还没做完就放弃）、`aStartCountsItsTry`、`theStartListsOffTheMainThreadAndSwitchesOnItAfter`（后台转换、之后主线程换上；之间什么都没换、键名设置没拷、导入只等转换、这期间恢复记下的留给下次）、`aStartKilledBetweenItsListingAndItsSwitchSwitchesAtTheNext`（转完、换之前被杀，标记都没写，下次按记录的 id 换上）、`theSwitchIsPlannedOnTheSettingsAsItIsMade`（换时按当时的设置算）、`aPanelSetToALayoutGoneCountsAsNone`（数字键盘选的布局已删，按没选算）、`KotlinHostTest.theThemeLayoutsChosenAreToldOnce`（提示看到为止、只一次）、`EngineNoticesTest.newsUntilSeenSaysTheTimeItAsks` 和 ime-core `NoticeStateTest`（这条提示 4 秒，其余的时长不变）；ime-core `ThemeLayoutSwitchTest`（每个输入法换不换：显示的那块、双拼的分组、微软双拼没有 14 键、码表要额外键、数字和符号）；设备上走一遍重启、提示、布局页和打字。
 
 ### ST-193 [P2] 升级时主题带的 18 键改了键名：在旧键上设的长按关闭、上滑跟着新键走
 - **前提**：同 ST-175（0.6.0 的「薄荷 17 键」导入并选用、拼音的 **键盘** 是「18 键」），升级前先在 **按键 → 按键字符和快捷键** 的 18 键里：点 H，把 **长按菜单** 关掉，**上滑** 选「文字」填 `嗨`，确定；点 JK，把长按列表删到只剩 k，确定。
@@ -1026,9 +1045,9 @@
 - **JVM**：`ExampleLayoutsTest.eachChecksCleanWhereItSaysItIsUsed`（拼音、双拼、英文、码表都能用，没有警告）、`ExampleLayoutsTest.eachDrawnInEveryFormAsHeld`（分体时第三行分成两半不缩小）；网页：`test/layout-maker.test.mjs`（AZERTY 的行，双拼、码表时出 `;` `*`）。
 
 ### ST-179 [P1] 网页示例「大按键数字键盘」：123 和小数框用它，电话框照旧
-- **前提**：B0-设置，没导入过布局；「下载」里有 `web/theme-maker/examples/layouts/big-number.layout`（`pads="full digits decimal"`）。
+- **前提**：B0-设置，没导入过布局；「下载」里有 `web/theme-maker/examples/layouts/big-number.layout`（不写 `pads=`：123 和各种数字框）。
 - **操作**：导入它，看确认框，问「现在就用作数字键盘吗？」时点 **用**；到测试页普通框点 **123**，看键盘，点 1、2、⌫、5；再到小数框（`#decimal`）、电话框看数字键盘。
-- **预期**：确认框写「数字键盘：123、只有数字、小数」。卡片下写「用在：数字键盘」。123 打开的是它：一行四个键（1 2 3 ⌫），回车竖着占两行，左下是 **符**、**返回**，没有 `=`、`,`；点 1、2、⌫、5 打出 15。小数框也是它，6 右边是 `.`；电话框还是 App 自带的数字键盘。
+- **预期**：确认框写「数字键盘：123」。卡片下写「用在：数字键盘」。123 打开的是它：一行四个键（1 2 3 ⌫），回车竖着占两行，左下是 **符**、**返回**，没有 `=`、`,`；点 1、2、⌫、5 打出 15。小数框也是它，6 右边是 `.` 和 `-`；电话框还是 App 自带的数字键盘。
 - **JVM**：`ExampleLayoutsTest.eachChecksCleanWhereItSaysItIsUsed`、`ExampleLayoutsTest.eachDrawnInEveryFormAsHeld`（每种输入框各画一次）、`CustomPanelTest.aNumberBoardIsDrawnForThePadsItIsForTheAppsForTheRest`；网页：`test/layout-maker.test.mjs`（大按键数字键盘的几何和 pads）。
 
 ### ST-180 [P2] 导入分体时分不成两半的布局：确认框警告这一行会整行缩小
@@ -1047,7 +1066,7 @@
 ### ST-186 [P2] 按键字符和快捷键：导入了没用的布局没有卡片
 - **前提**：B0-设置；「下载」里有 `uat-names.layout`。
 - **操作**：导入它，「现在就用在」点 **先不用**；**按键 → 按键字符和快捷键**，数顶上的卡片；回 **外观 → 布局** 点「UAT 键名」→ **用在…** 勾 **拼音**、**确定**；再看按键字符和快捷键；再去掉拼音，再看。
-- **预期**：没用时还是八张，没有「UAT 键名」；用在拼音上后多出它；去掉后又不见。
+- **预期**：没用时还是九张（布局类的七张加「滑动列」「功能键」），没有「UAT 键名」；用在拼音上后多出它；去掉后又不见。
 - **JVM**：`PopupOverridesLayoutTabTest.aLayoutNotInUseHasNoTab`、`ImKeyboardsTest.theLayoutsInUseAreThoseDrawn`。
 
 ### ST-187 [P2] 画不全的提示：导入的布局按它的名字说
@@ -1071,7 +1090,7 @@
 ### ST-190 [P2] 键盘布局网页：有错不让存、有警告先问、草稿找回、打开 .theme；主题制作网页打开 .layout
 - **前提**：电脑浏览器打开键盘布局页（同 ST-189）和主题制作页（同 ST-56）；`uat/fixtures/layouts/uat-names.layout`、`uat/fixtures/layouts/uat-old-group.layout`（UAT 17 键照 L8 之前的布局页写法，HJK 键显示的字写成 `{group:hjk}`，App 读不了）；示例主题「薄荷（动效）」的 `.theme`（主题制作页 **文件 › 新建…** 从示例里选它，再 **文件 › 保存 .theme**）；ST-72 的 `uat-layouts.theme`（带 `qwerty.xml`、`k18.xml` 两块 App 读得出的键盘和读不出的 `k14.xml`）。
 - **操作**：
-  1. 布局页从 26 键新建；在 **源码** 里删掉 `a` 键那一行，点 **文件 › 保存 .layout**；把它加回来，再把一个键的宽度改得很窄，再保存。
+  1. 布局页从 26 键新建；把一个键显示的字改成 17 个字，点 **文件 › 保存 .layout**；把它改回来，在 **源码** 里删掉 `a` 键那一行，再把一个键的宽度改得很窄，再保存。
   2. 改一处后不保存，重新载入页面。
   3. **文件 › 打开 .layout 或 .theme…** 选薄荷的 `.theme`。
   4. 主题制作页 **环境 › 键盘** 选 **打开 .layout…**，选 `uat-names.layout`；再把 `uat-names.layout` 的 id 改成 `qwerty` 另存，用同样的办法打开。
@@ -1079,7 +1098,7 @@
   6. 两个页面的 **设备** 都选「平板 10"」，不转横（布局页 **方向** 选竖，主题制作页不勾 **横屏**），看预览。
   7. 主题制作页 **文件 › 打开** `uat-layouts.theme`，**键盘** 先后选 26 键、18 键，看预览和 **问题**；布局页打开同一个 `.theme`，看列出的键盘。
 - **预期**：
-  1. 缺 `a` 时不保存，**问题** 里有这条错误；只有警告时列出警告，点 **仍然保存** 才保存。
+  1. 键上的字超过 16 个时不保存，**问题** 里有这条错误；改回后只有警告，列出「没有字母 a（密码框里也用这块键盘）」和键很窄的那条，点 **仍然保存** 才保存，存下的文件 `min-app` 是 0.6.3。
   2. 重新载入后问要不要 **恢复** 草稿，恢复后是改过的样子。
   3. 预览改按薄荷画，顶栏 **主题** 多一项「薄荷（动效）（打开的 .theme）」；主题包里带了自己的键盘布局的，同时列出那几块，可以从它开始（`layout-maker.test.mjs` 查）。
   4. `uat-names.layout` 打开后键盘一栏是「UAT 键名（uat-names.layout）」，预览画在这块 18 键分组键盘上；id 是 `qwerty` 的那份打不开，提示「id「qwerty」和 App 自带的键盘重名，App 不会导入它：换一个 id」。
@@ -1087,3 +1106,269 @@
   6. 平板竖拿也按横屏排：布局页写「800 dp 宽，按横屏排」；主题制作页的预览是横屏的键盘高度，主题里横屏的样式（`@landscape`、尺寸的第二个值）也按横屏用，和 App 在平板上一样。
   7. 26 键、18 键都按包里的那块画，**问题** 里没有把另一块当片段读不出的行；布局页列出这两块可以从它开始，读不出的 `k14` 写着原因，原因是中文（如「读不出来」），没有英文。
 - **JVM**：web/theme-maker 的 `layout-maker.test.mjs`（`保存: errors keep it from being saved; …`、`a theme pack's boards are offered made layouts of the user's, …`、`the draft is the theme maker's, in the layout maker's own database`）、`layout-smoke.mjs`（保存、草稿找回、打开 .theme）、`maker.test.mjs`（`a .layout opened for the preview: …`，含 `qwerty` 等 App 自带 id 被拒；`the environment is the engine's: …`（平板竖拿按横屏）；`a pack's two boards the app still reads are each drawn as the pack's, its fragment where they include it`）、`layout-maker.test.mjs` 的 `group letters set: …`（旧版 `{group:hjk}` 打开、恢复时改写）和 `LM.refusal` 那几行（原因写成中文）、`layout-smoke.mjs`（平板竖拿「800 dp 宽，按横屏排」）、`panels-smoke.mjs`（环境 › 键盘 › 打开 .layout）；页面上的样子在电脑浏览器上手工看。
+
+### ST-200 [P1] 百度皮肤：字号、粗细、角标颜色、按下时图标变色
+<!-- dev/design/063-skin-import §1 -->
+- **前提**：B0-设置；脚本现做的百度皮肤 `uat-skin2.bds`（不放第三方皮肤）：字母字号是默认的 1.2 倍，粗体；角标是绿色；功能键的图标是白色的单色图，按下时变成黄色。
+- **操作**：导入它并选用。在测试页看 26 键，按住退格。
+- **预期**：
+  - 字母比默认主题的大，而且是粗体；
+  - 键角的小字是绿色；
+  - 按住时，退格图标从白色变成黄色；
+  - 确认框的「以下没有转过来」里没有「单个按键的字号」那一条。
+- **JVM**：`SkinImportUatTest.baiduTextSizeWeightMarkAndPressedIconColorComeOver`（转出的 `theme.xml`：字母 `scale` 约 120%、`weight="700"`，角标绿色，功能键按下的 `icon-color` 是黄色，说明里没有字号）；设备上不跑。
+
+### ST-201 [P1] 位图图标和按下换图标
+<!-- dev/design/063-skin-import §2 -->
+- **前提**：B0-设置，**跟随系统深色模式** 关掉；脚本现做的 `uat-skin-icons.bds`：退格、Shift（三态各一张）、回车都是彩色的位图，按下时退格、Shift 各换成另一张图（Shift 的按下图只写在没上档的 Shift 上，皮肤里的写法就是这样）。
+- **操作**：
+  - 导入、选用；
+  - 按住退格（导入后的**第一次**按下）；
+  - Shift 点一下、再点两下，锁定时按住 Shift 看图标再松开；
+  - 在多行的框（回车是换行）和搜索框里看回车；
+  - 长按这个主题 → **信息**。
+- **预期**：
+  - 各个图标都是皮肤里的彩色图，不是 App 自带的线条图标；
+  - 第一次按住退格就换成按下的那张图，不先闪自带的；
+  - Shift 一次、锁定各是各的图；锁定时按住 Shift 仍是锁定那张，不闪出没上档时的按下图（按下图只在没上档时用；单次时按住也一样，只在 JVM 上断言：设备上按住超过长按时间就锁定了）；
+  - 换行的回车是皮肤的那张；搜索框里是 App 自带的搜索图标（百度皮肤「搜索」那张这一版不转，主题只有 `enter` 这一张，别的动作照旧画自带的）；
+  - 信息里主题格式那一行写需要 0.6.3。
+- **JVM**：`SkinImportUatTest.rasterIconsAndThePressedIconAreTheSkins`（五个图标各是皮肤那张图的颜色、退格按下用 `content` 换成 `backspace-pressed`、`min-app="0.6.3"`）、keyboard-scene `SkinThemeFeaturesTest.aShiftsPressedPictureIsOnlyTheUnshiftedOnes`（Shift 有按下图时另写 `:shifted:pressed`、`:locked:pressed` 用单次、锁定的图）；设备上留作冒烟（`14-settings.py` 截图量退格、Shift、回车上皮肤图标的颜色，第一次按住退格量按下那张的颜色，锁定时按住 Shift 量锁定那张的颜色，信息里有 0.6.3）。
+
+### ST-202 [P2] 工具栏、候选栏的位图图标
+<!-- dev/design/063-skin-import §2 -->
+- **前提**：脚本现做的 `uat-skin-toolbar.bdi`：带 3 张能对上的工具栏图（表情、剪贴板、设置）和 1 张对不上的（「搜索」），每张都有 `Select` 版。
+- **操作**：导入，看确认框；选用，展开工具栏，按住表情按钮。
+- **预期**：
+  - 确认框写「部分工具栏和候选栏的图标（1 个没对上）」；
+  - 工具栏上表情、剪贴板、设置三个按钮是皮肤的图，其余是自带的；
+  - 按住时还是常态那张图（按下的图这一版不转）。
+- **JVM**：`SkinImportUatTest.toolbarIconsThatMatchComeOverAndTheRestAreCounted`；设备上不跑。
+
+### ST-203 [P1] 加密的搜狗手机皮肤
+<!-- dev/design/063-skin-import §3 -->
+- **前提**：B0-设置；`node web/theme-maker/tools/make-skin-fixtures.mjs <目录>` 做出的 `warm.ssf`（用公开密钥加密的容器）和 `warm-plain.ssf`（同一个皮肤的明文版），放进「下载」时改名 `uat-sogou-enc.ssf`、`uat-sogou.ssf`。
+- **操作**：先后选这两个，看确认框；导入明文的那个并选用。
+- **预期**：
+  - 两次的确认框内容一样，导入后的样子一样；
+  - 不出现「加密」两个字。
+- **JVM**：`SkinImportUatTest.anEncryptedSogouSkinImportsLikeItsPlainCopy`（测试里用 `javax.crypto` 真加密；两个包转出的文件逐字节一样、确认框一样；截短的容器提示「这个搜狗皮肤读不出来……」）；设备上留作冒烟（`14-settings.py`，要 node）。
+
+### ST-204 [P2] 搜狗皮肤带的字体
+<!-- dev/design/063-skin-import §3 -->
+- **前提**：脚本现做的 `uat-sogou-font.ssf`：`TYPEFACE` 指向皮肤里的一个小字体（`web/theme-maker/test/testdata/tiny.ttf`）。另一份没有现成文件，只在 JVM 上现做（`SogouSkinFontTest.aFontTooBigOrMissingIsSaid` 里的皮肤）：字母键样式写 `TYPEFACE=gone.ttf`，皮肤里没有这个文件，只带符号键样式用的 `res_typeface/symbols.ttf`。
+- **操作**：导入、选用，看 26 键；长按这个主题 → **导出**。再导入第二份，看确认框的「以下没有转过来」，选用，看 26 键，导出。
+- **预期**：字母用这个字体画；导出的包里有这个字体。第二份（只在 JVM 上断言）：确认框的「以下没有转过来」列出字体（只有字体名、没有字体文件那一条）；字母用 App 的字体画，不拿皮肤里的 `symbols.ttf` 顶替；导出的包里没有 `<font>`、没有字体文件。
+- **JVM**：`SkinImportUatTest.aSogouSkinsFontDrawsTheLettersAndIsExported`（`theme.xml` 有 `<font>`、按键用它，导出的包里有字体文件）、keyboard-scene `SogouSkinFontTest.aFontTooBigOrMissingIsSaid`（字母键指向 `gone.ttf`、皮肤里只有 `symbols.ttf`：没有 `<font>`，记下字体那条说明）；设备上不跑。
+
+### ST-205 [P1] 皮肤的键位：默认不勾
+<!-- dev/design/063-skin-import §4 -->
+- **前提**：脚本现做的 `uat-skin-layout.bds`：26 键之外还有一块九键（九键没画 0，0 的位置是表情键）。
+- **操作**：导入，看确认框，**不改勾选**直接点 **导入**；再到 **外观 → 布局** 看。
+- **预期**：
+  - 确认框写「这个皮肤带 2 块键位：……」，**一起导入** 没有勾上；
+  - 导入后布局列表里没有这两块，键盘还是 App 自带的键位；
+  - 长按这个主题 → **信息**，最低版本没有因为键位变成 0.6.3。
+- **JVM**：`SkinImportUatTest.skinLayoutsAreOfferedUncheckedAndLeftOut`（确认框列出两块、主题目录里没有 `layouts/`、`min-app="0.6.0"`）、`ThemeImportLayoutsTest.aSkinsKeyboardsAreOfferedUntickedAndLeftOut`（勾选框的初值）；设备上不跑。
+
+### ST-206 [P1] 皮肤的键位：勾上以后
+<!-- dev/design/063-skin-import §4 -->
+- **操作**：再导入一次 `uat-skin-layout.bds`，这次勾上 **一起导入**；到 **外观 → 布局**，给拼音选「uat 布局皮肤 · 26 键」。再切到英文、在网址框里看一次。
+- **预期**：
+  - 列表里出现「uat 布局皮肤 · 26 键」和「uat 布局皮肤 · 九键」；
+  - 选上 26 键后，键的位置和宽度照皮肤，键缝不变；网址框里底行的键排得下，没有挤出屏幕；
+  - 长按 Q、看键角，和自带的一样（跟着 App 走）；
+  - 主题的最低版本是 0.6.3；
+  - 皮肤的九键没画 0，九键照样列出，确认框「以下没有转过来」里有一行「九键里皮肤没画、布局里也没放——没有数字键 0」，不再另列「缺键」那行。
+- **JVM**：`SkinImportUatTest.checkedSkinLayoutsAreListedAndKeepTheAppsKeys`（包里有 `layouts/qwerty.xml`、`min-app="0.6.3"`、布局里不写皮肤的长按和角标、经 `ThemeLayoutsToList` 后 `CustomLayouts.list` 按确认框的名字列出两块）、`ThemeSkinImportTest.aSkinsBoardsLackingKeysAreListedAsTheUsersOwnAndTold`（缺 0 的九键、缺 ⇧ 的 26 键照样列出，说明里各一行，最低版本 0.6.3）；各状态下每行的宽度由 `SkinLayoutWriterTest` 查；设备上不跑（排在真机上的样子要用真实输入法做的皮肤，仓库里不放）。
+
+### ST-207 [P1] 百度 `.bda`
+<!-- dev/design/063-skin-import §5 -->
+- **前提**：脚本现做的 `uat-skin.bda`：紫色背景，青色键面，键面是九宫格图，带一个 GIF 资源。
+- **操作**：导入、选用。
+- **预期**：
+  - 颜色、键面都对，键面的圆角没有被拉变形；
+  - 确认框里没有「暂不支持」，列出「帧动画、GIF、Lottie 和视频」。
+- **JVM**：`SkinImportUatTest.aBdaSkinImportsWithItsNineSliceFaces`（背景是紫色；键面图四周透明的边裁掉、按内框九宫格拉伸，中间是青色；说明里有帧动画）；设备上不跑。
+
+### ST-208 [P2] 同文：用 include、patch 写的主题
+<!-- dev/design/063-skin-import §6 -->
+- **前提**：脚本现做的 `uat-trime-include.zip`，里面有 `base.yaml` 和 `uat.trime.yaml`。后者只有 `__include: base:/` 和一个 `__patch`（把按键颜色改成红色），还引用了一个 `trime:/` 的东西。另一份像从 GitHub 下载的整个同文主题仓库：同样的 `base.yaml`、`uat.trime.yaml`，加上 `jsonnet/x.jsonnet` 和一个比 `uat.trime.yaml` 大、没有 `preset_color_schemes` 的 `big.trime.yaml`；这份没有现成文件，JVM 上分两半现做（带 `jsonnet/` 的同文主题在 `SkinWiringTest.formatsToldApartAreSaidSoByName`，更大的没有配色的 `big.trime.yaml` 在 `RimeComposeTest.eachThemeFileTriedHasLimitsOfItsOwn`）。
+- **操作**：导入第一份；再导入第二份。
+- **预期**：
+  - 能导入，按键是红色；
+  - 说明里有「引用了同文自带或包里没有的配置（1 处）」；
+  - 第二份（只在 JVM 上断言）也能导入，按键是红色：有 `jsonnet/` 但有同文的 `*.trime.yaml`，按同文主题读，不提示「仓输入法的皮肤暂不支持导入」；更大的没有配色的 `big.trime.yaml` 不占后面那份的读取上限，不提示主题坏了。
+- **JVM**：`SkinImportUatTest.aTrimeThemeOfIncludesAndPatchesImports`、keyboard-scene `SkinWiringTest.formatsToldApartAreSaidSoByName`（带 `jsonnet/` 的同文主题照样转，没有同文文件的才是仓输入法）、`RimeComposeTest.eachThemeFileTriedHasLimitsOfItsOwn`（每个候选主题文件各有自己的读取上限：前面更大的、没有配色的不让后面能用的判成坏的）；设备上不跑。
+
+### ST-209 [P2] 深色版背景图
+<!-- dev/design/063-skin-import §7 -->
+- **前提**：B0-设置；脚本现做的 `uat-skin-dark.bds`：`light/` 的背景是蓝色，`dark/` 的背景是黑色。
+- **操作**：打开 **跟随系统深色模式**；导入、选用；把系统切到深色，再切回浅色。长按这个主题 → **导出**。
+- **预期**：深色时背景是黑色，浅色时是蓝色，切换时不闪出别的图；导出的包里两张背景图都在。
+- **JVM**：`SkinImportUatTest.theDarkPictureIsDrawnInDarkModeAndExported`（`<picture variant="dark">`、深色版的样子用 `board-dark.png`、浅色版用 `board.png`、导出的包里两张都有）；深浅色切换在设备上（`14-settings.py` 量 g、h 之间的背景色）；切换时不闪要人看。
+
+### ST-210 [P2] 画成图片的字母
+<!-- dev/design/063-skin-import §7 -->
+- **前提**：脚本现做的 `uat-skin-letters.bds`：26 个字母各有正常、按下两张图。
+- **操作**：导入、选用；按住 Q；切到手写再切回来；换到九键。
+- **预期**：
+  - 字母键显示皮肤的图，没有和 App 自己画的字母叠在一起；
+  - 按住 Q 时换成按下的那张；
+  - 换到九键，是 App 画的字母，颜色是皮肤的。
+- **JVM**：`SkinImportUatTest.letterStickersReplaceTheLettersOnTwentySixKeysOnly`（26 个字母各有 `st-<字母>.png`、`st-<字母>-p.png`，贴纸只写在 `qwerty/<字母>` 上，`min-app="0.6.3"`）；贴纸的画法、手写时跟着字一起淡由 `ThemeStickerTest`、`StickerCacheTest` 查；设备上不跑。
+
+### ST-211 [P2] 讯飞 `.it`
+<!-- dev/design/063-skin-import §8 -->
+- **前提**：脚本照商店的结构现做的 `uat-skin.it`（顶层目录、`theme_info.ini`、`480/`、`720/`）：深蓝背景，白色的字，按下时键面变亮。
+- **操作**：导入、选用；按住一个字母。
+- **预期**：
+  - 颜色、键面都对，按下时变亮；
+  - 说明里有「深色版（皮肤只有一套……）」「按键的位置和大小」。
+- **JVM**：`SkinImportUatTest.anIflytekSkinImportsWithItsFacesAndColors`（名字取 `theme_info.ini` 的、字是白色、键面和按下的键面是皮肤的颜色、说明两条）；设备上不跑。
+
+### ST-212 [P1] 主题制作网页：导入别的输入法的皮肤
+<!-- dev/design/063-skin-import §9 -->
+- **前提**：电脑上的浏览器（新版 Chrome）打开主题制作页（同 ST-56）；样本用脚本现做，不放第三方皮肤：`node web/theme-maker/tools/make-skin-fixtures.mjs <目录>`，得到 `sea.bds`（百度，26 键）、`warm.ssf`（搜狗，用公开密钥加密的容器）、`warm-plain.ssf`（同一个皮肤不加密）、`warm-in.zip`（zip 里套着 `warm.ssf`）、`lotus.cskin`；再把 `sea.bds` 截掉后半截改名 `cut.theme`。
+- **操作**：
+  1. 先在 DevTools › Performance 把 CPU 降速调到 20×（样本小，不降速时转换远不到 2 秒）；页面一打开弹出 **新建主题** 时，点 **打开文件…** 选 `sea.bds`。看完第 1 条预期后把降速关掉。
+  2. 看顶上的提示条；勾上 **带上皮肤的键位**，**文件 › 保存 .theme**；撤销一步；再 **文件 › 新建…** 选内置 Nord，然后撤销回来。
+  3. 依次把 `warm.ssf`、`warm-plain.ssf`、`warm-in.zip` 拖到页面上。
+  4. 打开 `lotus.cskin`、`cut.theme`。
+  5. 点提示条的 **知道了**。
+  6. 把第 2 步存下的 `.theme` 导入手机（**外观 → 主题 → 新增主题 → 导入主题文件**），和在手机上直接导入 `sea.bds`（勾上键位）比较。
+- **预期**：
+  1. 转换时 **新建主题** 关掉，页面不能点；超过 2 秒显示「正在转换……」（盖在最上面）。转好后提示「已从皮肤转成主题」，预览是皮肤的样子，**问题** 里没有错误。
+  2. 提示条写「从别的输入法的皮肤转换而来。以下没有转过来：」和几条说明（文字和手机上导入时一样），还写「这个皮肤带 1 块键位：26 键……」，**带上皮肤的键位** 默认没勾。勾上后存下的包里有 `layouts/qwerty.xml`，`theme.xml` 里有 `min-app="0.6.3"`；撤销后勾选框跟着取消；换成 Nord 后提示条不见了（勾选框不会把皮肤的键位加进 Nord），撤销回皮肤那份后提示条又出现。
+  3. 三个搜狗样本转出来一样，图片都在，提示里没有「部分图片读不出来」那条。
+  4. `lotus.cskin` 提示「打不开这个文件：仓输入法的皮肤 暂不支持导入」；`cut.theme` 提示的是主题文件自己的错（「这不是主题文件（.theme 或 theme.xml）」），不提皮肤。
+  5. 提示条收起，之后编辑也不再出现；再打开一个皮肤时重新出现。
+  6. 手机上导入后和直接导入皮肤的一样（键位放进 **外观 → 布局**）。
+- 旧浏览器（没有 `DecompressionStream`、`OffscreenCanvas` 或 WebCrypto）打开皮肤时提示「这个浏览器不能导入皮肤，请用新版 Chrome、Edge、Firefox 或 Safari」：`skin-import.test.mjs` 查，不在浏览器上做。
+- **JVM**：web/theme-maker 的 `skin-import.test.mjs`（每个样本能转能打开、加密版和明文版一样、键位默认不勾、勾上带 `layouts/qwerty.xml` 和 0.6.3、报错文字和 App 一样、坏的 `.theme` 不当皮肤、旧浏览器的提示）、`maker.test.mjs`（打开和保存补 `min-app`、位图图标和贴纸的包存得下）、`panels-smoke.mjs`（headless Chrome 走拖放：新建里打开时对话框关掉、提示条、勾选框、保存的包、撤销、换成内置主题后提示条不见、加密的搜狗皮肤、`.cskin`、坏的 `.theme`）；第 1 步的「正在转换……」和第 6 步导入手机在电脑浏览器加设备上手工跑。
+
+### ST-213 [P1] 皮肤转出的主题：普通的照旧写 0.6.0，用了新东西的写 0.6.3，旧版 App 拒收后者
+<!-- dev/design/063-skin-import §0.1 -->
+- **前提**：一台模拟器，先卸掉幽默输入法，再 `adb install` v0.6.2 release 的 arm64 APK（GitHub Releases 的 v0.6.2）并导入文字包；ST-212 的样本 `sea.bds`（键位不勾时只用 0.6.0 就有的写法）和 `warm.ssf`（有深色版背景图，要 0.6.3）。在主题制作网页上分别打开这两个，键位不勾，**文件 › 保存 .theme**，再 `adb push` 到模拟器的 `/sdcard/Download/`。
+- **操作**：在 0.6.2 上从 **外观 → 主题 → 新增主题 → 导入主题文件** 导入这两个 `.theme`。
+- **预期**：
+  - 网页存下的 `sea` 包 `min-app="0.6.0"`，`warm` 包 `min-app="0.6.3"`（勾上 `sea` 的键位时也是 0.6.3，见 ST-212）。
+  - 0.6.2 上 `sea` 的能导入，样子和 0.6.3 一样；`warm` 的被拒，提示需要更新的版本；主题列表不变。
+- **JVM**：web/theme-maker 的 `skin-import.test.mjs`（`sea.bds` 转出 0.6.0、`warm.ssf` 转出 0.6.3、勾上键位 0.6.3）；App 一侧 `SkinImportUatTest.plainConversionsKeepMinApp060AndNewOnesWrite063`（普通转换照旧写 `min-app="0.6.0"`，用了位图图标的写 `0.6.3`；导出后在版本名 0.6.2 下前者收下、后者拒收并提到 0.6.3）；装 0.6.2 的那一半只能在设备上（安装、降级）手工跑。
+
+### ST-214 [P2] 暂不支持的格式给出明确提示
+<!-- dev/design/063-skin-import §11.2 -->
+- **前提**：脚本现做 4 个文件：一个手心形状的 zip（`skin.json` 加 `light/res/skin.proto`）、一个 Gboard 形状的 zip（`metadata.json` 加 `style_sheet_md2.css`）、一个 `x.cskin`、一个只有 `AndroidManifest.xml` 和 `resources.arsc` 的 `x.apk`。另两个没有现成文件，只在 JVM 上现做（`SkinWiringTest.formatsToldApartAreSaidSoByName` 里的）：一个顶层是两对同名的 `Ink.zip`、`Ink` 和 `Moss.zip`、`Moss`（Gboard 主题合集的样子）的 zip；一个百度皮肤 `.bds`，顶层多了一对同名的 `x` 和 `x.zip`（别的格式的皮肤里带着的）。
+- **操作**：逐个导入。
+- **预期**：前四个分别提示「手心输入法的皮肤暂不支持导入」「Gboard 的主题暂不支持导入」「仓输入法的皮肤暂不支持导入」「安装包（APK）里的主题暂不支持导入」；没有一个提示「只能导入主题文件和……」；主题列表不变。两对同名 zip 的那个提示「Gboard 的主题暂不支持导入」、带 `x`、`x.zip` 的百度皮肤照常导入（这两个只在 JVM 上断言）。带 `jsonnet/` 的同文主题仓库按同文导入，见 ST-208。
+- **JVM**：`SkinImportUatTest.unsupportedSkinsSayWhichAndAreNotImported`、keyboard-scene `SkinWiringTest.formatsToldApartAreSaidSoByName`（顶层成对的 `<名字>.zip` 和同名文件是 Gboard 主题合集，别的格式的皮肤里带着的不算；带 `jsonnet/` 又有同文 `*.trime.yaml` 的是同文）；设备上不跑。
+
+### ST-215 [P2] 网页做宠物
+<!-- dev/design/063-skin-import §15 -->
+- **前提**：B0-设置；脚本现画两组帧图（idle 紫、typing 红，见 [MN-28](19-motion-notices.md)）。
+- **操作**：主题制作网页打开内置主题，在「宠物」面板加 idle 和 typing 两组帧，点 typing 的「播放」；导出，导入手机并选用，在「普通文本」框按一个字母；看主题信息里的最低版本。再在面板里给 delete 选一张 1024×384、每帧 128 px 的方格图（8 列 3 行），看帧数和每行几帧；把帧数改成 5；把 **位置** 先设成键盘角上、调 **对齐** 和 **偏移**，再改成候选栏右边，看面板，看源码里的 `<pet>`；给 delete 换一张 384×64 的一行方格图。
+- **预期**：面板的预览里 typing 播一遍回到 idle；导出的包 `min-app="0.6.3"`；手机上有宠物，按字母时它变成 typing。方格图选上后写「24 帧」、每行 8 帧；帧数改成 5 后每行几帧跟着变成 5；改成候选栏右边后对齐和偏移那几行不见了，`<pet>` 上没有 `align`、`offset-x`、`offset-y`；换成一行方格图后重新数成 6 帧、每行 6 帧。这一段脚本不跑：node 上断言（下面的测试），浏览器里手工看一遍。
+- **JVM**：web/theme-maker 的 `pet.test.mjs`（面板写出的 `<pet>` 引擎读得出、超限的帧图存盘时报错、导出 `min-app` 是 0.6.3、新状态的一列或网格帧图也能加、换图时重猜帧数、调低帧数时列数跟着降、切到候选栏右边时去掉 align/offset、预览照 PetMachine 的规则播（`showing`）且连点两次「播放」只播一条）；导入手机那一半在设备上（`14-settings.py` 用 node 跑网页的面板代码做出这个包）；预览的播放在浏览器里人工看一眼。
+
+### ST-216 [P2] 带动画的 PNG（APNG）图标照样导入，只画第一帧
+<!-- dev/review/063-pending-decisions.md P19 -->
+- **前提**：B0-设置，**跟随系统深色模式** 关掉；脚本现做的 `uat-apng.theme`：内置 Nord 的主题（同 MN-28 用的那份），加 `<meta min-app="0.6.3"/>` 和 `<icon name="backspace" src="icon-backspace.png"/>`，`icon-backspace.png` 是两帧的 APNG（第一帧红、第二帧蓝，每帧 0.5 秒，循环）。
+- **操作**：导入、选用，在「普通文本」框看退格键，隔 1 秒再看一次。
+- **预期**：导入时不报错、不提示图片格式不对；退格键上是红色的方块（第一帧），两次都是红的，不变蓝（不播动画；见 docs/theme-format.md 的 `<icon>` 一节）。
+- **JVM**：keyboard-scene `ThemeRasterIconTest.aPngWithAnAcTLChunkStillReadsDrawnByItsFirstFrame`（带 acTL 的 PNG 照样读出大小、不算动画、不报问题）；设备上跑（`14-settings.py` 用 Pillow 现做 APNG，截图量退格键上的颜色）。
+
+### ST-217 [P2] 键面占满了包的皮肤照样导入，放不下的图标、字母图片用 App 自带的
+<!-- dev/design/063-skin-import -->
+- **前提**：没有现成文件，只在 JVM 上现做（`SkinThemeFeaturesTest.everyIconAndStickerFitsThePackWithOrWithoutKeyFaces` 里的皮肤）：26 键里 24 个字母键各有常态、按下两张 512×512 的键面图（共 48 张，按导入上限算约 50 MB），另带 App 认得的每一个按键和工具栏图标（常态、按下各一张）和 26 个画成图片的字母。
+- **操作**：导入，看确认框；选用，看 26 键和工具栏。
+- **预期**：能导入，不提示主题太大；48 张键面都在，字母键画皮肤的键面；包里放不下的图标和字母图片不写进主题，确认框「以下没有转过来」里列出放不下的那几类（「部分按键图标（读不出或太大，用了本输入法自带的）」「部分工具栏和候选栏的图标」「部分画成图片的字母（只取了颜色）」中拿掉了哪类就列哪类，至少一类），这些键和工具栏画 App 自带的图标，字母照常写字（这一句 JVM 不断言：放不下的图标没有写进主题，画的时候就用自带的，和别的缺图标的主题一样）；整个主题包在导入上限里（300 个文件、64 MB）。键面、字体、声音先算进包里，剩下的地方依次放深色背景图、常态图标、按下的图标、字母图片，放不下的从后面拿掉。
+- **JVM**：keyboard-scene `SkinThemeFeaturesTest.everyIconAndStickerFitsThePackWithOrWithoutKeyFaces`（先有 48 张最大的键面：键面全在，文件数和字节都在包的上限里，放不下的记进说明，不拒绝导入；没有键面时图标和字母图片都放得下）、`SkinThemeFeaturesTest.whatThePackHasNoRoomForIsLeftOutInItsOrderAndToldOf`（按深色背景图、常态图标、按下的图标、字母图片的顺序放，放不下的各记一条说明）；设备上不跑（脚本不做这么大的皮肤）。
+
+### ST-196 [P2] 开发者「清空剪贴板数据库」连收藏一起清
+<!-- dev/design/063-clipboard-favorites -->
+- **前提**：B0-设置，复制「公园」并收藏。
+- **操作**：**开发者 → 清空剪贴板数据库**，看确认框，点确定；打开剪贴板面板看两页。
+- **预期**：确认框写「剪贴板数据库将会被完全清空，包括收藏。继续吗？」；确认后最近和收藏都空了。
+- **JVM**：`DeveloperUatTest.clearingTheClipboardDatabaseTakesTheFavouritesToo`；设备上不跑。
+
+### ST-218 [P1] 「滑动列」卡片：九键列加 `#`、排到第 2 位、标「不转中文标点」，再恢复默认
+<!-- dev/design/063-number-pad-t9 -->
+- **前提**：B0-设置，拼音九键，开着中文标点。
+- **操作**：**按键字符和快捷键**，看卡片的顺序，点 **滑动列**；点「九键」那一行，勾输入框旁的 **不转中文标点**，加 `#`，长按 `#` 拖到第 2 位，确定；在测试 App 里九键没打字时滑左列点 `#`。回来点「九键」那一行，点 **恢复默认**。再点「数字键盘」那一行，看有没有 **不转中文标点** 和 **使用变量**，把项删光；最后打开 14 键的 QW，长按一项。
+- **预期**：**滑动列** 卡片在 **功能键** 前面，大卡片一类一行（九键、九键英文、数字键盘、电话、日期时间、网址、邮箱），每行写名字和前六项；改过九键后那一行描边，卡片右上角写 1（读屏念「改过 1 类」）；键盘上 `#` 在第 2 位，键帽下边写「原样」，中文标点下打出 `#`。恢复默认后描边和角上的数没了，键盘上是 `, . ? ! … 、 : ~ @`。数字键盘那一类没有 **不转中文标点**、**使用变量**，也没有 **设为首选**；删光时 **确定** 是灰的，写「至少留一项」。长按列表（QW）里的项只点不拖。⋮ 的 **全部恢复默认** 连滑动列一起恢复，提示上的 **撤销** 连滑动列一起撤回；多选时滑动列卡片没有勾选条；↶ 不撤滑动列。
+- **JVM**：`PopupOverridesFragmentTest$ScrollLists.theScrollListsAreACardBeforeTheFunctionKeysARowEach`、`.onlyTheNineKeysListsOfferNotConvertingAndNoneLeftCannotBeKept`、`.aLongPressEditorsItemsAreNotHeld`、`.aListIsPutBackAloneOrWithEverythingByResetAll`、`.undoAfterResetAllBringsTheScrollListsBackToo`；拖动本身（`View.startDragAndDrop`）Robolectric 发不出，排序规则见 ime-core `PopupEditorTest.aDraggedItemGoesWhereItIsDropped`；键盘上打出的样子在设备上看。
+
+### ST-219 [P1] 数字键盘列加命令「复制」和文字 `copy`
+<!-- dev/design/063-number-pad-t9 -->
+- **前提**：B0-设置，测试 App 的普通文字框里有一段选中的字。
+- **操作**：**按键字符和快捷键 → 滑动列**，点「数字键盘」那一行，点 **加命令…** 选 **复制**，再在输入框里加 `copy`，确定；在测试 App 里点 123，滑左列点复制的图标；换到密码框，点 123 再点它；回到普通框点 `copy`。
+- **预期**：编辑框和大卡片里命令画的是复制的图标（读屏念「复制」），文字 `copy` 是另一项，两项都在；键盘上点图标复制了选中的字，在密码框里不执行；点 `copy` 打出 `copy`。
+- **JVM**：`PopupOverridesFragmentTest$ScrollLists.aListsItemsAreAddedDeletedAndACommandAdded`（加命令、加文字、删一项、存下、卡片写改过 1 类、↶ 不可用）；键盘上点了执行、密码框里不执行在设备上看。
+
+### ST-220 [P1] 改网址那一类，只在网址框里生效；电话同理
+<!-- dev/design/063-number-pad-t9 -->
+- **前提**：B0-设置。
+- **操作**：**滑动列** 里把「网址」那一类改成只有 `/` `.io`，「电话」那一类加 `;`；在测试 App 的网址框、普通文字框里点 123（网址框里九键或数字键盘的列）看列；在电话框里看列。
+- **预期**：网址框里的列是 `/ .io`，普通框的数字键盘列还是 `+ - * / % , : ( ) #`；电话框里列的最后是 `;`，别的框里没有。
+- **JVM**：`ScrollColumnMenuTest.aPhoneFieldsColumnOnTheNineKeysIsThePhones`（电话框里返回到九键，左列是电话那一类的默认）；设置这边见 ST-218、ST-219；改过的类别在设备上跑。
+
+### ST-221 [P1] 布局里的横向滑动列
+<!-- dev/design/063-number-pad-t9 -->
+- **前提**：B0-设置，`uat/fixtures/layouts/uat-qwerty-scroll.layout`（26 键底排上面一条横的 `scroll list="nine"`，`show="6"`）。
+- **操作**：**外观 → 布局** 导入它，看确认框；选用；左右滑那一条，点一项；在网址框、电话框里看（电话框里点 返回 到 26 键）；空格上滑动。
+- **预期**：确认框照常（不列 `min-app`；文件写 0.6.3，只有更旧的版本会拒收），能导入；那一条能左右滑，点了照中英文标点打出；网址框里换成网址那一类，电话框里换成电话那一类；空格滑动照常。
+- **JVM**：没有（布局和键盘在 A、B）；集成分支上在模拟器上跑。
+
+### ST-222 [P2] 备份、恢复后改过的滑动列还在；在 0.6.2 上恢复，键盘照旧
+<!-- dev/design/063-number-pad-t9 -->
+- **前提**：B0-设置，**滑动列** 里改过「数字键盘」那一类（加了 **复制**）；**备份全部**。
+- **操作**：把数字键盘那一类恢复默认，再从这份备份恢复；看 **滑动列** 和键盘。卸载，装 0.6.2，从同一份备份恢复，打开数字键盘。
+- **预期**：恢复后数字键盘那一类又有 **复制**，卡片写改过 1 类；0.6.2 上恢复成功，数字键盘是 0.6.2 的样子，没有报错。
+- **JVM**：`BackupUatTest.aBackupBringsTheScrollListsChanged`（`scroll_lists` 跟着设置进备份、恢复回来）；0.6.2 那一半设备上手动，发版时跑。
+
+### ST-223 [P2] 搜「网址」：打开滑动列，网址那一行闪一下
+- **前提**：B0-设置。
+- **操作**：点 🔍，输入「网址」，点「滑动列 · 网址」（下面写「虚拟键盘 › 按键字符和快捷键」）那条；返回，再搜「滑动列」，点「滑动列」那条。
+- **预期**：第一条打开按键字符和快捷键，选中的是 **滑动列** 卡片，下面「网址」那一行闪一下（按下的样子，半秒多就恢复），不打开它的编辑框；第二条打开同一页，滑动列卡片闪一下。什么都没改。
+- **JVM**：没有（`SettingsPagesTest.everyTappableTextOnAHandPageIsSearched` 只查页上有字的都搜得到，不查点了打开哪一行）；设备上跑，同 ST-165。
+
+### ST-224 [P1] 键盘布局网页：滑动列页加一列，导入 App 后画出来
+- **前提**：同 ST-189（电脑浏览器打开键盘布局页；手机上 B0-设置）。
+- **操作**：**新建键盘布局**，**从内置键盘开始** 选 18 键，id 填 `my-k18-scroll`；在预览里点第一行的 `Q`，到 **滑动列** 页点 **加一列**，**类别** 选电话、**方向** 选横、**显示几项** 填 5；看预览；**文件 › 保存 .layout**，用文本编辑器看文件里的 `<meta>`；照 ST-189 导入手机，「现在就用在」点 **拼音**，到测试页看键盘，左右滑那一列、点一项。再新建一块，从 26 键开始，点第一行的 `Q`，看 **滑动列** 页。
+- **预期**：18 键 `Q` 的左边多了一列，横着露出 5 项电话那一类（`+ * # - (`），能左右滑；保存的文件写 `min-app="0.6.3"`；App 收下它，拼音打字时那一列在 `Q` 左边、横着露出 5 项，点一项打出它。26 键第一行分成两半，**加一列** 是灰的，并写着放不了的原因。
+- **JVM**：web/theme-maker 的 `layout-maker.test.mjs`（`滑动列: added where it can go, its options written, saved with min-app 0.6.3; 加一列 off where the app has none`）；App 一侧 `CustomKeyboardTest.aLetterLayoutsHorizontalColumnShowsTheFieldsListAndTypesIt`；网页到 App 的整条路在电脑浏览器和设备上手工跑。
+
+### ST-225 [P2] 数字键盘布局的滑动列是别的类别：完整的数字键盘缺 `-` 时提醒
+<!-- dev/design/063-number-pad-t9 -->
+- **前提**：B0-设置，没导入过布局；「下载」里有 `uat/fixtures/layouts/uat-number-nine-column.layout`（App 的数字键盘，`pads="full phone datetime"`，左边的滑动列写 `list="nine"`）。
+- **操作**：**外观 → 布局 → + → 导入布局文件** 选它，看确认框。
+- **预期**：确认框只有一条提醒「数字键盘缺 -：数字框里打不出来（比如金额的负号、小数点）」（九键那一类没有 `-`，`.` 有键）；电话框、日期框的数字键盘不提醒（那两种框里列换成电话、日期那一类）；照样能导入。
+- **JVM**：ime-core `LayoutImportTest.theUatsNumberBoardWithANineColumnIsToldItsFullPadLacksTheMinus`；规则见 keyboard-scene `ScrollCheckTest.aScrollColumnHoldsWhatAPadLacks`；设备上不跑。
+
+### ST-226 [P1] 升级到 0.6.3：每个输入法的键盘选单只留下正在用的导入布局
+<!-- dev/design/063-picker-opt-in -->
+- **前提**：装着 0.6.2，**外观 → 布局** 里有一个主题带的「uat-layouts · 主题 18 键」和自己导入的 `uat-qwerty-1.0.layout`；拼音选着主题 18 键，英文选着 uat-qwerty，双拼是 App 的全键盘。
+- **操作**：覆盖安装这一版，打开测试页点「普通文本」框；拼音、英文、双拼下各点 **⋯ → 键盘** 看列表；看 **外观 → 布局** 两张卡片下写的「用在：」。
+- **预期**：拼音的列表是 App 自带的加上「uat-layouts · 主题 18 键（自定义）」（打勾）；英文的是自带的加 uat-qwerty（打勾）；双拼只有自带的。主题 18 键的卡片写「用在：拼音」，uat-qwerty 的写「用在：英文」。各输入法正在用的键盘没变。
+- **JVM**：ime-core `OfferedLayoutsTest.anUpgradeKeepsEachInputMethodsCurrentOneAlone`（每个输入法只留正在用的那个，换回自带键盘的不留）、app `AppPrefsTest.theLayoutsOfferedAreEachInputMethodsCurrentOneTillAnyIsStored`（第一次启动写一次、直接启动时只读不写、存过的照旧）；0.6.2 装好再升级的那半发版时在设备上手动跑。
+
+### ST-227 [P1] 主题带的布局导入后不进键盘选单；用在… 勾上才有，取消就没有
+<!-- dev/design/063-picker-opt-in -->
+- **前提**：B0-设置，没导入过布局；「下载」里有带 `layouts/` 的主题（同 ST-72 的 `uat-layouts.theme`）。
+- **操作**：**主题 → 新增主题** 选它，**一起导入** 勾着，点 **导入**；回测试页用拼音点 **⋯ → 键盘** 看列表；到 **外观 → 布局** 点「uat-layouts · 主题 18 键」→ **用在…**，勾 **拼音**、点 **确定**，再看 ⋯ → 键盘；再点 **用在…**，取消 **拼音**、勾 **双拼**，点 **确定**，看拼音和双拼的 ⋯ → 键盘。
+- **预期**：导入后拼音的列表只有 App 自带的键盘，布局页的卡片下没有「用在：」。勾上拼音后列表里有「uat-layouts · 主题 18 键（自定义）」并打着勾（拼音换成了它），卡片写「用在：拼音」。第二次 **用在…** 里拼音勾着；取消拼音、勾双拼后，拼音换回 18 键、列表里没有它；双拼的列表里有它并打着勾，卡片写「用在：双拼」。
+- **JVM**：ime-core `OfferedLayoutsTest.useForTicksAndAnImportsQuestion`；app `ThemeImportLayoutsTest.aPacksLayoutsTakenAreOnForNoInputMethod`（导入后不给任何输入法打开，⋯ → 键盘 里没有；备份留下的同 id 也关掉）、`LayoutListFragmentTest.useForTurnsOnWhatIsTickedAndOffWhatIsNot`（勾上换上、取消换回改自的键盘）、`CustomKeyboardTest.anImportedLayoutIsOfferedOnlyWhereTurnedOn`；设备上手动看一遍（主题导入后的 ⋯ → 键盘）。
+
+### ST-228 [P1] 重新导入同一个布局：只问还没打开的输入法，「先不用」不动正在用的
+<!-- dev/design/063-picker-opt-in -->
+- **前提**：B0-设置；导入了 `uat-k18-swapped-1.0.layout`，「现在就用在…」只勾了 **拼音**。
+- **操作**：把同一个文件（或改了名字的新版）再导入一次，点 **导入**；问「现在就用在 双拼 上吗？」时点 **先不用**；看拼音、双拼的 ⋯ → 键盘。
+- **预期**：导入后提示「已更新 …，拼音 照常用它」；只问双拼（拼音已经打开），点 **先不用** 后拼音照样用它、列表里有它，双拼的列表里没有它，键盘不变。
+- **JVM**：ime-core `OfferedLayoutsTest.useForTicksAndAnImportsQuestion`；app `LayoutListFragmentTest.importedAgain`；设备上不跑。
+
+### ST-229 [P2] 恢复 0.6.2 的备份：每个输入法只留下备份里正在用的；恢复 0.6.3 的备份带着打开的
+<!-- dev/design/063-picker-opt-in -->
+- **前提**：B0-设置；一份 0.6.2 做的备份（拼音选着某个导入布局），一份这一版做的备份（某个导入布局用在… 给拼音、英文都打开，拼音正在用）。
+- **操作**：从 0.6.2 的备份恢复，看各输入法的 ⋯ → 键盘；再从这一版的备份恢复，看英文的 ⋯ → 键盘。
+- **预期**：0.6.2 的备份恢复后，拼音列表里只有备份里正在用的那个导入布局，别的输入法没有；这一版的备份恢复后英文的列表里也有它（打开的跟着备份走）。备份里打开着、但文件没能恢复的布局，之后再导入同一个 id 时不算打开。
+- **JVM**：`AppPrefsTest.theLayoutsOfferedAreEachInputMethodsCurrentOneTillAnyIsStored`（没存过时恢复后第一次启动按正在用的写）、`LayoutListFragmentTest.aFreshFileUnderAnIdLeftOnIsOnNowhere`；整个设置文件随备份走（`keyboard_layouts_offered` 和别的设置一样）；设备上手动，发版时跑。

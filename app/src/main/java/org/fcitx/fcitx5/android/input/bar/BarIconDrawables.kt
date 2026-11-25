@@ -10,35 +10,37 @@ import android.graphics.PorterDuffColorFilter
 import android.graphics.drawable.Drawable
 import android.widget.ImageView
 import androidx.annotation.ColorInt
+import androidx.annotation.DrawableRes
 import androidx.core.content.ContextCompat
 import org.fcitx.fcitx5.android.input.keyboard.canvas.PackIconDrawable
 import org.fcitx.fcitx5.android.input.keyboard.canvas.PackIcons
 import org.fcitx.fcitx5.android.scene.theme.Argb
+import org.fcitx.fcitx5.android.utils.appContext
+import splitties.dimensions.dp
 
-/**
- * A place of the bar's or a panel's icon ([BarIcons]) as drawn (061-toolbar-icons §2.4): the theme's of its name in
- * the place's icon colour (paths of no colour of their own), else the place's own image in it. The theme's is read on
- * [ThemeAssets][org.fcitx.fcitx5.android.data.theme.ThemeAssets]' thread ([PackIcons]): one the theme writes but not
- * read yet is nothing ([of] null) till [ready], never the app's image first and the theme's after (a flash). One whose
- * file is gone, broken or too long is the app's.
- */
+/** The theme's not read yet is nothing ([of] null) till [ready], never the app's first and the theme's after (a flash). */
 object BarIconDrawables {
 
-    /** [icon] in [tint], [px] square; null: the theme's not read yet, [ready] told on the main thread once it is. */
-    fun of(context: Context, icons: PackIcons, icon: BarIcons.Icon, @ColorInt tint: Int, px: Int, ready: () -> Unit): Drawable? {
-        val file = icons.file(icon.name) ?: return fallback(context, icon, tint)
-        val outline = icons.outline(file, ready)
+    /** Null: the theme's not read yet. */
+    fun of(context: Context, icons: PackIcons, icon: BarIcons.Icon, @ColorInt tint: Int, px: Int, ready: () -> Unit): Drawable? =
+        of(context, icons, icon.name, ToolbarButtonLooks.drawable(icon.fallback), tint, px, ready)
+
+    /** The theme's icon [name], else the app's [fallback]; null: the theme's not read yet. */
+    fun of(context: Context, icons: PackIcons, name: String, @DrawableRes fallback: Int, @ColorInt tint: Int, px: Int, ready: () -> Unit): Drawable? {
+        val file = icons.file(name) ?: return fallback(context, fallback, tint)
+        val side = decodeSide(context, px)
+        // a view keeps the drawable it is given: one lent at another size would stay
+        val own = icons.icon(file, px, px, ready, side, side)?.takeUnless { it is PackIcons.Raster && !it.exact }
+        val mask = icons.tintMask(file)
         return when {
-            outline != null -> PackIconDrawable(outline, Argb(tint), px, px)
+            // a picture's own colours as they are: the place's colour is for a mask or an outline
+            own != null -> PackIconDrawable(own, if (own is PackIcons.Raster && !mask) WHITE else Argb(tint), px, px, mask)
             icons.pending(file) -> null
-            else -> fallback(context, icon, tint)
+            else -> fallback(context, fallback, tint)
         }
     }
 
-    /**
-     * [view] showing [icon] in [tint]: the app's by its resource, tinted (SRC_IN) as such views ever were, where the theme
-     * has none; else [of], [px] square, [again] told once a file not read yet is.
-     */
+    /** The app's tinted (SRC_IN) as such views ever were where the theme has none. */
     fun show(view: ImageView, icons: PackIcons, icon: BarIcons.Icon, @ColorInt tint: Int, px: Int, again: () -> Unit) {
         if (!themed(icons, icon)) {
             view.setImageResource(ToolbarButtonLooks.drawable(icon.fallback))
@@ -49,22 +51,26 @@ object BarIconDrawables {
         view.setImageDrawable(of(view.context, icons, icon, tint, px, again))
     }
 
-    /** Whether the theme writes [icon]'s name: the app's image is never drawn for it then (but where its file fails). */
+    /** The app's image is never drawn for it then (but where its file fails). */
     fun themed(icons: PackIcons, icon: BarIcons.Icon): Boolean = icons.file(icon.name) != null
 
-    /**
-     * Whether [icon] is drawn as the theme's: its file read, or not yet (nothing drawn till it is). One gone, broken or too
-     * long draws the app's image, to be turned as the app's is (R26 F8310: a restored backup's pack is not held to the
-     * import's checks).
-     */
-    fun drawsOwn(icons: PackIcons, icon: BarIcons.Icon): Boolean =
-        icons.file(icon.name)?.let { icons.outline(it) != null || icons.pending(it) } == true
+    /** One gone, broken or too long draws the app's: a restored backup's pack is not held to the import's checks. */
+    fun drawsOwn(icons: PackIcons, icon: BarIcons.Icon): Boolean = icons.file(icon.name)?.let(icons::draws) == true
 
-    private fun fallback(context: Context, icon: BarIcons.Icon, @ColorInt tint: Int): Drawable =
-        ContextCompat.getDrawable(context, ToolbarButtonLooks.drawable(icon.fallback))!!.mutate().apply { setTint(tint) }
+    private fun fallback(context: Context, @DrawableRes res: Int, @ColorInt tint: Int): Drawable =
+        ContextCompat.getDrawable(context, res)!!.mutate().apply { setTint(tint) }
 
-    /** The theme's icons ahead, the bar's every one (the bar is made with the input view): told nothing, kept for its draw. */
+    /** The bar is made with the input view: told nothing, kept for its draw (a PNG's decoded once, at [decodeSide]). */
     fun readAhead(icons: PackIcons) {
-        for (icon in BarIcons.BAR) icons.file(icon.name)?.let { icons.outline(it) }
+        val side = decodeSide(appContext, 0)
+        for (icon in BarIcons.BAR) icons.file(icon.name)?.let { icons.icon(it, side, side) }
     }
+
+    /** One decode of a PNG for every bar place (a button before its size is set, a narrow cell), drawn smaller. */
+    fun decodeSide(context: Context, px: Int): Int = maxOf(px, context.dp(DECODE_DP))
+
+    // the largest a bar place draws (a button's default, the side and status icons)
+    private const val DECODE_DP = 24
+
+    private val WHITE = Argb(0xFFFFFFFF.toInt())
 }

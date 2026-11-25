@@ -6,25 +6,8 @@ package org.fcitx.fcitx5.android.engine.session
 
 import org.fcitx.fcitx5.android.engine.data.PinyinData
 import org.fcitx.fcitx5.android.engine.data.PinyinDataBuilder
-import org.fcitx.fcitx5.android.engine.pinyin.Syllables
 import java.nio.ByteBuffer
-
-internal fun syl(vararg s: String) = s.map { Syllables.id(it) }.toIntArray()
-
-/** A dictionary and model of [words]: each its text, its syllables apart by spaces, and its score (a text at two readings: its first's, one unigram). */
-internal fun pinyinDataOf(vararg words: Triple<String, String, Float>) = PinyinData.load(
-    ByteBuffer.wrap(
-        PinyinDataBuilder().unigram("<unk>", -7f, 0f)
-            .apply {
-                val texts = HashSet<String>()
-                words.forEach { (w, reading, score) ->
-                    if (texts.add(w)) unigram(w, score, 0f)
-                    entry(w, reading.split(' ').map(Syllables::id).toIntArray())
-                }
-            }
-            .build().toByteArray(),
-    ),
-)
+import org.fcitx.fcitx5.android.engine.data.syl
 
 /** The dictionary and model the pinyin session tests read. */
 internal fun sessionTestData() = PinyinData.load(
@@ -46,7 +29,6 @@ internal fun sessionTestData() = PinyinData.load(
             // 双拼 微软's ; typed as ing (xing) and after a whole syllable (lan)
             .unigram("星", -4f, 0f)
             .unigram("蓝", -4f, 0f)
-            // a word of the built-in phrases (PhraseBook.WORD_KEYS)
             .unigram("日期", -4f, 0f)
             .bigram("你", "好", -0.75f, 0f)
             .bigram("你好", "吗", -0.5f, 0f)

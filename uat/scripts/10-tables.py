@@ -3,7 +3,7 @@ follows its case's 前提/操作/预期."""
 import statistics
 import time
 
-from uat import (Blocked, add_im, block_candidate, case, check, script)
+from uat import (PKG, Blocked, add_im, block_candidate, case, check, gear, home, script)
 
 
 def word(c):
@@ -32,67 +32,230 @@ def tbl01(d):
     return f"「{t}」"
 
 
-case("TBL-02", needs="jvm:OtherInputMethodsUatTest.wubiFourCodesWithOneCharacterCommitIt")(lambda d: None)
+def offer(d, want, note):
+    """the notice strip's offer after the pause: its words, shot"""
+    s = d.wait(lambda x: x if x.find(text="记住：", where="all") else None, timeout=5, step=0.2,
+               what="提示条「记住：」")
+    d.shot("full", note)
+    offered = [n.text for n in s.nodes if n.pkg == PKG and n.text and n.text != "记住：" and " " in n.text]
+    check(want in offered, f"提示条给出 {offered}，没有「{want}」")
+    return offered
 
 
-case("TBL-03", needs="jvm:TablesUatTest.fullCodeThenAnotherKeyCommitsTheFirst")(lambda d: None)
+def remember(d, text):
+    """tap the offered word: kept, the strip says so with 撤销"""
+    n = d.screen().find(text=text, where="all")
+    if not n:
+        raise Blocked(f"提示条上没有「{text}」")
+    d.tap(n.c, 0.4)
+    return d.wait(lambda x: x if x.find(contains="记住了", where="all") else None, timeout=3, step=0.2,
+                  what="提示条「记住了」")
 
 
-case("TBL-04", needs="jvm:TablesUatTest.autoCommitOff")(lambda d: None)
+def wang_xiao_ming(d):
+    d.type("ig ih je ")
+    d.expect_field("汪小明")
 
 
-case("TBL-05", needs="jvm:TablesUatTest.anEmptyCodeIsDroppedByTheNextKey")(lambda d: None)
+@case("TBL-11", base="B0-五笔", mutates="learn", clean=True)
+def tbl11(d):
+    wang_xiao_ming(d)
+    offered = offer(d, "汪小明 iije", "逐字打出「汪小明」停一下：提示条「记住：汪小明 iije」")
+    check(not any(o.startswith("小明") for o in offered), f"给出了半个词：{offered}")
+    said = [t for t in remember(d, "汪小明 iije").texts(where="all") if "记住了" in t]
+    d.shot("full", "点了以后：记住了『汪小明』，带撤销")
+    check(any("五笔" in t and "iije" in t for t in said), f"记住后的提示 {said}")
+    d.expect_field("汪小明")
+    d.type(",iije")
+    # not first till picked again (TBL-11d): past the bar's few, in the list
+    c = words(d.all_cands())
+    check("汪小明" in c, f"iije 的候选 {c[:12]}")
+    return f"给出 {offered}；{said}；iije 里第 {c.index('汪小明') + 1} 个"
 
 
-case("TBL-06", needs="jvm:TablesUatTest.codeHintsByDefault")(lambda d: None)
+@case("TBL-11c", base="B0-五笔", mutates="learn", clean=True)
+def tbl11c(d):
+    wang_xiao_ming(d)
+    offer(d, "汪小明 iije", "给出「汪小明」")
+    s = remember(d, "汪小明 iije")
+    undo = s.find(text="撤销", where="all")
+    check(undo is not None, f"记住后的提示没有撤销：{s.texts(where='all')[:8]}")
+    d.tap(undo.c, 0.8)
+    d.expect_field("汪小明")
+    d.clear()
+    d.type("iije")
+    c = words(d.cands())
+    check("汪小明" not in c, f"撤销后 iije 还有「汪小明」：{c[:6]}")
+    d.clear()
+    d.type("qgyi")
+    d.cands(want="鲸")
+    d.pick("鲸")
+    d.type("lfqv")
+    if d.field_text() != "鲸园":
+        d.space()
+    d.expect_field("鲸园")
+    offer(d, "鲸园 qglf", "给出「鲸园 qglf」")
+    remember(d, "鲸园 qglf")
+    d.clear()
+    d.type("qglf")
+    kept = words(d.cands(want="鲸园"))
+    check("鲸园" in kept, f"记住后 qglf 的候选 {kept[:6]}")
+    menu = d.long_pick("鲸园")
+    d.shot("full", "长按记住的「鲸园」：有删除")
+    check("删除" in menu, f"长按菜单 {[t for t in menu if len(t) < 10][:12]}")
+    d.tap_text("删除", where="all", scroll=False, after=0.3)
+    s = d.wait(lambda x: x if x.find(text="撤销", where="all") else None, timeout=3, step=0.2, what="删除后的撤销")
+    deleted = [t for t in s.texts(where="all") if "删除" in t]
+    d.shot("full", "删除后的提示条，带撤销")
+    d.tap(s.find(text="撤销", where="all").c, 0.8)
+    d.clear()
+    d.type("qglf")
+    again = words(d.cands(want="鲸园"))
+    check("鲸园" in again, f"撤销删除后 qglf 的候选 {again[:6]}")
+    return f"撤销后 iije {c[:3]}；删除提示 {deleted}；撤销后 qglf {again[:4]}"
 
 
-case("TBL-07", needs="jvm:TablesUatTest.codeHintsOff")(lambda d: None)
+@case("TBL-11g", base="B0-五笔", mutates="learn", clean=True)
+def tbl11g(d):
+    d.step("删回去")
+    # no pause: an offer seen in the field would not be given again in the second part
+    d.type("ig ih je " * 3)
+    d.bksp(7)
+    d.type("je ")
+    d.expect_field("汪小明", msg="九个字删回两个再打「明」，框里「{got}」")
+    time.sleep(2.0)
+    s = d.screen()
+    whole = [t for t in s.texts(where="all") if t.startswith("汪小明 ")]
+    d.shot("full", "删回去以后：不给「汪小明」")
+    check(not whole, f"删回去以后提示条给了 {whole}")
+    d.step("九个字")
+    d.clear()
+    d.type("ig ih je " * 3)
+    d.expect_field("汪小明" * 3)
+    offered = offer(d, "汪小明 iije", "打满九个字停下：只给最后的「汪小明 iije」")
+    check(all(len(word(o)) <= 3 for o in offered), f"九个字给了 {offered}")
+    return f"删回去以后不给汪小明；九个字给出 {offered}"
 
 
-case("TBL-08", needs="jvm:TablesUatTest.wubiZLooksUpByPinyin")(lambda d: None)
+@case("TBL-11h", base="B0-五笔", mutates="learn", clean=True)
+def tbl11h(d):
+    wang_xiao_ming(d)
+    offer(d, "汪小明 iije", "给出「汪小明」")
+    remember(d, "汪小明 iije")
+    d.switch_im("拼音")
+    s = d.screen()
+    undo = s.find(text="撤销", where="all")
+    d.shot("full", "切到拼音后：记住了的提示条还在，带撤销")
+    check(undo is not None, f"切到拼音后提示条没有撤销：{s.texts(where='all')[:8]}")
+    d.tap(undo.c, 0.8)
+    d.expect_field("汪小明")
+    d.switch_im("五笔")
+    d.clear()
+    d.type("iije")
+    c = words(d.cands())
+    check("汪小明" not in c, f"切到拼音撤销后回五笔，iije 还有「汪小明」：{c[:6]}")
+    return f"切到拼音撤销，回五笔 iije {c[:3]}"
 
 
-case("TBL-09", needs="jvm:TablesUatTest.wubiZIsAWildcard")(lambda d: None)
+@case("TBL-11i", base="B0-设置", mutates=True, clean=True, visual=True)
+def tbl11i(d):
+    add_im(d, "五笔")
+    d.open_settings()
+    d.goto("通用输入")
+    d.switch("空格上屏联想词", True)
+    on_page(d, "五笔")
+
+    def space_takes(before, note):
+        time.sleep(1.0)
+        shown = words(d.cands())
+        d.shot("kb", note)
+        if not shown:
+            raise Blocked(f"「{before}」后没有联想")
+        d.space()
+        want = before + shown[0]
+        d.expect_field(want, msg=f"空格后框里「{{got}}」，不是「{want}」（联想 {shown[:3]}）")
+        return want
+
+    d.step("记住以后")
+    wang_xiao_ming(d)
+    offer(d, "汪小明 iije", "给出「汪小明」")
+    remember(d, "汪小明 iije")
+    kept = space_takes("汪小明", "点了记住：第一个联想词画成首选的样子")
+    d.step("撤销以后")
+    d.clear()
+    d.type("qgyi")
+    d.cands(want="鲸")
+    d.pick("鲸")
+    d.type("lfqv")
+    if d.field_text() != "鲸园":
+        d.space()
+    d.expect_field("鲸园")
+    offer(d, "鲸园 qglf", "给出「鲸园 qglf」")
+    s = remember(d, "鲸园 qglf")
+    undo = s.find(text="撤销", where="all")
+    check(undo is not None, f"记住后的提示没有撤销：{s.texts(where='all')[:8]}")
+    d.tap(undo.c, 0.8)
+    d.expect_field("鲸园")
+    undone = space_takes("鲸园", "点了撤销：第一个联想词画成首选的样子")
+    return f"记住后空格「{kept}」，撤销后空格「{undone}」"
 
 
-case("TBL-10", needs="jvm:OtherInputMethodsUatTest.wubiAWord")(lambda d: None)
+@case("TBL-11d", base="B0-设置", mutates=True)
+def tbl11d(d):
+    add_im(d, "五笔")
+    gear(d, "五笔")
+    d.switch("调频", True)
+    on_page(d, "五笔")
+    wang_xiao_ming(d)
+    offer(d, "汪小明 iije", "给出「汪小明」")
+    remember(d, "汪小明 iije")
+    d.type(",iije")
+    once = words(d.all_cands())
+    check("汪小明" in once and once[0] != "汪小明", f"记住后第一次 iije {once[:6]}")
+    d.pick("汪小明")
+    d.type(",iije")
+    twice = words(d.cands(want="汪小明"))
+    d.shot("kb", "记住后再选一次：iije 第一个是「汪小明」")
+    check(twice[0] == "汪小明", f"再选一次后 iije {twice[:4]}")
+    return f"iije 记住后 {once[:3]}，再选一次后 {twice[:3]}"
 
 
-case("TBL-11", needs="jvm:TablesUatTest.aCharacterAtATimeMakesNoWord")(lambda d: None)
+@case("TBL-11e", base="B0-五笔拼音", mutates="learn", clean=True)
+def tbl11e(d):
+    d.type("qgyi")
+    d.cands(want="鲸")
+    d.pick("鲸")
+    d.type("yuan")
+    d.cands(want="园")
+    d.pick("园")
+    d.expect_field("鲸园")
+    offered = offer(d, "鲸园 qglf", "五笔拼音：拼音打出的「园」也算，提示条「记住：鲸园 qglf」")
+    return f"给出 {offered}"
 
 
-case("TBL-12", needs="jvm:TablesSettingsUatTest.aPinyinWordOnATablesOnlyCodeSaysWhichWord、TablesUatTest.aPinyinWordTakesNoTablesOnlyCode")(lambda d: None)
+@case("TBL-11f", base="B0-二笔", mutates="learn", clean=True)
+def tbl11f(d):
+    d.type("wch xd ms ")
+    d.expect_field("汪小明")
+    offered = offer(d, "汪小明 wcxm", "二笔：提示条「记住：汪小明 wcxm」")
+    return f"给出 {offered}"
 
 
-case("TBL-14", needs="jvm:TablesUatTest.noOrderByUseOnANewInstall")(lambda d: None)
-
-
-case("TBL-15", needs="jvm:TablesUatTest.orderByUseOnPinyinUntouchedThenTheTablesOrderBack")(lambda d: None)
-
-
-case("TBL-16", needs="jvm:TablesUatTest.aTablesCommitPredicts")(lambda d: None)
-
-
-case("TBL-18", needs="jvm:TablesUatTest.erbiBracketLooksUpByPinyin")(lambda d: None)
-
-
-case("TBL-19", needs="jvm:OtherInputMethodsUatTest.cangjie")(lambda d: None)
-
-
-case("TBL-45", needs="jvm:TablesUatTest.cangjieAndErbiStarIsAWildcard")(lambda d: None)
-
-
-case("TBL-21", needs="jvm:TablesUatTest.ziranmaTable")(lambda d: None)
-
-
-case("TBL-22", needs="jvm:OtherInputMethodsUatTest.wubiAndPinyinMixed")(lambda d: None)
-
-
-case("TBL-24", needs="jvm:HostCasesUatTest.aCodeMistypedInTheMiddleIsFixedWhereTheRowIsTapped")(lambda d: None)
-
-
-case("TBL-12b", needs="jvm:TablesUatTest.importedWordsAfterTheTablesOwnNotOnItsOnlyCode")(lambda d: None)
+@case("TBL-47a", base="B0-五笔", mutates="learn", visual=True)
+def tbl47a(d):
+    k = d.keys(refresh=True)
+    check("shift" in k, f"五笔键盘没有 ⇧：{sorted(k)[:40]}")
+    check("拼" not in k, "五笔键盘上还有「拼」")
+    d.press("shift", after=0.4)
+    d.shot("kb", "五笔点 ⇧：字母键上是大写字母")
+    d.type("a")
+    d.expect_field("A")
+    d.type("ig")
+    check("shift" in d.keys(refresh=True), "打着编码时 ⇧ 不见了")
+    d.press("shift", after=0.4)
+    d.type("a")
+    got = d.expect_field("A汪A")
+    return f"框里「{got}」"
 
 
 @case("TBL-12c", base="B0-设置", mutates=True, heavy=True,
@@ -121,9 +284,7 @@ def tbl12c(d):
         time.sleep(0.4)
         more.append(words(d.candidates())[:3])
         d.clear()
-    # coding frost for 五笔 runs on past the 30 s above and holds ~100 MB live while it does (read
-    # after a GC); the case is about what stays, so wait for it to finish before the readings
-    # two low readings in a row: one alone can fall between two batches of the coding
+    # coding frost for 五笔 runs past the wait above: wait for two low readings in a row before the readings
     peak, low = 0, 0
     for _ in range(30):
         h = words13.java_heap(d)
@@ -143,43 +304,7 @@ def tbl12c(d):
     return f"jbys：{c[:5]}；gg、wq {more}；Java 堆 {base} → {heap} KB（编码时最高 {peak} KB）"
 
 
-case("TBL-27", needs="jvm:TablesUatTest.wubiEmoji")(lambda d: None)
-
-
-case("TBL-28", needs="jvm:TablesUatTest.everyTableHasEmojiAfterASwitchAndARestart")(lambda d: None)
-
-
-case("TBL-33", needs="release:要从 v0.3.0 升级（装旧版、学过词，不卸载装这一版）；发版时手动跑")(lambda d: None)
-
-
 case("TBL-43", needs="release:要 v0.4.0 装好学过词后导出的 .zip，再重置装这一版恢复；发版时手动跑")(lambda d: None)
-
-
-case("TBL-12d", needs="release:v0.3.2 正式版里并入雾凇拼音、加五笔，再覆盖安装这一版正式版，签名要一致")(lambda d: None)
-
-
-case("TBL-36", needs="jvm:TablesUatTest.aBlockInATableIsForThatCodeListedAndRestored")(lambda d: None)
-
-
-case("TBL-46", needs="jvm:TablesUatTest.cangjiesCodeIsShownInItsRoots")(lambda d: None)
-
-
-case("TBL-47", needs="jvm:TablesUatTest.theLookUpKeyLooksUpByPinyinTillPressedAgain")(lambda d: None)
-
-
-case("TBL-48", needs="jvm:TablesKeysUatTest.returnSaysConfirmWhileATableHasACode")(lambda d: None)
-
-
-case("TBL-49", needs="jvm:TablesKeysUatTest.wubiKeysShowNamesOrAllRoots")(lambda d: None)
-
-
-case("TBL-50", needs="jvm:TablesKeysUatTest.erbisSemicolonHasAKey")(lambda d: None)
-
-
-case("TBL-51", needs="jvm:TablesKeysUatTest.wubisAllRootsAreItsNamesAtCompact、TableRootsTest.atCompactAllTheRootsAreShownAsTheirNames")(lambda d: None)
-case("TBL-54", needs="jvm:TableSlipUatTest.cangjiesEmptyCodeIsReadAsTheKeyTheTapLeansTo、TableSlipUatTest.cangjiesLoneCodeReadFromASlipWaitsForTheNextKey、TableSlipTest.aKeyThatMakesAnEmptyCodeIsReadAsTheOneItsTapLeansTo、TableSlipTest.theNearestKeyThatLeadsOnIsTaken、TableSlipTest.aCodeReadFromASlipWithOneCandidateIsCommittedByAKeyThatCannotGoOn、TableSlipTest.aCodeReadFromASlipWaitsOnlyWhereItWouldHaveCommittedItself、TableSlipTest.theKeyAfterAWaitingCodeIsReadAsAToppingKeyIs、TableSlipTest.aWaitingCodeIsCommittedByPunctuationASpaceOrASelectionKeyAsAnyCode、TableSlipTest.everyKeyReadKeepsItsMarkWhenAnotherGoes、TableSlipTest.aKeyPutInMidCodeIsNeverReadAndMovesTheMarks、TableSlipTest.noKeyIsReadAsASelectionKeyNorAnEndKey、TableSlipTest.erbiNeverTopsAndItsPinyinKeyIsNeverRead、EnginesTableSlipTest.aCodeReadFromASlipWaitsThenTheNextKeyThatCannotGoOnCommitsIt")(lambda d: None)
-case("TBL-55", needs="jvm:TableSlipUatTest.wubisToppingKeyIsReadOnlyAtTheEdge、TableSlipTest.aKeyAfterAWholeCodeIsReadOnlyAtTheEdge、TableSlipTest.aKeyIsNeverReadAsOneLeadingToTheTextItWouldCommit、TableSlipTest.aWaitingCodeIsCommittedOnceWhereTheTableTops、TableSlipTest.ziranmaTopsAsWubiDoes、TableSlipTest.wubiPinyinReadsNoKeyAsOneLeadingToPinyinAlone、TableSlipTest.aKeyAfterAWholeCodeIsReadOnlyForACodeTheWordModelWeighsAsMuch、TableSlipTest.aCodeWithAKeyReadAsItsNeighbourNeverCommitsItself、TableSlipTest.aCodeWithEntriesIsNeverChanged、TableSlipTest.aCodesFirstKeyIsNeverRead、TableSlipTest.aFullCodesNextKeyStartsTheNextCode、TableSlipTest.theWildcardIsNeverReadAsAnotherKey")(lambda d: None)
-case("TBL-56", needs="jvm:TableSlipUatTest.slipsOffLeaveTheEmptyCodeToBeDropped、EnginesTableSlipTest.aSlipIntoAnEmptyCodeIsReadAsTheKeyMeantUnlessSlipsAreOff")(lambda d: None)
 
 
 @case("TBL-52", base="B0-五笔", mutates=True)   # 你 blocked stays blocked
@@ -198,4 +323,3 @@ def tbl52(d):
     d.clear()
     check("你" not in again, f"屏蔽后 z n i 还有「你」：{again[:6]}")
     return f"屏蔽前 {c[:4]}，屏蔽后 {again[:4]}（设置里恢复由 JVM 管）"
-case("TBL-53", needs="jvm:EnginesWordCardTest、WordCardUatTest.theExamplesReadAsTheDesignHasThem")(lambda d: None)

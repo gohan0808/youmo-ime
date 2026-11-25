@@ -17,14 +17,16 @@ class CandidateViewHolder(val ui: CandidateItemUi) : RecyclerView.ViewHolder(ui.
     var candidate: CandidateWord = CandidateWord.Empty
         private set
 
-    fun update(newIndex: Int, newCandidate: CandidateWord) {
-        // a holder bound again at another index draws again where that changes its look (the first's own,
-        // its number: the theme's, T6a), not only its candidate
-        val moved = (idx == 0) != (newIndex == 0) || ui.bar.labelStyle != null && idx != newIndex
+    private var first = false
+
+    fun update(newIndex: Int, newCandidate: CandidateWord, first: Boolean = newIndex == 0) {
+        // a holder bound again at another index draws again where that changes its look, not only its candidate
+        val moved = this.first != first || ui.bar.labelStyle != null && idx != newIndex
         idx = newIndex
+        this.first = first
         if (candidate != newCandidate || moved) {
             candidate = newCandidate
-            ui.updateCandidate(newCandidate, newIndex)
+            ui.updateCandidate(newCandidate, newIndex, first)
         }
     }
 
@@ -32,10 +34,7 @@ class CandidateViewHolder(val ui: CandidateItemUi) : RecyclerView.ViewHolder(ui.
         update(-1, CandidateWord.Empty)
     }
 
-    /**
-     * The pick of the candidate shown now, for a tap: read on the tap, as the holder may be bound
-     * to another candidate before the job runs.
-     */
+    /** Read on the tap, as the holder may be bound to another candidate before the job runs. */
     fun pick(): suspend CoroutineScope.(HostApi) -> Unit {
         val index = idx
         val text = candidate.text

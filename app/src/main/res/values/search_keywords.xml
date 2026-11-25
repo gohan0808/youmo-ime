@@ -10,6 +10,11 @@
     <string-array name="kw_stroke_singles">
         <item>stroke filter</item>
     </string-array>
+    <string-array name="kw_shuangpin_keys_shown">
+        <item>preedit</item>
+        <item>composition</item>
+        <item>Shuangpin keys</item>
+    </string-array>
     <string-array name="kw_glide">
         <item>swipe typing</item>
         <item>gesture typing</item>
@@ -44,6 +49,7 @@
         <item>background</item>
     </string-array>
     <string-array name="kw_clipboard">
+        <item>favorites</item>
         <item>copy history</item>
     </string-array>
     <string-array name="kw_prediction">
@@ -53,6 +59,10 @@
     <string-array name="kw_trad_simp">
         <item>traditional</item>
         <item>simplified</item>
+    </string-array>
+    <string-array name="kw_switch_input_method">
+        <item>globe</item>
+        <item>language</item>
     </string-array>
     <string-array name="kw_nine_keys">
         <item>T9</item>
@@ -112,6 +122,9 @@
         <item>battery</item>
         <item>slow</item>
         <item>lag</item>
+        <item>processor</item>
+        <item>CPU</item>
+        <item>auto</item>
     </string-array>
     <string-array name="kw_code_row">
         <item>composing</item>
@@ -151,5 +164,10 @@
     <string-array name="kw_hardware_shortcuts">
         <item>Ctrl+Space</item>
         <item>switch shortcut</item>
+    </string-array>
+    <string-array name="kw_scroll_lists">
+        <item>scroll list</item>
+        <item>symbol column</item>
+        <item>left column</item>
     </string-array>
 </resources>

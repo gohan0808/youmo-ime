@@ -66,8 +66,8 @@ class SkinConverterTest {
         assertEquals("#102030", hexOf(t.colors["keyText"]))
         assertEquals(mapOf(SoundKey.LETTER to "sound-letter.wav"), t.sounds)
         assertEquals(
-            setOf(SkinNote.LAYOUT, SkinNote.DECORATION, SkinNote.ANIMATION, SkinNote.LETTER_IMAGES),
-            c.notes,
+            setOf(SkinNote.LAYOUT_EXTRA, SkinNote.DECORATION, SkinNote.ANIMATION, SkinNote.LETTER_IMAGES),
+            c.notes.keys,
         )
         // the theme's file names are its own
         assertEquals(c.files.map { it.name }.toSet(), c.files.map { it.name }.filter { NAME.matches(it) }.toSet())
@@ -81,7 +81,12 @@ class SkinConverterTest {
         assertContains(c.themeXml, """<colors variant="dark">""")
         assertContains(c.themeXml, """select="@dark key" fill="image(d-key-n.png""")
         assertContains(c.themeXml, """select="@dark keyboard" fill="@keyboard"""")
-        assertTrue(SkinNote.DARK_PICTURE in c.notes)
+        // its own dark board drawn in the dark: a 0.6.3 theme
+        assertFalse(SkinNote.DARK_PICTURE in c.notes)
+        assertContains(c.themeXml, """<picture variant="dark" src="board-dark.png">""")
+        assertContains(c.themeXml, """select="@dark keyboard" fill="picture"""")
+        assertContains(c.themeXml, """min-app="0.6.3"""")
+        assertNotNull(t.darkPicture)
         assertNotNull(c.file("d-key-n.png"))
         val darkKey = t.darkColors?.get("key")
         assertEquals("#333333", hexOf(darkKey))
@@ -168,7 +173,8 @@ class SkinConverterTest {
         // three seconds of 48 kHz stereo: cut to one, mono, halved till it is within 100 KB
         val space = (c.file("sound-space.wav") as SkinOutput.Bytes).bytes
         assertTrue(space.size <= 100 * 1024)
-        assertEquals(setOf(SkinNote.TEXT_SIZE, SkinNote.DARK_PICTURE), c.notes)
+        assertEquals(setOf(SkinNote.TEXT_SIZE), c.notes.keys)
+        assertNotNull(t.darkPicture)
         assertEquals("preview.png", t.meta?.preview)
     }
 
@@ -194,7 +200,9 @@ class SkinConverterTest {
         files[r + "keys.ini"] = text("[Key_A]\nFG_IMAGES=Fg_A\n[Fg_A]\nNORMAL=a.png\n")
         val c = convert(files)
         assertEquals("#00ff00", hexOf(read(c).colors["keyText"]))
-        assertTrue(SkinNote.LETTER_IMAGES in c.notes)
+        // a 26-key letter's picture is a sticker now: nothing said of it
+        assertFalse(SkinNote.LETTER_IMAGES in c.notes)
+        assertContains(c.themeXml, "sticker=\"st-a.png\"")
     }
 
     @Test

@@ -5,53 +5,49 @@
 package org.fcitx.fcitx5.android.input.voice
 
 /**
- * Tap to talk, the bar's microphone (060-voice-tap-to-talk.md, the user's decisions 2026-11-06):
- * tapped, it listens on with no finger held, a mask over the keys, till it is stopped. What each
- * press or event does to it.
- *
- * Stopping keeps the microphone on for the tail ([VoiceCaptureEnd.tail], as a lift), then types
- * what is left; pressed again meanwhile, the tail ends at once (as a press after a lift, VO-25).
- * No × (the user's decision 2026-11-07): what is not wanted is deleted after. The keyboard hidden stops it as a tap does, what is left typed
- * straight into the field (still its, its connection still good) once recognized. Another field
- * types what was heard so far at once, into the field it was said in: its connection is about to go.
- * To send what was said: stop it, then the keyboard's Enter (no Enter on the mask: the user's
- * decision 2026-11-06).
+ * Tap to talk: listens with no finger held, a mask over the keys, till stopped. Stopping keeps the microphone on for
+ * the tail, then types what is left; a press meanwhile ends the tail. Hidden: stopped, the rest typed straight into the
+ * field. Another field: what was heard so far typed at once (its connection is about to go).
  */
 class VoiceTap {
 
     enum class Press {
-        /** the bar's microphone again */
         MIC,
 
-        /** anywhere on the mask */
         MASK,
 
-        /** a press off the mask (the bar's other buttons, the candidates): it then acts as usual */
+        /** Off the mask (the bar's other buttons, the candidates): it then acts as usual. */
         OUTSIDE,
 
-        /** [QUIET_MS] with nothing new heard */
+        /** [QUIET_MS] with nothing new heard. */
         QUIET,
 
-        /** the keyboard hidden, the field kept */
+        /** The field kept. */
         HIDDEN,
 
-        /** another field, or the keyboard's view made anew */
+        /** Or the keyboard's view made anew. */
         INPUT_ENDED,
+
+        /** Another app took the sound (a call ringing, an alarm): what comes next is not speech. */
+        INTERRUPTED,
     }
 
     enum class Act {
         NONE,
 
-        /** the microphone closed a tail from now; what is left typed once recognized */
+        /** The microphone closed a tail from now; what is left typed once recognized. */
         STOP,
 
-        /** stopping already: the tail ends now */
+        /** Stopping already: the tail ends now. */
         CUT,
 
-        /** the keyboard hidden: stopped if not yet, what is left typed straight into the field, not through the engine */
+        /** Stopped with no tail; what was said typed once recognized. */
+        STOP_NOW,
+
+        /** Stopped if not yet, what is left typed straight into the field, not through the engine. */
         HIDE,
 
-        /** what was heard so far typed at once, the rest not waited for */
+        /** The rest not waited for. */
         TYPE_NOW,
     }
 
@@ -60,13 +56,13 @@ class VoiceTap {
     var state = State.LISTENING
         private set
 
-    /** What [press] does now. */
     fun press(press: Press): Act {
         val act = when (state) {
             State.OVER -> Act.NONE
             State.LISTENING -> when (press) {
                 Press.INPUT_ENDED -> Act.TYPE_NOW
                 Press.HIDDEN -> Act.HIDE
+                Press.INTERRUPTED -> Act.STOP_NOW
                 else -> Act.STOP
             }
             State.STOPPING -> when (press) {
@@ -77,20 +73,20 @@ class VoiceTap {
             }
         }
         when (act) {
-            Act.STOP, Act.HIDE -> state = State.STOPPING
+            Act.STOP, Act.STOP_NOW, Act.HIDE -> state = State.STOPPING
             Act.TYPE_NOW -> state = State.OVER
             Act.NONE, Act.CUT -> {}
         }
         return act
     }
 
-    /** The session ended on its own: typed, nothing heard, failed or given up. */
+    /** Typed, nothing heard, failed or given up. */
     fun ended() {
         state = State.OVER
     }
 
     companion object {
-        /** how long nothing new heard stops it (the user's 60 s): a talk forgotten does not listen on for good */
+        /** A forgotten talk does not listen on for good. */
         const val QUIET_MS = 60_000L
     }
 }

@@ -5,6 +5,7 @@
 package org.fcitx.fcitx5.android.input.popup
 
 import org.fcitx.fcitx5.android.Uat
+import org.fcitx.fcitx5.android.assertRows
 import org.fcitx.fcitx5.android.input.keys.ItemMark
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -27,7 +28,7 @@ class PopupEditorTest {
         assertEquals(-1, e.selected)
     }
 
-    // the key's own letters and digit as any item (060-row-unlock): moved, deleted, made the first
+    // the key's own letters and digit as any item: moved, deleted, made the first
     @Test
     fun aRowItemMovesDeletesAndIsMadeTheFirst() {
         val e = editor()
@@ -43,6 +44,43 @@ class PopupEditorTest {
         e.delete()
         assertEquals(listOf("1", "w", "q", "!", "@", "#"), e.items)
         assertEquals(0, e.selected)
+    }
+
+    @Test
+    fun aDraggedItemGoesWhereItIsDropped() = assertRows(
+        "another item dragged past the selected one: the selection stays on its item" to {
+            val e = editor().apply { tap(4) }
+            e.move(6, 0)
+            assertEquals(listOf("#", "Q", "1", "q", "w", "!", "@"), e.items)
+            assertEquals(5, e.selected)
+        },
+        "the selected item dragged: the selection goes with it" to {
+            val e = editor().apply { tap(4) }
+            e.move(4, 6)
+            assertEquals(listOf("Q", "1", "q", "w", "@", "#", "!"), e.items)
+            assertEquals(6, e.selected)
+        },
+        "nothing selected stays so" to {
+            val e = editor()
+            e.move(1, 2)
+            assertEquals(-1, e.selected)
+        },
+        "a drop out of the list moves nothing" to {
+            val e = editor().apply { tap(4) }
+            e.move(0, 7)
+            e.move(-1, 0)
+            assertEquals(editor().items, e.items)
+            assertEquals(4, e.selected)
+        },
+    )
+
+    @Test
+    fun aLongerListTakesItsOwnMost() {
+        val e = PopupEditor(emptyList(), null, max = 24)
+        assertTrue(e.add((1..24).joinToString(" ")))
+        assertEquals(24, e.items.size)
+        assertFalse(e.add("x"))
+        assertFalse(PopupEditor(emptyList(), null).add((1..17).joinToString(" ")))
     }
 
     @Test
@@ -112,7 +150,7 @@ class PopupEditorTest {
         assertEquals(listOf("1", "a"), PopupEditor(listOf("1", "a", "1"), null).items)
     }
 
-    // 061-no-cn-punct §2.1: an English mark a Chinese table converts, the user's table's keys too
+    // an English mark a Chinese table converts, the user's table's keys too
     @Test
     fun whatCanBeKeptAsIs() {
         val keys = setOf(",", ".", "@")
@@ -155,7 +193,7 @@ class PopupEditorTest {
         assertEquals(mapOf("\$day" to ItemMark.Variables), e.marks)
     }
 
-    // 061-text-variables §2.5, S3: the field one item, blanks round it gone, a line break a space, 64 at most
+    // the field one item, blanks round it gone, a line break a space, 64 at most
     @Test
     fun anItemOfVariablesAdded() {
         val e = PopupEditor(listOf("a"), "a")
@@ -165,14 +203,13 @@ class PopupEditorTest {
         e.add("x".repeat(70), ItemMark.Variables)
         assertEquals("x".repeat(64), e.items.last())
         assertEquals(ItemMark.Variables, e.marks["x".repeat(64)])
-        // nothing but blanks: nothing added, and true, as false is only "some did not fit" (add's KDoc): nothing was
-        // turned away for want of room, so the box is not told the list is full (R26 F8410)
+        // nothing but blanks: nothing added, and true (false only means "some did not fit"), so the box is not told it is full
         val before = e.items.toList()
         assertTrue(e.add("  ", ItemMark.Variables))
         assertEquals(before, e.items)
     }
 
-    // 061-no-cn-punct Q3: the marks of them that can have it, the others added as ever
+    // the marks of them that can have it, the others added as ever
     @Test
     fun itemsAddedAsIs() {
         val e = PopupEditor(emptyList(), null)

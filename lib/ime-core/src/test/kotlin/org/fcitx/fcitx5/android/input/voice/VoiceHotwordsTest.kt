@@ -49,13 +49,24 @@ class VoiceHotwordsTest {
         )
         assertEquals(VoiceHotwords.Words("幽 默 :5.0/佛 系", "尬 聊/内 卷"), VoiceHotwords.ofUser(words))
         assertEquals(VoiceHotwords.Words.NONE, VoiceHotwords.ofUser(emptyList()))
-        // U-93 off: nothing of theirs listened for, the blocked never heard all the same; so too for words
-        // read with the switch on and handed to a listener once it is off
+        // habits off: nothing of theirs listened for, the blocked never heard; so too words read before it went off
         assertEquals(VoiceHotwords.Words("", "尬 聊/内 卷"), VoiceHotwords.ofUser(words).withHabits(false))
         assertEquals(VoiceHotwords.ofUser(words), VoiceHotwords.ofUser(words).withHabits(true))
     }
 
-    // 生僻字屏蔽 (design §5.3): the engine's answer for the words and the recognizer's characters
+    // 记住 in a table keeps the word to the table: the code is no reading, and voice uses none of them
+    @Test
+    fun aWordATableRememberedIsNoHotword() {
+        val words = listOf(
+            UserWord("经验", "xcgw", Kind.LEARNED, table = "wbx"),
+            UserWord("幽默", "xcgw", Kind.LEARNED, table = "wbx"),
+            UserWord("幽默", "you mo", Kind.LEARNED, 2f),
+        )
+        assertEquals("pinyin's own word of the same text still listened for", VoiceHotwords.Words("幽 默", ""), VoiceHotwords.ofUser(words))
+        assertEquals(VoiceHotwords.Words.NONE, VoiceHotwords.ofUser(words.take(1)))
+    }
+
+    // 生僻字屏蔽: the engine's answer for the words and the recognizer's characters
     @Test
     fun aWordWithACharacterHeldBackIsNoHotwordAndTheCharactersAreNeverCompleted() {
         val words = listOf(
@@ -92,7 +103,7 @@ class VoiceHotwordsTest {
 
     @Test
     fun aListenerTheReadCameTooLateForUsesTheLastReadAndTheLateOneIsKeptForTheNext() {
-        // VO-10/VO-14 (F2458, F2467): an engine too busy to answer in time leaves the words last read in use, never none
+        // an engine too busy to answer in time leaves the words last read in use, never none
         val remembered = VoiceHotwords.Remembered()
         val first = VoiceHotwords.Words("澜 境", "天 气")
         assertEquals(first, remembered.inTime(remembered.read(remembered.ticket(), first)))
@@ -118,7 +129,7 @@ class VoiceHotwordsTest {
 
     @Test
     fun aReadStillUnderWayIsSharedAndOneDoneGivesWayToANewOne() {
-        // F2498: holds while a slow read runs wait on it; once it is done the next hold reads again
+        // holds while a slow read runs wait on it; once it is done the next hold reads again
         val remembered = VoiceHotwords.Remembered()
         val launched = mutableListOf<Long>()
         var running = true

@@ -71,7 +71,7 @@ class SceneBuilderTest {
     fun keptCascadesMakeTheSameScenes() {
         for (theme in listOf(Fixtures.materialLight, Forms.materialDark)) {
             val kept = Cascades(theme)
-            for (shot in Shots.all) {
+            for (shot in Shots.drawn) {
                 val board = Forms.layout(shot.board)
                 val fresh = SceneBuilder(theme, shot.env, FakeMeasurer).build(board, Forms.fragments).ok()
                 val again = SceneBuilder(theme, shot.env, FakeMeasurer, cascades = kept).build(board, Forms.fragments).ok()
@@ -86,17 +86,17 @@ class SceneBuilderTest {
     fun aNumberPadWithNoPadIsTheFullOne() {
         val pads = board(
             "number",
-            "<row><key id=\"=\" label=\"=\" send=\"commit:=\" when=\"pad=full\"/><key id=\"-\" label=\"-\" send=\"commit:-\" when=\"pad=signed\"/></row>",
+            "<row><key id=\"=\" label=\"=\" send=\"commit:=\" when=\"pad=full\"/><key id=\"-\" label=\"-\" send=\"commit:-\" when=\"pad=phone\"/></row>",
         )
         val scene = Fixtures.scene(Fixtures.portrait, pads)
         assertEquals(listOf("="), scene.keys.map { it.id })
         assertTrue(scene.warnings.single().message.contains("no pad="), "${scene.warnings}")
-        val signed = Fixtures.scene(Fixtures.portrait.copy(input = Fixtures.portrait.input.copy(pad = "signed")), pads)
-        assertEquals(listOf("-"), signed.keys.map { it.id })
-        assertTrue(signed.warnings.isEmpty())
+        val phone = Fixtures.scene(Fixtures.portrait.copy(input = Fixtures.portrait.input.copy(pad = "phone")), pads)
+        assertEquals(listOf("-"), phone.keys.map { it.id })
+        assertTrue(phone.warnings.isEmpty())
     }
 
-    // review L-7: split-side is the side a board docks to while the letters split, nothing otherwise
+    // split-side is the side a board docks to while the letters split, nothing otherwise
     @Test
     fun splitSideIsWhereTheBoardDocks() {
         val sided = board(
@@ -111,7 +111,7 @@ class SceneBuilderTest {
         assertEquals(listOf("x"), ids(Fixtures.portrait.copy(oneHanded = SplitKeyboard.Dock.LEFT)), "one-handed is not split")
     }
 
-    // review L-12: whatever goes wrong building, a Failed, not a crash in the keyboard
+    // whatever goes wrong building, a Failed, not a crash in the keyboard
     @Test
     fun buildingNeverThrows() {
         val broken = TextMeasurer { _, _, _, _ -> error("no fonts") }
@@ -169,7 +169,7 @@ class SceneBuilderTest {
         assertEquals("Q W，1", qw.a11y, "GroupedKeyboard's a11y_key_grouped, in Chinese")
         assertEquals("QW", qw.label)
         assertEquals("1", qw.alt)
-        // its letters, the long press the app makes of them (no popup written: 060-render-v2 §15)
+        // its letters, the long press the app makes of them (no popup written)
         assertEquals("qw", qw.letters?.group)
         assertTrue(qw.lean, "the 14 keys' two letters lean")
         assertNull(qw.popup)

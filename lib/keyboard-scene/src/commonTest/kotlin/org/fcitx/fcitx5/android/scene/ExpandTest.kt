@@ -20,7 +20,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-// 060-render-v2 §6 step 2: includes, `when=`, bindings, defaults
+// includes, `when=`, bindings, defaults
 class ExpandTest {
     private val env = Fixtures.portrait
 
@@ -32,10 +32,13 @@ class ExpandTest {
         assertEquals(listOf("a", "s", "d", "f", "g", "h", "j", "k", "l"), ids(env, 1))
         val shuangpin = env.copy(input = Input(ime = "shuangpin", schemeTypes = setOf("semicolon")))
         assertEquals("semicolon", ids(shuangpin, 1).last())
-        val table = env.copy(input = Input(ime = "table", table = "wubi", tableExtra = "star"))
+        val table = env.copy(input = Input(ime = "table", table = "erbi", tableExtra = "star", tableLookUp = true))
         assertEquals("star", ids(table, 1).last())
         assertEquals("lookup", ids(table, 2).first(), "a table's lookup key: 拼 instead of ⇧")
         assertEquals("lookup-on", ids(table.copy(input = table.input.copy(lookingUp = true)), 2).first())
+        val wubi = env.copy(input = Input(ime = "table", table = "wubi"))
+        assertEquals("shift", ids(wubi, 2).first(), "五笔 looks up with z: ⇧ stays")
+        assertEquals("shift", ids(wubi.copy(input = wubi.input.copy(composing = true)), 2).first(), "and while a code is typed")
         val url = env.copy(input = Input(field = "url"))
         assertEquals(listOf("symbols", "numbers", "slash", "space", "dot", "domain", "lang", "enter"), ids(url, 3))
         val composingTable = table.copy(input = table.input.copy(composing = true))
@@ -110,11 +113,11 @@ class ExpandTest {
     fun twoKeysOfOneIdShownIsAProblem() {
         val l = LayoutReader.layout(
             "<keyboard xmlns=\"${LayoutReader.NAMESPACE}\" id=\"t\" name=\"t\" family=\"symbols\" columns=\"10\">" +
-                "<row><key id=\"minus\" label=\"-\" when=\"pad=signed|signed-decimal\"/>" +
-                "<key id=\"minus\" label=\"-\" when=\"pad=signed|phone\"/></row></keyboard>",
+                "<row><key id=\"minus\" label=\"-\" when=\"pad=full|datetime\"/>" +
+                "<key id=\"minus\" label=\"-\" when=\"pad=full|phone\"/></row></keyboard>",
         ).ok()
         assertEquals(1, Expand.rows(l, emptyMap(), env.copy(input = Input(pad = "phone"))).ok().single().items.size)
-        assertTrue(Expand.rows(l, emptyMap(), env.copy(input = Input(pad = "signed"))).problems().single().message.contains("two keys"))
+        assertTrue(Expand.rows(l, emptyMap(), env.copy(input = Input(pad = "full"))).problems().single().message.contains("two keys"))
     }
 
     @Test

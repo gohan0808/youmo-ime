@@ -7,6 +7,8 @@ package org.fcitx.fcitx5.android.uat
 import org.fcitx.fcitx5.android.Uat
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog
 import org.fcitx.fcitx5.android.engine.assertRows
+import org.fcitx.fcitx5.android.engine.glide.GlideLayout
+import org.fcitx.fcitx5.android.engine.pinyin.Fuzzy
 import org.fcitx.fcitx5.android.engine.runtime.EngineSettings
 import org.fcitx.fcitx5.android.engine.pinyin.NineKeyLetters
 import org.fcitx.fcitx5.android.engine.runtime.Keyboard
@@ -17,10 +19,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.fcitx.fcitx5.android.host.KeyStates as HostKeyStates
 
-/**
- * uat/03-t9.md: each case from B0-九键. Its English (中/英) is English fed the nine keys' own
- * characters ([Keyboard.nineKey], [Keyboard.nineLetter]), as T9Keyboard sends them.
- */
+/** uat/03-t9.md, each case from B0-九键; English fed the nine keys' characters as T9Keyboard sends them. */
 class NineKeysUatTest {
 
     private fun EngineReplay.nine(digits: String) {
@@ -61,6 +60,10 @@ class NineKeysUatTest {
         type(EngineReplay.nineKeys("94"))
         assertTrue("94 「$preedit」: $threePages", "中国" !in threePages)
         backspace(2)
+        // 1 between the keys reads each as an initial (简拼)
+        type(EngineReplay.nineKeys("914"))
+        expectFirst("中国")
+        backspace(3)
         type(EngineReplay.nineKeys("94664486"))
         expectFirst("中国")
         backspace(8)
@@ -199,13 +202,7 @@ class NineKeysUatTest {
         assertTrue("fengh $part", "奉化" in part.take(3))
     }
 
-    // ------------------------------------------------------------------ 连按, on the replay's clock
-
-    /**
-     * The digit keys under 连按 at [timeout] ms (连按选字母 中 is T9MultiTap.Medium's 600), as
-     * T9Keyboard.resolve reads a press at its time: the digit, or the same key pressed again soon its
-     * next letter (Keyboard.letterKey, again). The time is the replay's [HostReplay.clock].
-     */
+    /** The digit keys under 连按 at [timeout] ms, read as T9Keyboard.resolve does on the replay's [HostReplay.clock]. */
     private class Presses(val replay: HostReplay, timeout: Long = 600) {
         private val tap = MultiTap(timeout)
 
@@ -244,7 +241,7 @@ class NineKeysUatTest {
         pick("广告")
         expectText("广告")
         focus("")
-        // quickly: h, the h characters, not two keys' 广告 (learned) or 哈哈 (the user's 2026-10-19 gg)
+        // quickly: h, the h characters, not two keys' 广告 (learned) or 哈哈 (the user's gg)
         keys.presses("44", QUICK)
         assertEquals("4 4 quickly 「$preedit」", "h", preedit.replace("'", "").replace(" ", ""))
         val hWords = candidates.take(8)
@@ -262,9 +259,7 @@ class NineKeysUatTest {
         assertEquals(seven, preedit to candidates.take(6))
     }
 
-    // typed a letter at a time (九键英文 连按, and always where English suggests nothing), each
-    // letter is the keyboard's own commit (resolveEnglish's CommitAction, NineKeysTapUatTest): the
-    // engine only told of the field's text, which it offers nothing for
+    // typed a letter at a time, each letter is the keyboard's own commit: the engine only told of the field's text
     @Test
     @Uat("T9-33", "T9-44")
     fun lettersTypedAtATimeLeaveEnglishNothingToOffer() {
@@ -345,9 +340,69 @@ class NineKeysUatTest {
         assertEquals(first + "00", text)
     }
 
+    private val inIng = EngineSettings(fuzzy = setOf(Fuzzy.IN_ING))
+
+    // a fuzzy reading's word ranks past a page or more of singles, so 丿 narrows to 金鱼's first stroke
+    private fun EngineReplay.expectJinyu(s: EngineSettings, how: String, among: Int = FIRST) {
+        stroke("p")
+        assertEquals("$how ${s.fuzzy}: ${candidates.take(among)}", s.fuzzy.isNotEmpty(), "金鱼" in candidates.take(among))
+    }
+
+    // jing taken off the bar still reads jin with the fuzzy pair on: 5464, jing, 98 gives 金鱼
+    @Test
+    @Uat("T9-73")
+    fun aSyllableTakenStillReadsTheFuzzyPairsOn() {
+        for (s in listOf(inIng, EngineSettings())) with(EngineReplay(settings(s), im = InputMethodCatalog.PINYIN)) {
+            type(EngineReplay.nineKeys("5464"))
+            syllable("jing")
+            type(EngineReplay.nineKeys("98"))
+            expectJinyu(s, "jing taken")
+        }
+    }
+
+    // letters glided are typed as themselves and still read the fuzzy pairs: the glide reads ling yu first, its fuzzy lin yu 淋浴 among the first
+    @Test
+    @Uat("T9-74")
+    fun lettersGlidedStillReadTheFuzzyPairsOn() {
+        for (s in listOf(inIng, EngineSettings())) with(EngineReplay(settings(s), im = InputMethodCatalog.PINYIN)) {
+            glide("jingyu", GlideLayout.nineKeys())
+            assertEquals("glided ${s.fuzzy}: ${candidates.take(FIRST)}", s.fuzzy.isNotEmpty(), "淋浴" in candidates.take(FIRST))
+        }
+    }
+
+    // letters picked by 连按 (a long press commits its letter) the same: J I N G, 98 gives 金鱼
+    @Test
+    @Uat("T9-75")
+    fun lettersMultiTappedStillReadTheFuzzyPairsOn() {
+        for (s in listOf(inIng, EngineSettings())) with(EngineReplay(settings(s), im = InputMethodCatalog.PINYIN)) {
+            press('5', 4)
+            press('4', 3)
+            press('6', 2)
+            press('4', 4)
+            type(EngineReplay.nineKeys("98"))
+            // JI and JIN's singles come first here
+            expectJinyu(s, "multi-tapped", among = candidates.size)
+        }
+    }
+
+    // u and v share 8, yet lv taken off the bar reads lu with u ↔ v on: 58, lv, then shang gives 路上
+    @Test
+    @Uat("T9-76")
+    fun lvTakenReadsLuUnderUV() {
+        for (s in listOf(EngineSettings(fuzzy = setOf(Fuzzy.V_U)), EngineSettings())) with(EngineReplay(settings(s), im = InputMethodCatalog.PINYIN)) {
+            type(EngineReplay.nineKeys("58"))
+            syllable("lv")
+            type(EngineReplay.nineKeys("74264"))
+            assertEquals("lv taken ${s.fuzzy}: ${candidates.take(FIRST)}", s.fuzzy.isNotEmpty(), "路上" in candidates.take(FIRST))
+        }
+    }
+
     private companion object {
         // the case's 0.3 s and 1 s and more between presses
         const val QUICK = 300L
         const val SLOW = 1_200L
+
+        // the candidates looked at: a fuzzy reading's word may be past the first page
+        const val FIRST = 30
     }
 }

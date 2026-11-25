@@ -71,16 +71,18 @@ sealed class InputWindow : Dependent {
 
         open val showTitle: Boolean = true
 
+        /** The bar extension in the title's place, after the back button. */
+        open val extensionInTitle: Boolean = false
+
         open val title: String = ""
 
         open fun onCreateBarExtension(): View? {
             return null
         }
 
-        /** Where the title's ← goes: the keyboard when null; a panel opened from another, back to that one. */
+        /** The keyboard when null. */
         open val returnTo: (() -> InputWindow)? = null
 
-        /** What ← is said to do, for [returnTo]. */
         @get:StringRes
         open val returnLabel: Int = R.string.back_to_keyboard
 

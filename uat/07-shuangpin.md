@@ -68,10 +68,10 @@
 - **预期**：没打过时 u f m u h 的候选里没有「什么时候」、y i v z 里没有「一直在」（只打声母只出打过的词，见 docs/pinyin.md「双拼」）。全码打过一次以后，u f m u h 的第一个候选是「什么时候」，**为什么排在这** 里写着「你打过的词，按声母读出」，点了框里是「什么时候」（m u、u h 连起来也是音节 mu、shang，每个键还能单独当声母；这串键读不成整音节，打过的词排第一）；y i v z 的候选栏或展开后的第一页有「一直在」（词库里没有「一直在」这个词，按「一直」「在」读，不按打过的词排）。
 - **JVM**：`ShuangpinUatTest.aWordTypedWithItsFirstSyllableWholeAndTheRestByInitials`（:lib:ime-eval:uatTest，真数据）、`PinyinSessionAbbrevTest.aWordTypedByInitialsStaysWhereItIsOnceAcceptedAndThePickTwiceTakesFirstBack`（:lib:ime-core:test）；菜单的原因（`Reason.ALONE`）由 ime-core 里标着 SP-30 的菜单测试查；设备上留作冒烟（看胶水；脚本不长按，候选的长按菜单 dump 看不见）。
 
-### SP-31 [P1] 两个键成音节的仍先按音节读，打全码的首选不变
+### SP-31 [P1] 两个键成音节的仍先按音节读，打全码的首选不变错
 - **前提**：B0-双拼（自然码）。
 - **操作**：点 x m，看拼音行和第一个候选；删光，点 v g，看拼音行。
-- **预期**：x m 的拼音行是 `xian`，第一个候选是「先」；v g 的拼音行是 `zheng`。另在 JVM 上：聊天句子集用自然码、微软、小鹤全码打，在全键盘、18 键、14 键（微软没有）、九键上，带 3000 个打过的词，第一个候选和不读中间简拼时一样；每个音节的两个键（自然码、微软、小鹤，和 0.5 去掉的紫光、智能ABC、国标六种方案），第一个候选不变，第一页原有的候选被挤开的不超过 1%；在学习开着的输入会话里（打过的词按习惯排），每个音节的两个键和 150 句聊天句子逐键打，第一个候选也和不读中间简拼时一样。
+- **预期**：x m 的拼音行是 `xian`，第一个候选是「先」；v g 的拼音行是 `zheng`。另在 JVM 上：聊天句子集用自然码、微软、小鹤全码打，在全键盘、18 键、14 键（微软没有）、九键上，带 3000 个打过的词，读中间简拼不让不读时对的第一个候选变错，每种方案的每种键盘至多 1 句的第一个候选变；每个音节的两个键（自然码、微软、小鹤，和 0.5 去掉的紫光、智能ABC、国标六种方案），第一个候选不变，第一页原有的候选被挤开的不超过 1%；在学习开着的输入会话里（打过的词按习惯排），每个音节的两个键和 150 句聊天句子逐键打，第一个候选也和不读中间简拼时一样。
 - **JVM**：`ShuangpinUatTest.twoKeysThatMakeASyllableStayThatSyllableFirst`、`ShuangpinUatTest.wholeSyllablesReadAsBeforeTheAbbreviations`、`ShuangpinUatTest.wholeSyllablesReadAsBeforeTheAbbreviationsInASessionThatLearns`（:lib:ime-eval:uatTest，真数据）；设备上不跑。
 
 ### SP-32 [P2] 全打声母
@@ -346,3 +346,43 @@
 - **操作**：（没打过「小米」）点 x w m m 选「下面」，再做一次；删光，点 x ' m，翻看候选。
 - **预期**：第一个是「下面」；「小米」等没打过的词照旧在候选里（分隔键后的单个声母不限打过的词）。
 - **JVM**：`ShuangpinUatTest.aWordUsedInFullGoesSecondUnderAPairItsInitialsSpell`（:lib:ime-eval:uatTest，真数据）、`PinyinSessionAbbrevTest.aWordPickedInFullGoesSecondUnderAPairItsInitialsSpell`（:lib:ime-core:test）；设备上不跑。
+
+## 编码行显示双拼按键
+
+### SP-60 [P1] 编码行显示按下的双拼键（每种键盘）
+- **前提**：B0-18键（自然码）。
+- **操作**：到 **输入法 → 双拼** 打开 **编码行显示双拼按键**；回测试页点 BN IO H JK（自然码 ni hk），看编码行和候选；按回车，看框里；删光，点 BN IO H JK，点「你」，看编码行；删光，点 V SD FG IO，在音节条上点 zhong，在编码行 v 和 s 之间点一下，再点 BN，看编码行；删光，**键盘** 改回「全键盘」，打 n i h k 看编码行，再点 v s g 看编码行。
+- **预期**：18 键上编码行是 `ni hk`（每个键读出的字母，不是 `bn io h jk` 也不是拼音 `ni hao`），候选里有「你好」；回车后框里是 `nihk`；点「你」后编码行是 `你hk`。点定 zhong 后编码行是 `vs'go`，点在 v、s 之间再点 BN，编码行末尾仍是 `vs'go`（光标算在 zhong 前面，不会拆开它）。全键盘上 n i h k 是 `ni hk`，v s g 是 `vs g`。关着（默认）时编码行是拼音 `ni hao`。14 键、九键（6 4 4 5 显示 `ni hk`，不是 `mg gj`）、小鹤（`nihc` 显示 `ni hc`）、微软（`x;`）、`'`、光标（左右移一下跳过点定的音节）、退格、按偏的键（显示认出来的键）、ü 按成自己的键的错拼（显示按下的键）、音节条上点定的音节（自然码 zhong 显示 `vs`）由 JVM 覆盖；音节条本身见 SP-65。
+- **JVM**：ime-core `PinyinSessionKeysShownTest`（每种键盘、三个方案、简拼、选了一部分、`'`、光标、按偏的键、点定的音节和声母、模糊音、回车）、`EngineOptionsTest.shuangpinKeysShownIsOffTillSetAndOnTheShuangpinPage`；ime-eval `ShuangpinUatTest.theCodeShowsTheKeysPressedOnEveryKeyboardWhenSet`（真数据，四种键盘）；app `InputMethodSettingsScreenTest.aSchemeAndATablesOptionsAreSavedWhereTheEngineReadsThem`（开关默认关，打开后引擎读到）；设备上跑（冒烟）。
+
+### SP-61 [P1] 编码行在输入框里时也显示双拼键
+- **前提**：B0-18键（自然码）；**编码行显示双拼按键** 打开；B-IF（编码行选成「输入框里（实验性）」）。
+- **操作**：回测试页换到双拼，点 BN IO H JK，看框里；点「你好」。
+- **预期**：框里带下划线的是 `ni hk`（不是 `ni hao`）；点「你好」后框里是「你好」。
+- **JVM**：ime-eval `ShuangpinUatTest.theCodeShowsTheKeysPressedOnEveryKeyboardWhenSet`（输入框里写的就是编码行的文字，`CodeInFieldUatTest` 管它怎样放进框里）；设备上跑（冒烟）。
+
+### SP-65 [P1] 音节条和九键左边的音节列也显示双拼键
+- **前提**：B0-18键（自然码），打开 **编码行显示双拼按键**。
+- **操作**：点 U A BN IO（自然码 ua ni），看编码行和音节条；点音节条上的 `ua`，看候选和编码行；键盘换成 14 键（UI AS BN UI）、九键（8 2 6 4，音节在左边一列）各做一遍；关掉开关再打一遍。
+- **预期**：编码行是 `ua ni`（14 键、九键后一段可能先读成别的，如 `ua bu`），音节条上有 `ua`（sha）和 `u`（声母 sh），不是 `sha`、`sh`；点 `ua` 后编码行以 `ua` 开头，候选和关着开关时点 sha 一样（第一页有「杀」「沙」一类 sha 的字）。九键左边一列也是 `ua`、`u`。关着时音节条是 `sha`、`sh`。读屏念的是拼音（sha）。
+- **JVM**：ime-core `GroupedShuangpinSegmenterTest.aBarOfferedSyllableOrInitialShowsAsTheKeysTheCodeShowsTaken`（三个方案、三种键盘，每个音节是方案的码，声母是它的键）、`PinyinSessionKeysShownTest.theBarShowsTheKeysTheCodeShowsAndTakesAsBefore`（点了和关着时点拼音读得一样）；ime-eval `ShuangpinUatTest.theBarShowsTheKeysAsTheCodeDoesWhenSet`（真数据，三种键盘）；app `SyllableStripTest.talkBackReadsShuangpinKeysShownAsTheirPinyin`、`T9ShuangpinKeyboardTest.noLanguageKeyAndTheColumnOffersShuangpinsSyllablesNotNineKeys`（读屏念拼音）；设备上跑 18 键、14 键（冒烟）。
+
+## 模糊音
+
+### SP-62 [P1] 模糊音在双拼里和全拼一样起作用
+- **前提**：B0-双拼（自然码），**通用输入** 的 **模糊音** 里只勾 in ↔ ing，**通用输入** 的 **在键上划** 里选 **笔画筛选**。
+- **操作**：点 j y（jing），展开候选往下翻；删光，点 j n（jin），展开候选往下翻；删光，点 j n j i；把 **方案** 换成小鹤（jing = j k，jin = j b）、微软（jing = j ;，jin = j n）各做一遍；再到 **拼音** 里打 jing、jin 对照；再点 j y y u（jing yu）后在键盘上划一撇（笔画筛选）；最后取消勾选 in ↔ ing，双拼里再点 j y，再点 j y y u 划一撇。
+- **预期**：j y 的候选里有「金」，j n 的候选里有「京」，单字的先后和全拼打 jing、jin 时一样（读成另一个音的字排在本音的常用字后面，「金」在第 15 个左右，不在第一页）；j n j i 第一页有「经济」；j y y u 划一撇后第一页有「金鱼」，往下有「金」。取消勾选后 j y 没有「金」，j y y u 划一撇后没有「金鱼」「金」。三个方案都这样。
+- **JVM**：`FuzzyUatTest.fuzzyPinyinReadsEverySchemeAsFullPinyinDoes`（:lib:ime-eval:uatTest，真数据）；设备上不跑。
+
+### SP-63 [P1] 双拼音节条点定的音节照样按模糊音读
+- **前提**：B0-双拼（自然码），**输入法 → 双拼** 的键盘选 18 键并打开 **编码行显示双拼按键**，**通用输入** 的 **模糊音** 里只勾 in ↔ ing，**在键上划** 里选 **笔画筛选**。
+- **操作**：点 jy 两键，在音节条上点 jing（开着编码行显示双拼按键，音节条上写的是 `jy`，小鹤是 `jk`，见 SP-65），看候选和编码行；再点 y u 两键后划一撇（笔画筛选）；选「金鱼」上屏，再这样打一遍（也划一撇）、选一次；清空后不点音节条直接打 jy yu；取消勾选 in ↔ ing，点 jy、点 jing，看候选；键盘换成 14 键、九键（音节在左边一列），方案换成小鹤各做一遍。
+- **预期**：点了 jing 后单字的先后和全键盘双拼打 jing 时一样，往下有「金」；编码行仍是点的那两键（不是 jin 的）；划一撇后前 30 个候选里有「金鱼」和「金」；学过以后不点音节条打 jy yu，第一页有「金鱼」。取消勾选后点了 jing 没有「金」。
+- **JVM**：`FuzzyUatTest.aSyllableTakenOnTheGroupedKeysStillReadsTheFuzzyPairsOn`（:lib:ime-eval:uatTest，真数据）、`PinyinSessionShuangpinKeysTest.aSyllableTakenReadsItsFuzzyPartnerShownAsItsOwnKeys`（ime-core）；设备上不跑。
+
+### SP-64 [P1] 双拼音节条点定的声母照样按模糊音读
+- **前提**：B0-双拼（自然码），**输入法 → 双拼** 的键盘选 18 键，**通用输入** 的 **模糊音** 里只勾 c ↔ ch。
+- **操作**：点 XC，在音节条上点 c，往下翻候选；再点 IO，往下翻候选；取消勾选 c ↔ ch 再做一遍；键盘换成九键（点 2 键，在左边一列点 c，再点 6 键）各做一遍。
+- **预期**：勾着时只点了 c 的候选里有「吃」，再点 IO 后前 30 个有「错」，往下有「戳」（chuo）；取消勾选后只有 c 开头的字，没有「吃」「戳」。
+- **JVM**：`FuzzyUatTest.anInitialTakenOnTheGroupedKeysReadsItsFuzzyPartner`（:lib:ime-eval:uatTest，真数据，18 键和九键）、`GroupedShuangpinSegmenterTest.aTakenSyllableOrInitialReadsItsFuzzyPartner`（ime-core）；设备上不跑。

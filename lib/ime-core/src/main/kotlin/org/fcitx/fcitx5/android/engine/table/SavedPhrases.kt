@@ -4,30 +4,29 @@
  */
 package org.fcitx.fcitx5.android.engine.table
 
+import org.fcitx.fcitx5.android.engine.learn.LearnRecord.Commit
 import org.fcitx.fcitx5.android.engine.learn.LearnRecord.TableWordRow
 import org.fcitx.fcitx5.android.engine.learn.LearnState
 import java.util.TreeMap
 
-/**
- * The phrases [im]'s table saved in an older build (自动造词 is gone), as the learning record
- * keeps them ([LearnState.tableWords], [state]'s; null: none, habits off): those the table lacks,
- * its own entry standing for one a later table has, in the order they were saved. 0.3.0's picks of
- * what the table has not, which 0.4 converted to counts alone (StatRow) but offered from its table's
- * log, were put in from that log once (Engines.keepOlderTablePhrases). Read again as the record
- * changes them ([LearnState.tableWordsVersion]).
- * [forget] takes one out through [remove], which writes it to the record.
- */
+/** The words [im]'s table remembered (or an older build saved), as the record keeps them: those the table lacks, in saved order; reread as [LearnState.tableWordsVersion] changes. [add] writes one, [remove] drops rows. */
 class SavedPhrases(
     private val table: TableDictionary,
     private val im: String,
     private val state: () -> LearnState?,
     private val remove: (List<TableWordRow>) -> Unit = {},
+    private val add: (code: String, text: String) -> Unit = { _, _ -> },
 ) {
-    // in code order, so that the codes a prefix starts are a range of them
+    /** A tap's word and the commit that typed it. */
+    class Tapped(val text: String, val code: String, val commit: Commit?)
+
+    /** The last [Tapped], kept here past its session: the notice's 撤销 may reach one made anew (an input method switched and back). */
+    var tapped: Tapped? = null
+
+    // in code order, so the codes a prefix starts are a range
     private var saved = TreeMap<String, MutableList<String>>()
 
-    // the state and its version [saved] was read from: by its id, not holding it (F3216)
-    // two fields, not a pair: asked at every word a code key shows
+    // by id, not holding the state; two fields, not a pair: asked at every word a code key shows
     private var readId = -1L
     private var readVersion = -1L
 
@@ -37,7 +36,6 @@ class SavedPhrases(
         readId = s.id
         readVersion = s.tableWordsVersion
         saved = TreeMap()
-        // in the record's order, the order saved: within a code as a table's log had them
         for ((im, code, text) in s.tableWords.keys) {
             if (im != this.im || code.isEmpty() || text.isEmpty()) continue
             if (table.indexOf(code, text) < 0) saved.getOrPut(code) { ArrayList() } += text
@@ -47,21 +45,32 @@ class SavedPhrases(
 
     fun isSaved(code: String, text: String): Boolean = saved()[code]?.contains(text) == true
 
-    /** The saved phrases whose code starts with [prefix], as code and text, in code order. */
-    fun saved(prefix: String): List<Pair<String, String>> =
-        savedUnder(prefix).flatMap { (code, texts) -> texts.map { code to it } }
+    /** Those under [code] exactly: a prefix shows none, so typing on it is as before. */
+    fun saved(code: String): List<Pair<String, String>> = saved()[code]?.map { code to it }.orEmpty()
 
-    /** Whether some saved phrase has a code starting with [prefix]. */
+    /** Every one, in code order. */
+    fun all(): List<Pair<String, String>> = saved().flatMap { (code, texts) -> texts.map { code to it } }
+
+    /** Whether [text] is saved under any code. */
+    fun hasText(text: String): Boolean = saved().values.any { text in it }
+
     fun leadsAnywhere(prefix: String) = savedUnder(prefix).isNotEmpty()
 
     private fun savedUnder(prefix: String): Map<String, List<String>> =
         saved().let { if (prefix.isEmpty()) it else it.subMap(prefix, true, prefix + Char.MAX_VALUE, false) }
 
-    /** Forgets the phrase [text] under [code], as the user asked. */
-    fun forget(code: String, text: String) {
-        val s = state() ?: return
-        val since = s.tableWords[Triple(im, code, text)] ?: return
-        remove(listOf(TableWordRow(im, code, text, since)))
+    /** The row it dropped, null if none. */
+    fun forget(code: String, text: String): TableWordRow? {
+        val s = state() ?: return null
+        val since = s.tableWords[Triple(im, code, text)] ?: return null
+        return TableWordRow(im, code, text, since).also { remove(listOf(it)) }
+    }
+
+    /** Saves [text] under [code]; false with no record (habits off). */
+    fun remember(code: String, text: String): Boolean {
+        if (state() == null) return false
+        add(code, text)
+        return true
     }
 
     private companion object {

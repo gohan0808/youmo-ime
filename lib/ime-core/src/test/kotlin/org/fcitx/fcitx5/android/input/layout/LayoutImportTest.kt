@@ -111,7 +111,7 @@ class LayoutImportTest {
         assertEquals("label-long", bad.errors.single().key)
     }
 
-    // the number keyboard's and the symbol panel's (L5): taken with no warning, the number one for 123's pad and a phone's
+    // the number keyboard's and the symbol panel's: taken with no warning
     @Test
     @Uat("ST-170", "ST-172")
     fun theUatsPanelLayoutsAreTakenWithNoWarning() {
@@ -124,8 +124,26 @@ class LayoutImportTest {
         assertEquals(emptyList<LayoutCheck.Finding>(), symbols.report.warnings)
     }
 
-    // the settings UAT's layout of names (uat/fixtures/layouts/uat-names.layout, 061-custom-layout §9, L6): taken, its
-    // WE's 下滑 told (the 18 keys' is used) and not among what it types; its own key's 哈 and long press are
+    // boards lacking keys: taken, each told once what it lacks
+    @Test
+    @Uat("ST-197")
+    fun theUatsLayoutsLackingKeysAreTakenAndTold() {
+        fun lacks(name: String) = (judge(File("../../uat/fixtures/layouts/$name.layout").readText(), app = "0.6.3") as Verdict.Ok).report.warnings
+            .filter { it.key == "lacks" }.map { it.args }
+        assertEquals(listOf(listOf("digits", "0")), lacks("uat-nine-big-enter"))
+        assertEquals(listOf(listOf("letters", "m")), lacks("uat-k17-no-m"))
+        assertEquals(listOf(listOf("symbol-grid")), lacks("uat-symbols-no-grid"))
+    }
+
+    // a number board whose column is the nine keys' list: taken, told only that the full pad lacks -
+    @Test
+    @Uat("ST-225")
+    fun theUatsNumberBoardWithANineColumnIsToldItsFullPadLacksTheMinus() {
+        val ok = judge(File("../../uat/fixtures/layouts/uat-number-nine-column.layout").readText(), app = "0.6.3") as Verdict.Ok
+        assertEquals(listOf(LayoutCheck.Finding(0, "pad-lacks", listOf("full", "-"))), ok.report.warnings)
+    }
+
+    // the UAT's uat-names.layout: taken, its WE's 下滑 told (the 18 keys' is used) and not among what it types
     @Test
     @Uat("ST-188")
     fun theUatsLayoutOfNamesIsTakenItsHeldKeyTold() {
@@ -134,7 +152,7 @@ class LayoutImportTest {
         assertEquals(listOf("哈", "哈哈", "嘿"), ok.commits)
     }
 
-    // L8: a split row with 8 keys to halve, taken with that one warning, its count and the scene told
+    // a split row with 8 keys to halve, taken with that one warning
     @Test
     @Uat("ST-180")
     fun theUatsSplitRowThatCannotBeHalvedIsTakenWithAWarning() {

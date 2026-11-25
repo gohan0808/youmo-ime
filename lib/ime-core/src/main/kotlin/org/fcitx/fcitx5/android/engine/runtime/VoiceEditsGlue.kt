@@ -10,57 +10,75 @@ import org.fcitx.fcitx5.android.engine.learn.Row
 import org.fcitx.fcitx5.android.engine.session.Snapshot
 import org.fcitx.fcitx5.android.input.voice.VoiceEdits
 import org.fcitx.fcitx5.android.input.voice.VoiceHomophones
-import kotlin.coroutines.Continuation
-import kotlin.coroutines.EmptyCoroutineContext
-import kotlin.coroutines.startCoroutine
+import org.fcitx.fcitx5.android.input.voice.VoiceRerank
 
-/**
- * [VoiceEdits] as [Engines] has it (061-voice-learn-from-edits.md): told the engines' commits and
- * Backspaces as they answer, the host's contexts, and the app's calls; asking the user's words,
- * the characters' readings and voice's own replacing ([VoiceHomophones]) of [words] and [assets].
- */
+/** [VoiceEdits] wired into [Engines]: fed commits, Backspaces, contexts and app calls; reads the user's words, readings and voice's replacing ([VoiceHomophones]) from [words] and [assets]. */
 internal class VoiceEditsGlue(
     private val words: LexiconFacade,
     private val lexicon: UserLexicon,
     private val assets: EngineAssets,
     simplify: (String) -> String,
 ) {
-    // the user's words as an edit's [VoiceEdits.Words.mine] read them, and voice's table of them made once
-    // for the edit, by the word taken off them ([VoiceEdits.Words.takes]' replacing): review S7
+    // the user's words as an edit read them, and voice's table of them, made once per edit by the word taken off
     private var userWords: List<UserWord> = emptyList()
     private val tables = HashMap<String?, VoiceHomophones>()
+
+    // the last talks' stretches as voice kept them, the latest last: a word judged on the stretch voice judged
+    private val talks = ArrayDeque<List<String>>()
+
+    // as the field's last context said: a field that does not learn keeps none of what was said in it
+    private var fieldLearns = true
 
     val edits = VoiceEdits(object : VoiceEdits.Words {
         override fun readings(c: Char) = assets.voiceReadings(c)
 
         override fun mine(): VoiceEdits.Mine {
-            val all = words.userWords()
-            userWords = all
+            // voice is judged on all the words, as VoiceEngine reads them; a table's remembered words are not asked about
+            userWords = words.userWords()
             tables.clear()
-            fun of(kind: UserWord.Kind) = all.filter { it.kind == kind }.mapTo(HashSet()) { it.text }
-            return VoiceEdits.Mine(of(UserWord.Kind.ADDED), of(UserWord.Kind.LEARNED), of(UserWord.Kind.BLOCKED))
+            val asked = userWords.filter { it.table.isEmpty() }
+            fun of(kind: UserWord.Kind) = asked.filter { it.kind == kind }.mapTo(HashSet()) { it.text }
+            return VoiceEdits.Mine(
+                of(UserWord.Kind.ADDED), of(UserWord.Kind.LEARNED), of(UserWord.Kind.BLOCKED),
+                asked.filter { it.voiceAlways }.mapTo(HashSet()) { it.text },
+            )
         }
 
         override fun pinyinOf(text: String) = words.pinyinOf(text)
 
-        // what a hold would do with [word] added as the settings add it: the words as VoiceEngine reads them, [replacing]
-        // off them (review M4: one added before at the place, ranked first, would keep its place), and it after them
-        override fun takes(text: String, at: Int, heard: String, word: String, pinyin: String, replacing: String?): Boolean {
-            val added = UserWord(word, pinyin, UserWord.Kind.ADDED)
+        // as voice would write it with [word] added: the words as VoiceEngine reads them, [replacing] removed (an earlier
+        // word at the place would keep it), then it; judged at the place, on the stretch voice judged after the one
+        // before it, else in its clause after what is before it
+        override fun takes(text: String, at: Int, heard: String, word: String, pinyin: String, replacing: String?): VoiceEdits.Takes {
+            if (!text.regionMatches(at, heard, 0, heard.length)) return VoiceEdits.Takes.NO
             val without = { userWords.filterNot { it.kind == UserWord.Kind.ADDED && it.text == replacing } }
             val base = tables.getOrPut(replacing) { words.voiceHomophones(without()) }
-            val homophones = (if (base.isEmpty) null else assets.voiceWordReadings(added)?.let { base.withAdded(word, it) })
-                ?: words.voiceHomophones(without() + added)
-            val out = now { homophones.hold().replace(text) { spans -> words.voiceHomophonesAllowed(spans) } }
-            return out.regionMatches(at, word, 0, word.length) && text.regionMatches(at, heard, 0, heard.length)
+            val readings = assets.voiceWordReadings(UserWord(word, pinyin, UserWord.Kind.ADDED))
+            val judged = stretchAt(talks, text, at, heard.length) ?: clauseAt(text, at, heard.length)
+            val blocked = userWords.filter { it.kind == UserWord.Kind.BLOCKED }.map { it.text }
+            fun puts(always: Boolean): Boolean {
+                val bonus = if (always) VoiceHomophones.ALWAYS else VoiceHomophones.ADDED_BONUS
+                val table = (if (base.isEmpty) null else readings?.let { base.withAdded(word, it, bonus) })
+                    ?: words.voiceHomophones(without() + UserWord(word, pinyin, UserWord.Kind.ADDED, voiceAlways = always))
+                val out = words.voicePick(table, judged.text, judged.before, blocked)
+                return out.regionMatches(judged.at, word, 0, word.length)
+            }
+            return when {
+                puts(always = false) -> VoiceEdits.Takes.YES
+                puts(always = true) -> VoiceEdits.Takes.IF_ALWAYS
+                else -> VoiceEdits.Takes.NO
+            }
         }
     }, simplify)
 
-    /**
-     * [im]'s answer [s] to [event]: a commit, a Backspace the app takes. [predicting]: what showed
-     * before it was 联想, whose pick is no word typed; [inking]: handwriting written over the keys showed
-     * before it (InkOver.inking), whose commit it is. Nothing is followed where nothing is [learning].
-     */
+    /** A talk's stretches as voice kept them ([VoiceChoice.Talk.stretches]); none kept where the field does not learn. */
+    fun stretches(texts: List<String>) {
+        if (!fieldLearns) return
+        talks.addLast(texts.toList())
+        while (talks.sumOf { t -> t.sumOf { it.length } } > MAX_STRETCHES) talks.removeFirst()
+    }
+
+    /** [im]'s answer to [event]: a commit or app-taken Backspace. [predicting]: 联想 showed (a pick is no typed word); [inking]: handwriting over the keys showed, whose commit it is. Nothing is followed without [learning]. */
     fun answered(im: String, event: Int, s: Snapshot, predicting: Boolean, learning: Boolean, reading: String? = null, inking: Boolean = false) {
         try {
             follow(im, event, s, predicting, learning, reading, inking)
@@ -71,16 +89,17 @@ internal class VoiceEditsGlue(
 
     private fun follow(im: String, event: Int, s: Snapshot, predicting: Boolean, learning: Boolean, reading: String?, inking: Boolean) {
         if (!edits.open) return
-        // the engine taking back what was before the cursor (English's correction, say): not followed
+        // the engine took back text before the cursor (English's correction): not followed
         if (!learning || s.deleteBefore > 0) return edits.clear()
         if (event == EngineEvent.BACKSPACE && !s.handled && s.commit.isEmpty()) edits.backspace()
-        // handwriting's (written over the keys, [inking]: the commit is its), read by the characters' readings it
-        // shares with what voice heard (§3), not by the pinyin the input method's own last commit had
+        // handwriting's commits are read by the readings shared with what voice heard, not by the input method's last pinyin
         if (s.commit.isNotEmpty()) edits.committed(s.commit, typed = (inking || im in TYPED) && !predicting, reading.takeIf { !inking })
     }
 
-    /** The host's context, as [Engines.context] has it. */
+    /** As [Engines.context] has it. */
     fun context(before: String, learning: Boolean, cleared: Boolean, after: String?, selected: Boolean, said: Boolean) {
+        fieldLearns = learning
+        if (!learning) talks.clear()
         if (!edits.open) return releaseIfClosed()
         try {
             if (!learning) edits.clear() else edits.context(before, after, selected, said, cleared)
@@ -89,17 +108,17 @@ internal class VoiceEditsGlue(
         }
     }
 
-    /** Nothing of voice's text followed any more (another field, the habits off): what its edits read let go. */
+    /** Stops following voice text (another field, habits off, learning cleared), releasing what edits read and what was said. */
     fun end() {
         edits.clear()
+        talks.clear()
         releaseIfClosed()
     }
 
-    /** Whether the user's words read for an edit, or voice's tables of them, are held. */
+    /** Whether user words or voice tables are held for an edit. */
     val holdsWords: Boolean get() = userWords.isNotEmpty() || tables.isNotEmpty()
 
-    // the window closed: the user's words (all of them) and voice's tables made for its edits let go, not kept with
-    // the engines till the next window's (review F8342)
+    // window closed: release the user's words and voice's tables rather than holding them till the next window
     private fun releaseIfClosed() {
         if (edits.open) return
         userWords = emptyList()
@@ -107,31 +126,31 @@ internal class VoiceEditsGlue(
     }
 
     /**
-     * [ask]'s word added by hand, then one this window's prompt added at its place taken off ([UserLexicon.unAdd]):
-     * a word that does not add leaves that one be (review S8).
+     * Adds [ask]'s word by hand ([VoiceEdits.Ask.always]: and always put in), then removes one this window's prompt
+     * added there ([UserLexicon.unAdd]); a word that does not add leaves that be.
      */
     fun remember(ask: VoiceEdits.Ask): Boolean {
-        if (!words.addWord(ask.word, ask.pinyin)) return false
+        if (!ask.added && !words.addWord(ask.word, ask.pinyin)) return false
+        // one added before and deleted while asked: nothing to mark; one marked meanwhile on the word list is marked
+        if (ask.always && !lexicon.setVoiceAlways(ask.word, true) && ask.word !in lexicon.voiceAlways) return false
         ask.replaces?.let(lexicon::unAdd)
         edits.remembered(ask)
         return true
     }
 
     /**
-     * [word] off the added words again, nothing forgotten in the learning record (review R1). Out of the
-     * model at once ([UserLexicon.unAdd]): typed again it is learned as if never added; kept listed till
-     * the next start ([UserModel.unlistByHand] alone), it was learned not at all (review S3, measured).
+     * Takes [ask]'s word off the added words, forgetting nothing in the record; out of the model at once
+     * ([UserLexicon.unAdd]), so typed again it is learned as if never added. One added before the ask stays, no longer always put in.
      */
-    fun forget(word: String) {
-        lexicon.unAdd(word)
-        edits.forgot(word)
+    fun forget(ask: VoiceEdits.Ask) {
+        if (ask.always) lexicon.setVoiceAlways(ask.word, false)
+        if (ask.added) return
+        lexicon.unAdd(ask.word)
+        edits.forgot(ask.word)
     }
 
     companion object {
-        /**
-         * The syllables [commit] was typed as (`xu jing`), from [record], the session's record of it: its
-         * rows of the whole commit, or its picks joined; null where they do not spell it (a table's, handwriting's).
-         */
+        /** The syllables [commit] was typed as (`xu jing`), from the session's [record]: rows of the whole commit or its picks; null where they do not spell it. */
         fun readingOf(commit: String, record: LearnRecord.Commit?): String? {
             val rows = record?.rows ?: return null
             rows.firstOrNull { it.whole && it.words.text == commit }?.let { return it.words.reading.ifEmpty { null } }
@@ -141,15 +160,43 @@ internal class VoiceEditsGlue(
         }
 
 
-        // pinyin's (全拼, 双拼, the nine keys and the rest of its keyboards), and handwriting's ([answered]'s inking): the edits
-        // the user's choice (r13 U-30, Q5) counts; a table's, English's not
-        private val TYPED = setOf(InputMethodCatalog.PINYIN, InputMethodCatalog.SHUANGPIN, InputMethodCatalog.T9)
+        /** A place judged: [text] as voice read it, the place [at] in it, after [before]. */
+        internal class Judged(val text: String, val at: Int, val before: String)
 
-        // [block] run to its end here: its suspensions are none (the engine answers at once, on this thread)
-        private fun <T> now(block: suspend () -> T): T {
-            var out: Result<T>? = null
-            block.startCoroutine(Continuation(EmptyCoroutineContext) { out = it })
-            return checkNotNull(out) { "suspended" }.getOrThrow()
+        /** The stretch of [talks] (the latest last) that holds the place, found in [text] without marks and spaces. */
+        internal fun stretchAt(talks: Collection<List<String>>, text: String, at: Int, length: Int): Judged? {
+            val kept = text.indices.filter { VoiceRerank.bare(text[it].toString()).isNotEmpty() }
+            val bare = String(CharArray(kept.size) { text[kept[it]] })
+            val place = kept.indexOf(at)
+            if (place < 0) return null
+            // the place's length without marks too, as the stretches are searched
+            val n = kept.count { it >= at && it < at + length }
+            var end = bare.length
+            for (talk in talks.reversed()) {
+                for (k in talk.indices.reversed()) {
+                    val b = VoiceRerank.bare(talk[k])
+                    val i = if (b.isEmpty() || end < b.length) -1 else bare.lastIndexOf(b, end - b.length)
+                    if (i < 0) continue
+                    end = i
+                    if (place >= i && place + n <= i + b.length) return Judged(b, place - i, talk.getOrNull(k - 1).orEmpty())
+                }
+            }
+            return null
         }
+
+        // a stretch not found as kept (the polish wrote it otherwise): the clause around the place, after what is before it
+        internal fun clauseAt(text: String, at: Int, length: Int): Judged {
+            var from = at
+            while (from > 0 && Character.isLetterOrDigit(text[from - 1])) from--
+            var to = at + length
+            while (to < text.length && Character.isLetterOrDigit(text[to])) to++
+            return Judged(text.substring(from, to), at - from, text.substring(0, from))
+        }
+
+        // characters of stretches kept: more than an edited talk holds
+        private const val MAX_STRETCHES = 4000
+
+        // pinyin's keyboards and handwriting ([answered]'s inking) count for edits; tables and English do not
+        private val TYPED = setOf(InputMethodCatalog.PINYIN, InputMethodCatalog.SHUANGPIN, InputMethodCatalog.T9)
     }
 }

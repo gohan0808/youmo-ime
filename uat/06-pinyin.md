@@ -52,7 +52,7 @@
 - **操作**：打「他」，点 f e n g h u a 选「奉化」，点 **。**；再做一次；打「他」，点 f h；点 ⌫ 删掉拼音，点 f e n g h；点 ⌫ 删掉拼音，打「他」，点 s h o u j i a 选「售价」，点 **。**，再做一次，打「他」，点 s h o u j。
 - **预期**：「奉化」在第三，第一个、第二个和开始时一样（docs/pinyin.md「完整拼音和简拼」）；fengh 下「奉化」也在第三；shouj 下是「手机、收集、售价、📱」（表情候选开着：表情仍出，排在提到第三的词后面，docs/pinyin.md「表情候选」）。在 `fh` 下再选两次，它第一。
 - **操作**：打「他」，点 d i a n l e 选「点了」，点 **。**，再做一次；打「他」，点 d l。
-- **预期**：「点了」在前三，第一个仍是「带来」。在 `zd` 下选过两次「知道」后，全拼打两次「指导」：`zd` 第一个仍是「知道」，「指导」在前三。
+- **预期**：「点了」在前三，第一个仍是「的脸」。在 `zd` 下选过两次「知道」后，全拼打两次「指导」：`zd` 第一个仍是「知道」，「指导」在前三。
 - **JVM**：`PinyinUatTest.aWordTypedTwiceInFullGoesThirdUnderItsInitials`、`aWordTypedTwiceInFullGoesThirdUnderPartsOfItToo`（fengh 第三、shouj 的表情排在后面）、`aWordUsedUnderTheInitialsStaysFirstThere`（:lib:ime-eval:uatTest，真数据）；设备上不跑。
 
 ### PY-09c [P1] 有固定的词时，提上来的词往后挪一位
@@ -148,7 +148,7 @@
 - **前提**：B0-注音九键，**通用输入** 的 **纠正错拼和按偏的键** 开着。
 - **操作**：点 ㄅㄉㄚ 最靠右的边上（靠 ㄍㄐㄞ），再点 ㄖㄥㄩ、ㄈㄌㄝ，看候选，删光；三个键都点在正中再打一遍；点 ㄆㄊㄛ 靠右边缘（靠 ㄎㄑㄟ）后再点声调键 ˉ 靠右边缘；到 **通用输入** 关掉 **纠正错拼和按偏的键**，照第一次打。
 - **预期**：第一次候选里有读 jue 的字（「觉」「决」等；ㄅㄉㄚ 读成 ㄍㄐㄞ 的 ㄐ，按原样 ㄅㄖㄈ 拼不成）；点在正中、关掉以后都没有。声调键点在边上不读成旁边的键。（0.6.1 起注音九键也纠，用户 2026-11-16 定；地板 −2：按原样拼得成的不改读，所以点在键中间打的句子不会被改错。）
-- **JVM**：`EnginesZhuyinSlipTest.zhuyinsNineKeysReadASlipUnlessSlipsAreOff`、`NeighbourSlipTest.zhuyinsNineKeysReadAGroupAsTheOneNextToIt`、`NeighbourTouchTest.zhuyinsNineGroupKeysGoWithTheGroupKeysAround`（组键带落点和旁边的组键，声调键不带）；设备上不跑。
+- **JVM**：`EnginesTableSlipTest.zhuyinsNineKeysReadASlipUnlessSlipsAreOff`、`NeighbourSlipTest.zhuyinsNineKeysReadAGroupAsTheOneNextToIt`、`NeighbourTouchTest.zhuyinsNineGroupKeysGoWithTheGroupKeysAround`（组键带落点和旁边的组键，声调键不带）；设备上不跑。
 
 ### PY-152 [P1] 拼音 18 键：两个字母的键点在哪一半有用
 - **前提**：B0；**输入法 → 拼音** 的「键盘」选「18 键」。
@@ -193,6 +193,36 @@
 - **预期**：框里是「我的iPhone」。
 - **JVM**：`PinyinUatTest.chineseAndEnglishMixed`（:lib:ime-eval:uatTest，真数据）；设备上不跑。
 
+### PY-158 [P1] 14 键中英混输
+- **前提**：B0-14键。
+- **操作**：点 `qw op df er ui op gh op bn er`（wo de iphone），看编码行和候选，点「我的iPhone」；清空，点 `ui op gh op bn er`（iphone），点 **回车**；清空，点 `qw op m er bn jk ui bn ty ui as bn qw ui cv gh ui df as bn`（women jintian qu chifan），看首选。
+- **预期**：同 T9-70：首选「我的iPhone」，编码行里英文那段是小写 `iphone`，点了框里是「我的iPhone」；回车上屏 `iphone`；中文整句首选「我们今天去吃饭」，和关掉 **中英混输** 时一样。
+- **JVM**：`LatinOnKeysUatTest.chineseAndEnglishMixedOnEveryKeyboard`（:lib:ime-eval:uatTest，真数据）、`PinyinSessionLatinTest.aLatinWordIsTypedOnEveryPinyinKeyboardAsOnTheFullOne`（ime-core）；设备上留作冒烟。
+
+### PY-159 [P1] 18 键中英混输
+- **前提**：B0-拼音18键。
+- **操作**：点 `we io sd we io p h io bn we`（wo de iphone），看编码行和候选，点「我的iPhone」；清空，点 `io p h io bn we`（iphone），点 **回车**；清空，点 women jintian qu chifan 的键（`we io m we bn jk io bn rt io a bn q u xc h io fg a bn`），看首选。
+- **预期**：同 PY-158。
+- **JVM**：`LatinOnKeysUatTest.chineseAndEnglishMixedOnEveryKeyboard`（:lib:ime-eval:uatTest，真数据）、`PinyinSessionLatinTest.aLatinWordIsTypedOnEveryPinyinKeyboardAsOnTheFullOne`（ime-core）；设备上留作冒烟。
+
+### PY-163 [P1] 14 键音节条点定的音节照样按模糊音读
+- **前提**：B0-14键，**通用输入** 的 **模糊音** 里只勾 l ↔ n。
+- **操作**：点 `bn ui`，在音节条上点 ni，再点 `zx ui as bn gh`（xiang），往下翻候选；取消勾选 l ↔ n 再做一遍。
+- **预期**：勾着时候选前面（前 30 个以内）有「理想」；取消勾选后没有。
+- **JVM**：`Keys14UatTest.aSyllableTakenStillReadsTheFuzzyPairsOn`（:lib:ime-eval:uatTest，真数据）、`T9SegmenterTest.aTakenOrFixedReadingReadsTheFuzzyPairsOn` 的 14 键那一行（ime-core）；设备上不跑。
+
+### PY-164 [P1] 注音九键点定的声母照样按模糊音读
+- **前提**：B0-注音九键，**通用输入** 的 **模糊音** 里只勾 z ↔ zh。
+- **操作**：点 ㄓㄗㄢㄦ，在码行右边的条上点 ㄓ，再点 ㄍㄐㄞ、ㄔㄘㄣㄧ，看候选；取消勾选 z ↔ zh 再做一遍。
+- **预期**：勾着时前 30 个候选里有「自己」（点的 ㄓ 也读成 ㄗ）；取消勾选后没有。
+- **JVM**：`FuzzyUatTest.aZhuyinInitialTakenReadsItsFuzzyPartner`（:lib:ime-eval:uatTest，真数据）、`T9SegmenterZhuyinTest.aTakenSyllableOrSymbolReadsTheFuzzyPairsOn`（ime-core）；设备上不跑。
+
+### PY-165 [P1] 注音九键长按选的符号照样按模糊音读
+- **前提**：B0-注音九键，**通用输入** 的 **模糊音** 里只勾 z ↔ zh。
+- **操作**：长按 ㄓㄗㄢㄦ 选 ㄓ，再点 ㄍㄐㄞ、ㄔㄘㄣㄧ，看候选；取消勾选 z ↔ zh 再做一遍。
+- **预期**：勾着时前 30 个候选里有「自己」（长按选的 ㄓ 也读成 ㄗ）；取消勾选后没有。
+- **JVM**：`FuzzyUatTest.aZhuyinSymbolLongPressedReadsItsFuzzyPartner`（:lib:ime-eval:uatTest，真数据，按键盘长按发的符号码）、`T9SegmenterZhuyinTest.aTakenSyllableOrSymbolReadsTheFuzzyPairsOn`（ime-core）；设备上不跑。
+
 ### PY-24 [P1] u 开头按笔画查字
 - **前提**：B0。
 - **操作**：点 u h s p。
@@ -218,6 +248,12 @@
 - **操作**：看候选栏最右边；点 ×；再点 m i n g t i a n，空格。
 - **预期**：联想时最右边有 ×（⌄ 在它左边），打字时（有编码）没有 ×；点 × 后联想收起，栏上回到工具栏，什么都没上屏也没删；「联想下一个词」设置还开着，「明天」上屏后照常给出联想。
 - **JVM**：`BarUatTest.theCrossWithThePredictionsDropsThem`（联想时 × 在最右、⌄ 在它左边，点了只请宿主收起联想、不改设置，也不再把前文告诉引擎；没有联想、有编码时没有 ×）；宿主那一边见 ime-core `DropPredictionsTest`（联想时只收起联想，有编码时什么都不做）和 `DropPredictionsEnginesTest`（真会话上：英文纠错后点 ×，退格照样改回；英文自动加的空格照样让给逗号；拼音上屏的词照样是前文）。
+
+### PY-160 [P1] 空格上屏联想词：开着时空格上屏联想词，后面不多空格
+- **前提**：B0，**通用输入** 里打开 **空格上屏联想词**。空框。
+- **操作**：点 j i n t i a n，点空格；等 1 秒，看候选栏（截图），点空格；看框；马上再点空格。关掉开关，回空框同样打「今天」，等 1 秒点空格。
+- **预期**：开着时联想的第一个词画成首选的样子；空格后框里是「今天」加第一个联想词，后面没有空格；紧接着的那一下空格打出一个空格。关着时空格收起联想、打出一个空格。码表里一样；码表自动上屏后紧接的那一下空格不取联想词（JVM）。
+- **JVM**：ime-core `PinyinSpacePicksTest.aSpaceTakesTheFirstPredictionShownOnlyWithTheSwitchOn`（开、关、联想出现不到 0.3 秒三行；取过一次后下一下是空格）、`PinyinSpacePicksTest.aSpaceJustAfterATappedPredictionsNextRoundIsASpace`、`TableWordLearningTest.aSpaceJustAfterATappedPredictionsNextRoundIsASpace`（点联想词后新一轮出来不到 0.3 秒的空格仍是空格）、`TableWordLearningTest.aSpaceTakesThePredictionShownOnlyWithTheSwitchOn`、`noSpaceAfterASelfCommitTakesAPrediction`、`DropPredictionsTest.theBarLeadsWithWhatSpaceTakes`（候选栏画哪一个）、ime-eval `PinyinUatTest.aSpaceTakesThePredictionShownThenTypesASpace`（真数据，经键盘的空格）+ app `BarThemeTest.theBarDrawsAsFirstTheOneItIsToldLeads`；设备上跑。
 
 ## 长按候选
 
@@ -267,7 +303,7 @@
 <!-- learning: U-82 U-84 -->
 - **前提**：B0。打「他」，点 d l 选「点了」；接着打「他」，点 d l 选「点了」；接着打「他」，点 d l，确认第一个是「点了」。
 - **操作**：长按「点了」，选 **忘掉学到的**；点 ⌫ 删掉拼音，再点 d l。
-- **预期**：第一个回到「带来」，「点了」回到没选过时的位置（不在第二）。
+- **预期**：第一个回到「的脸」，「点了」回到没选过时的位置（不在第二）。
 - **JVM**：`PinyinUatTest.forgettingWhatWasLearned`（:lib:ime-eval:uatTest，真数据）；设备上不跑。
 
 ### PY-33 [P1] 长按候选的菜单只列适用的项
@@ -383,7 +419,7 @@
 - **JVM**：ime-core `NineKeyLettersCustomTest.theBuiltInGroupsInAnotherOrderAreThatKeyboardAndItsRecord`（同样的码、同样的记录）、`KeyboardCustomTest.theBuiltInGroupsRearrangedAreTheBuiltInKeyboardOnEitherInputMethod`、`ImKeyboardsTest.aLayoutOfOnesOwnIsShownAsTheBuiltInOneItIsTypedAs`；app `GroupedKeyboardOwnGroupsTest.theEighteenKeysRearrangedAreDrawnAsWrittenAndTypedAsTheEighteenKeys`；设备上不跑（换位的样子由 SP-51 在设备上看）。
 
 ### PY-155 [P1] 打字时换成另一种分组的键盘：退格还改刚才打的，点新键盘的字母键时先上屏
-- **前提**：B0；导入了两个自己分组的布局（比如 17 键和另一种 17 键），拼音用其中一个。
+- **前提**：B0；导入了两个自己分组的布局（比如 17 键和另一种 17 键），两个都在 **外观 → 布局** 点它 → **用在…** 勾了 **拼音**（这样都在拼音的 ⋯ → 键盘 里），拼音用其中一个。
 - **操作**：在第一个键盘上打 nih（不选候选）；打字时从工具栏 **⋯ → 键盘** 换成另一个；先点一下退格，再点新键盘上的一个字母键。
 - **预期**：退格删的是刚才打的最后一个键（还在编码里，没有上屏）；点新键盘的字母键时，刚才打的先照回车的样子上屏，再从新键盘的这个键开始打。不会丢掉打了一半的拼音，也不会退格删掉已经上屏的字。
 - **JVM**：ime-core `OwnKeysTurnTest`（什么键等、什么键换）；app `OwnKeysTurnChainTest.anotherGroupingShownWhileTypingTakesOverAtItsFirstKey`（两个自己分组的键盘各自显示、点键，经真的 KotlinHost 到真引擎：退格、上屏、新键盘接着打）、`KotlinHostOwnKeysTest.otherGroupsWhileTypingCommitTheCodeAtTheirFirstCode`、`aBackspaceAfterOtherGroupsAreToldTakesFromTheCodeTyped`、`otherGroupsLeaveTheFieldsComposingTextAlone`、`EngineBridgeTest.theConfigReadAgainKeepsTheGroupsTypedOnTillTheOthersFirstCode`（换了还没打时改设置也不丢）；设备上不跑：要导入两个自己分组的布局再在 ⋯ → 键盘 里换，脚本没在 0.6.1 写，留到 0.6.1 之后。
@@ -406,15 +442,15 @@
 <!-- learning: U-02 U-10 -->
 - **前提**：B0。
 - **操作**：打「他」，点 d l 看候选，选「点了」；接着打「他」，点 d l 看候选，选「点了」；接着打「他」，点 d l。
-- **预期**：第一次第一个是「带来」；第二次是「带来、点了」（选一次只排到前面）；第三次是「点了、带来」。
+- **预期**：第一次第一个是「的脸」；第二次是「的脸、点了」（选一次只排到前面）；第三次是「点了、的脸」。
 - **JVM**：`PinyinUatTest.afterTheSameWordsPickedOnceIsSecondTwiceFirst`（:lib:ime-eval:uatTest，真数据）；设备上不跑。
 
 ### PY-64 [P1] 选错了马上删，删掉的不算，重打的算改选
 <!-- learning: U-03 D2 -->
 - **前提**：B0。
 - **操作**：打「他」；点 d l 选「带领」；点 m a 点空格（上屏「吗」）；点 ⌫ 三下删掉「带领吗」；点 d i a n l e m a 选「点了吗」，点 **。**；打「他」，点 d l 看候选，选「点了」，点 **。**；打「他」，点 d l。
-- **预期**：第一次「他 dl」第一个是「带来」，「点了」在「带领」前面（「带领」被删掉不算用过，重打的「点了吗」算在 dl 下改选了一次「点了」）；再选一次「点了」后，它排第一（和重打那次连着两次）。（不用「给」后的「打了」：词库现在在「给」后面就把「打了」排第一，选它不算改选。）
-- **JVM**：`HostReplayUatTest.aSentenceTypedBeforeIsNotToldAfterTheAppsOwnCommits`（整条操作；回放和设备一样首选「带来」（上屏后不告诉引擎前文，dev/design/fcitx-s3-report.md））；设备上不跑。
+- **预期**：第一次「他 dl」第一个是「的脸」，「点了」在「带领」前面（「带领」被删掉不算用过，重打的「点了吗」算在 dl 下改选了一次「点了」）；再选一次「点了」后，它排第一（和重打那次连着两次）。（不用「给」后的「打了」：词库现在在「给」后面就把「打了」排第一，选它不算改选。）
+- **JVM**：`HostReplayUatTest.aSentenceTypedBeforeIsNotToldAfterTheAppsOwnCommits`（整条操作；回放和设备一样首选「的脸」（上屏后不告诉引擎前文，dev/design/fcitx-s3-report.md））；设备上不跑。
 
 ### PY-68 [P1] 删除、屏蔽、固定都能当场撤销
 <!-- learning: U-82 -->
@@ -425,9 +461,9 @@
 
 ### PY-69 [P1] 为什么排在这
 <!-- learning: U-81 D26 -->
-- **前提**：B0。打「他」，点 d l 选「点了」；接着打「他」，点 d l 选「点了」；接着打「他」，点 d l，候选显示着「点了、带来」。
-- **操作**：长按「点了」选 **为什么排在这**；点键盘上菜单外的地方关掉菜单（这一下只关菜单，不打字；不点键盘上面的网页空白，那一下归应用，网页会让框失去焦点），再长按「带来」选同一项；点里面的复制给开发者，到「长文本」框粘贴看。
-- **预期**：「点了」写的是"在这个前文后面连着选过两次"；「带来」写的是"最近在这串键下用过 N 次"或"词库自带的顺序"；复制出的内容有 dl 的候选和次数，没有「他」这个前文的字，也没有别的词。
+- **前提**：B0。打「他」，点 d l 选「点了」；接着打「他」，点 d l 选「点了」；接着打「他」，点 d l，候选显示着「点了、的脸」。
+- **操作**：长按「点了」选 **为什么排在这**；点键盘上菜单外的地方关掉菜单（这一下只关菜单，不打字；不点键盘上面的网页空白，那一下归应用，网页会让框失去焦点），再长按「的脸」选同一项；点里面的复制给开发者，到「长文本」框粘贴看。
+- **预期**：「点了」写的是"在这个前文后面连着选过两次"；「的脸」写的是"最近在这串键下用过 N 次"或"词库自带的顺序"；复制出的内容有 dl 的候选和次数，没有「他」这个前文的字，也没有别的词。
 - **JVM**：`CandidateMenuUatTest.whyItIsThereAndTheReportCopied`（「为什么排在这」按引擎给的理由写；复制给开发者把引擎的报告放上剪贴板。报告里有什么是引擎的事）；设备上不跑。
 
 ### PY-72 [P1] 不再联想（前文是模型切出的最后一词：整词选的「你好」可能记在「好」后面）
@@ -449,8 +485,8 @@
 <!-- learning: U-53 -->
 - **前提**：B0，点「聊天」框。在框里点 d l 点空格上屏「带来」，点 **。**；这样做三次（「带来」用过，后面选两次的「点了」才不会按第 3 条到处排第一，见 docs/pinyin.md「候选怎么排」）。先不发出。
 - **操作**：接着打「他」，点回车，连同前面的字一起发出；点 d l 选「点了」，发出；打「他」，发出；点 d l 选「点了」，发出；回到空的「普通文本」框打「他」，点 d l。
-- **预期**：「普通文本」里「他 dl」的第一个是「带来」：发出消息后接着打的不算在「他」后面（两次「点了」都学在"没有前文"下）。
-- **JVM**：`HostCasesUatTest.wordsSentFromAChatBoxAreLearnedWithNothingBefore`（整条操作，他 dl 第一个「带来」）；设备上不跑。
+- **预期**：「普通文本」里「他 dl」下长按「点了」选 **为什么排在这**，不写"在这个前文后面连着选过两次"：发出消息后接着打的不算在「他」后面（两次「点了」都学在"没有前文"下）。「点了」排第一也可以（dl 下用过两次的词靠前），只要不是因为「他」后面学到的搭配。
+- **JVM**：`HostCasesUatTest.wordsSentFromAChatBoxAreLearnedWithNothingBefore`（整条操作，他 dl 下「点了」的排位原因不是「在这个前文后面选过」）；设备上不跑。
 
 
 ## 14 键
@@ -655,6 +691,18 @@
 - **预期**：筛空时这一页留着，是空的（以前会收起）；⌫ 撤回最后一笔，候选回来；拼音删完时收起，回到键盘。
 - **JVM**：`StrokePageUatTest.aStrokeLeavingNoCandidateKeepsThePageAndItsBackspaceTakesItBack`。
 
+### PY-157 [P1] 笔画把第一个筛出第一页后点候选：上屏的就是点的那个
+- **前提**：B0，另外笔画筛选。
+- **操作**：打 nizai，在键上划一横（「拟」开头的留下，原来第一个的「你在」筛掉），看候选；翻到第二页，点一个候选；停 2 秒再看候选。重复几次，每次点不同位置。
+- **预期**：点哪个就上屏哪个，不会上屏一个没显示过或笔画不符的词（0.6.1 用户实录：九键微软双拼 gj 划折，点「好看」上屏「估计」、点「敢」上屏「参加」）；停顿后候选不变。
+- **JVM**：`StrokeFilterTest.aFilterThatReordersPastTheFirstPageLeavesATapTheCandidateTapped`（ime-core：真 PinyinSession，笔画把会话的第一个筛出第一页，点第二页的候选上屏的就是它）、`StrokeFilterTest.aCandidateTheSessionMovedUnderTheStrokesIsPickedAndPressedWhereItIsNow`（会话悄悄错位时 Pick/Forget/why 仍落在原来的词上）、`StrokeFilterTest.aCandidateGoneFromTheSessionUnderTheStrokesPutsNothingUpAndIsLookedForAgain`（候选消失时不上屏并重新筛）；设备上只做冒烟。
+
+### PY-162 [P1] 高档打一长句后停下：首选和次序都不变
+- **前提**：B0；**通用输入 → 性能档位** 选高档。
+- **操作**：打一长句（如 womenjintianxiawuquyinhangbanshi），看候选；停 2 秒再看；退格一个字母再打回去，再看。
+- **预期**：停顿前后、退格打回前后，首选和整页的次序都一样；同样的上文和按键总给出同样的候选。
+- **JVM**：`EnginesPickingTest.whatAKeyShowsHangsOnTheTextBeforeAndTheKeysAlone`（ime-core：高档的门有的键送大模型、有的不送；逐键打、中间移光标、提交后告知上文，与新会话一次打完逐位相同）；设备上只做冒烟。
+
 ### PY-105 [P1] 拼音 18 键
 - **前提**：B0，在 **输入法 → 拼音** 里把 **键盘** 选成「18 键」，回测试页点「普通文本」框。
 - **操作**：看键盘；点 N（BN 键）I（IO 键）H（H 键）A（A 键）O（IO 键），看编码行和候选；点「你好」。
@@ -686,7 +734,13 @@
 - **前提**：B0-注音全键盘。
 - **操作**：看键盘；点 ㄋ ㄧ ˇ ㄏ ㄠ ˇ，看码行和候选，点「你好」；点 ㄇ ㄚ，按空格，看码行和候选，再按空格；点 ㄉ ㄜ ˙，看候选，按空格；点 ㄅ ˇ，按回车。
 - **预期**：大千排列，第一行是 ㄅ ㄉ ˇ ˋ ㄓ ˊ ˙ ㄚ ㄞ ㄢ ㄦ；码行 `ㄋㄧˇ ㄏㄠˇ`，首选「你好」；ㄇㄚ 后按空格码行是 `ㄇㄚˉ`、首选「妈」，再按空格上屏「妈」；ㄉㄜ˙ 首选「的」；回车上屏 `ㄅˇ`。框里最后是「你好妈的ㄅˇ」。
-- **JVM**：`ZhuyinKeyboardTest.dachenHasEachSymbolAndToneWhereTaiwanPrintsIt`、`PinyinSessionZhuyinTest`（`dachenTypesAWordByItsSymbolsShownInZhuyin`、`dachensSpaceIsTheFirstToneThenThePick`、`enterCommitsTheZhuyinShown`）、`PinyinUatTest.aNeutralToneTypedOrNotPutsTheWordFirst`（真数据：ㄓㄨㄛㄗ、ㄉㄨㄥㄒㄧ 打 ˙、打本调、不打声调，「桌子」「东西」都排第一，大千和注音九键都是）；设备上照跑。
+- **JVM**：`ZhuyinSceneGesturesTest`（`everyKeyGestures`、`dachenOnTheKeysAsShown`）、`PinyinSessionZhuyinTest`（`dachenTypesAWordByItsSymbolsShownInZhuyin`、`dachensSpaceIsTheFirstToneThenThePick`、`enterCommitsTheZhuyinShown`）、`PinyinUatTest.aNeutralToneTypedOrNotPutsTheWordFirst`（真数据：ㄓㄨㄛㄗ、ㄉㄨㄥㄒㄧ 打 ˙、打本调、不打声调，「桌子」「东西」都排第一，大千和注音九键都是）；设备上照跑。
+
+### PY-161 [P1] 注音键盘：打不打声调学的是同一份
+- **前提**：B0-注音全键盘，**用我的输入习惯** 开着，没在 ㄋㄧ 下学过。
+- **操作**：点 ㄋ ㄧ，看第一个候选，删光；点 ㄋ ㄧ ˇ，选「拟」；点 ㄋ ㄧ，选「拟」；再点 ㄋ ㄧ、点 ㄋ ㄧ ˇ、点 ㄋ ㄧ ˊ，各看第一个候选。长按「拟」选 **删除**（忘掉），再点 ㄋ ㄧ 看候选。换到注音九键照做一遍（声调用左边的 ˇ、ˊ 键）。
+- **预期**：一开始第一个不是「拟」；带声调和不带声调各选一次以后，ㄋㄧ 和 ㄋㄧˇ 下第一个都是「拟」（声调不算键，两次学在同一串键下）；ㄋㄧˊ 下第一个不是「拟」（「拟」读三声，打了对不上的声调，学到的第一不提前）；忘掉以后 ㄋㄧ 的第一个回到原来的。注音九键一样。0.6.3 以前带着声调学到的顺序和固定不再起作用，也不会出错。
+- **JVM**：`PinyinSessionZhuyinTest`（`aWordTypedWithAToneAndWithoutLearnsAsOne`、`aTonedPickUndoesAndForgetsFromTheOneRecord`、`anOldTonedRecordIsKeptButReadNoMore`、`aWordLearnedFirstGivesWayToATypedToneItHasNot`、`aPinGivesWayToATypedToneItHasNot`：大千和注音九键，带声调和不带声调学成一条、撤销和忘掉、旧的带声调记录留着不读、备份读回一样、学到的第一和固定（单字和句中的词）在声调对不上时不提前）、`PressedKeysTest.zhuyinsTonesAreNoKeysAsTheSeparatorIsNone`；设备上不跑。
 
 ### PY-110 [P1] 候选词注音一律标本调，不标轻声
 - **前提**：B0，**候选词注音** 选「拼音」。
@@ -759,6 +813,12 @@
 - **操作**：打 yinhang，长按候选「银行」，点读音行；点「行」那一行；点「‹ 银行」。录屏或盯着看换卡的那一下。竖屏做一遍，横屏再做一遍。
 - **预期**：点「行」，词卡在同一个弹窗里一帧换成字卡：不先消失、不变淡、不从候选那里缩小再长大；弹窗贴着候选栏的那条边不动（竖屏弹窗在候选栏上面，是下边；横屏在下面，是上边）、左右不变，只有另一条边随卡的高度变，不滑过去，也不压到候选栏上（卡比地方高时，菜单照旧能往下滑着看下面的项）。点「‹ 银行」换回词卡也一样。点读音行展开时照旧从候选那里长出来。字卡比词卡高、放不下而换到候选另一边时（悬浮键盘挪到中间偏下能见到），在新的那一边从候选重新长出来。Android 14 以下也不滑。
 - **JVM**：app `CandidateMenuUatTest.aCharacterOfTheWordAndBackStayInTheSameWindow`（同一个弹窗、宽度不变、只在展开时从候选长出来、没变淡没缩小、系统的挪动动画关着，SDK 29 也跑）；ime-core `CardNavTest.onlyOpeningTheLineGrowsTheWindowAnew`、`CardNavTest.aStepToTheCandidatesOtherSideGrowsTheWindowAnew`；设备上照跑（竖屏、横屏：弹窗的左右和贴候选栏的边，不压候选栏）；逐帧录屏见 `dev/design/061-wordcard-shots/`。
+
+### PY-166 [P1] 词卡上下滑过以后，点字照样打开字卡
+- **前提**：B0，「普通文本」框；词卡比弹窗能占的地方高、要滑着看（七个字的词卡一般放不下；放得下的屏幕上脚本记阻塞，靠 JVM 那条）。
+- **操作**：打 zhonghuarenmingongheguo，长按候选「中华人民共和国」，点读音行；在词卡的字行上往上滑到底，点「和」那一行；点「‹ 中华人民共和国」返回，（回来时词卡若在最上面，先往上滑到底）往下滑到顶，点「华」那一行。
+- **预期**：两次滑动字行都跟着动；两次都打开那个字的字卡（最上面「‹ 中华人民共和国」）；滑动停下后第一次点就打开，不用点两下。
+- **JVM**：app `WordCardScrollUatTest.aWordCardScrolledToItsEndStillOpensARowOnTheFirstTap`（查过词卡确实能滚）。
 
 ### PY-125 [P1] 多音字由词定读音：行业的行读 háng，行走的行读 xíng；字卡里那个读音排第一
 - **前提**：B0，「普通文本」框。

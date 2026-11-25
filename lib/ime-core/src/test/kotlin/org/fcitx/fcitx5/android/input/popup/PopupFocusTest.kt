@@ -102,13 +102,38 @@ class PopupFocusTest {
         },
     )
 
-    // 060-edge-popup (用户 2026-11-10「全部按全键盘的排法」): the key's own first, the rest as listed
+    // a menu a swipe down opened: the finger below the key; going on down is no going back, up onto the key is
+    @Test
+    @Uat("KB-115")
+    fun aMenuOpenedDownCancelsBackUpOnTheKeyAndNeverGoingOnDown() = assertRows(
+        "going on down, however far, keeps the pick" to {
+            // the key's bottom at y = 100, the finger 20 below it
+            val f = PopupFocus(listOf(intArrayOf(0, 1, 2)), 0, 1, 20f, 25f, Float.POSITIVE_INFINITY, cancelAboveAt = 100f)
+            assertEquals(1, f.moveTo(40f, 120f))
+            assertEquals(1, f.moveTo(40f, 400f))
+            assertEquals(2, f.moveTo(60f, 500f))
+        },
+        "back up onto the key cancels, a shake up short of it does not" to {
+            val f = PopupFocus(listOf(intArrayOf(0, 1, 2)), 0, 1, 20f, 25f, Float.POSITIVE_INFINITY, cancelAboveAt = 100f)
+            assertEquals(1, f.moveTo(40f, 120f))
+            assertEquals(2, f.moveTo(60f, 101f))
+            assertEquals(PopupFocus.CANCELLED, f.moveTo(60f, 99f))
+        },
+        "a finger still on the key when it opens gets the shake room up" to {
+            // 2 above the key's bottom: the floor (0.15 of the row step 25) decides
+            val f = PopupFocus(listOf(intArrayOf(0, 1, 2)), 0, 1, 20f, 25f, Float.POSITIVE_INFINITY, cancelAboveAt = 100f)
+            assertEquals(1, f.moveTo(40f, 98f))
+            assertEquals(1, f.moveTo(40f, 95f))
+            assertEquals(PopupFocus.CANCELLED, f.moveTo(40f, 94f))
+        },
+    )
+
+    // the key's own first, the rest as listed
 
     @Test
     @Uat("PY-89b")
     fun theKeysOwnComesFirstAndTheRestAsListed() {
-        // 九键's 3: D E F 3 d e f, 3 first then the rest as listed (PopupKeyboardUi's columns then
-        // place them round the focus, right, left, right ..., on the screen as f d E 3 D F e)
+        // 九键's 3: D E F 3 d e f, 3 first then the rest as listed (placed round the focus: f d E 3 D F e)
         assertEquals(listOf(3, 0, 1, 2, 4, 5, 6), PopupFocus.ownFirst(7, 3).toList())
         // 十四键's L: L 0 l, its corner first; at the screen's right l L 0
         assertEquals(listOf(1, 0, 2), PopupFocus.ownFirst(3, 1).toList())

@@ -9,6 +9,7 @@ import org.fcitx.fcitx5.android.FcitxApplication
 import org.fcitx.fcitx5.android.core.FakeHostApi
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog
 import org.fcitx.fcitx5.android.engine.runtime.EngineSettings
+import org.fcitx.fcitx5.android.engine.runtime.ModelLevel
 import org.fcitx.fcitx5.android.host.ConfigTree
 import org.fcitx.fcitx5.android.host.EngineOptions
 import org.junit.Assert.assertEquals
@@ -19,10 +20,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-/**
- * The shared page saves what it shows alone: pinyin's own options, read with it from pinyin's
- * config, may have been changed on pinyin's page since, and writing them back would undo that.
- */
+/** Pinyin's own options, read with the shared ones, may have been changed on pinyin's page since: not written back. */
 @RunWith(RobolectricTestRunner::class)
 @Config(application = FcitxApplication::class)
 class SharedInputSavesTest {
@@ -40,8 +38,7 @@ class SharedInputSavesTest {
         assertNull(saved[EngineSettings.CHAIZI])
     }
 
-    // pinyin's page open behind the shared one read the shared options before they changed there:
-    // its save, of what it shows alone, leaves them as the shared page set them (the host's partial load)
+    // pinyin's page open behind read the shared options before they changed: its save leaves them as set
     @Test
     fun aPageOpenBehindTheSharedOneDoesNotWriteBackWhatItRead() {
         val options = EngineOptions()
@@ -51,7 +48,7 @@ class SharedInputSavesTest {
         options.setPage(InputMethodCatalog.PINYIN, ConfigTree.of(InputMethodSettings.only(InputMethodSettings.SHARED, shared)))
         behind[EngineSettings.CHAIZI] = "False"
         options.setPage(InputMethodCatalog.PINYIN, ConfigTree.of(InputMethodSettings.only(InputMethodSettings.of(InputMethodCatalog.PINYIN)!!, behind)))
-        val read = options.toSettings()
+        val read = options.toSettings(ModelLevel.HIGH)
         assertFalse(read.emoji)
         assertFalse(read.chaizi)
     }

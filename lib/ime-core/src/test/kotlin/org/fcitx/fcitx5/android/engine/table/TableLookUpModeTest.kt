@@ -19,10 +19,7 @@ import org.junit.Test
 /** The table's 拼 key ([Action.LookUp]): every letter looked up by pinyin till it is pressed again. */
 class TableLookUpModeTest {
 
-    /**
-     * Shows what is typed; 我 for wo, 你 for ni, picked by a space, 你 of nihao a piece; Enter gives
-     * the keys. What it would learn, [learned]: commits while learning, a piece handed back.
-     */
+    /** Shows what is typed; 我 wo, 你 ni, picked by space, 你 of nihao a piece; Enter gives the keys; [learned] what it would learn. */
     private class Pinyin : Session {
         private val typed = StringBuilder()
         private var pieces = ""
@@ -75,7 +72,8 @@ class TableLookUpModeTest {
         }
     }
 
-    private fun wubi(mode: TableSession.LookUpMode = TableSession.LookUpMode(), options: TableOptions = TableOptions.WUBI, pinyin: Pinyin = Pinyin()) =
+    // 五笔 itself has no 拼 key (z looks up there): the mode as the tables that keep one have it, on 五笔's codes
+    private fun wubi(mode: TableSession.LookUpMode = TableSession.LookUpMode(), options: TableOptions = TableOptions.WUBI.copy(lookUpKey = true), pinyin: Pinyin = Pinyin()) =
         TableSession(dictionary("trnt 我", "wqiy 你", "aawt 工作", "haob 好", "xiab 系"), options, pinyin, lookUpMode = mode)
 
     @Test
@@ -88,14 +86,11 @@ class TableLookUpModeTest {
         assertTrue(wo.lookingUp)
         assertEquals("wo", wo.preedit)
         assertEquals(listOf("我"), wo.candidates)
-        // its code beside it
         assertEquals(listOf("trnt"), wo.hints)
         assertEquals("我", t.apply(Action.Select(0)).commit)
-        // still on: the next letter looks up too
         val n = t.apply(Action.Key('n'))
         assertTrue(n.lookingUp)
         assertEquals("n", n.preedit)
-        // off: a code again
         t.apply(Action.Reset)
         t.apply(Action.LookUp)
         assertFalse(mode.on)
@@ -108,11 +103,9 @@ class TableLookUpModeTest {
     fun whatIsTypedGoesOverAsItIsPressed() {
         val t = wubi()
         t.type("wq")
-        // a code into a lookup
         val looked = t.apply(Action.LookUp)
         assertTrue(looked.lookingUp)
         assertEquals("wq", looked.preedit)
-        // the lookup back into a code
         val code = t.apply(Action.LookUp)
         assertFalse(code.lookingUp)
         assertEquals("wq", code.preedit)
@@ -125,7 +118,6 @@ class TableLookUpModeTest {
         val whole = t.apply(Action.LookUp)
         assertEquals("", whole.commit)
         assertEquals(listOf("工作"), whole.candidates)
-        // as many as the longest code takes
         t.apply(Action.Reset)
         t.apply(Action.LookUp)
         t.type("aawtwq")
@@ -156,7 +148,6 @@ class TableLookUpModeTest {
         assertEquals("", gone.preedit)
         assertTrue(gone.handled)
         t.type("wo")
-        // no key to give back before them
         assertEquals("wo", t.apply(Action.CommitRaw).commit)
         // a key the app takes commits what was looked up, then is the app's
         t.type("wo")
@@ -169,19 +160,22 @@ class TableLookUpModeTest {
     fun theModeOutlivesASessionMadeAnewAndATableWithNoPinyinHasNone() {
         val mode = TableSession.LookUpMode()
         wubi(mode).apply(Action.LookUp)
-        // the settings changed: a session made anew, the same 拼 key
         assertTrue(wubi(mode).type("ni").second.lookingUp)
         // 仓颉 has no lookup key of its own: its 拼 key looks up all the same
         val cangjie = TableSession(dictionary("onf 你", header = mapOf("键码" to "abcdefghijklmnopqrstuvwxyz")), TableOptions.CANGJIE, Pinyin(), lookUpMode = TableSession.LookUpMode())
         cangjie.apply(Action.LookUp)
         val ni = cangjie.type("ni").second
         assertEquals(listOf("你"), ni.candidates)
-        // its code as its keys show it
         assertEquals(listOf("人弓火"), ni.hints)
-        // none: nothing to turn on
         val alone = TableSession(dictionary("trnt 我"), TableOptions.WUBI)
         alone.apply(Action.LookUp)
         assertFalse(alone.type("wo").second.lookingUp)
+        // 五笔 and 五笔拼音 have no 拼 key: a LookUp there turns nothing on
+        for (options in listOf(TableOptions.WUBI, TableOptions.WUBI_PINYIN)) {
+            val keyless = TableSession(dictionary("trnt 我"), options, Pinyin(), lookUpMode = TableSession.LookUpMode())
+            keyless.apply(Action.LookUp)
+            assertFalse(options.toString(), keyless.type("wo").second.lookingUp)
+        }
     }
 
     @Test
@@ -194,13 +188,10 @@ class TableLookUpModeTest {
         assertEquals("日", a.preedit)
         assertFalse(a.lookingUp)
         assertEquals("日月", cangjie.apply(Action.Key('b')).preedit)
-        // the cursor where it was: one root a letter
         assertEquals(1, cangjie.apply(Action.Cursor(1)).cursor)
-        // what is committed as typed is the letters
         assertEquals("ab", cangjie.apply(Action.CommitRaw).commit)
     }
 
-    // off mid-lookup: nothing of the pinyin committed nor learned, the letters a code again (review b5 MUST)
     @Test
     fun offTheLettersAreACodeAgainAndNothingIsLearned() {
         val pinyin = Pinyin()
@@ -212,7 +203,6 @@ class TableLookUpModeTest {
         assertEquals("hao", off.preedit)
         assertFalse(off.lookingUp)
         assertEquals(emptyList<String>(), pinyin.learned)
-        // a ' has no place in a code: the letters alone
         t.apply(Action.Reset)
         t.apply(Action.LookUp)
         t.type("xi'a")
@@ -232,7 +222,6 @@ class TableLookUpModeTest {
         assertEquals("xian", erbi.apply(Action.LookUp).preedit)
     }
 
-    // a word picked of it is put in, as a pick is, and learned so; the letters after it a code again
     @Test
     fun offAWordPickedOfItIsPutInAndTheRestIsACode() {
         val pinyin = Pinyin()
@@ -262,8 +251,8 @@ class TableLookUpModeTest {
                 // t, as trnt 我 starts: a code the table has (a key no code starts is the app's, and z after it would look up)
                 Row("五笔's wildcard is a letter, z: past the first key it is still a code", { wubi() }, "tz", false),
                 Row(
-                    "五笔拼音's z past the first key is pinyin's: looked up",
-                    { TableSession(dictionary("trnt 我", "@wo 我", header = mapOf("拼音" to "@")), TableOptions.WUBI_PINYIN, Pinyin(), lookUpMode = TableSession.LookUpMode()) },
+                    "a table spelling pinyin: z past the first key is pinyin's, looked up",
+                    { TableSession(dictionary("trnt 我", "@wo 我", header = mapOf("拼音" to "@")), TableOptions.WUBI_PINYIN.copy(lookUpKey = true), Pinyin(), lookUpMode = TableSession.LookUpMode()) },
                     "tz", true,
                 ),
             ),

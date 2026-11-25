@@ -5,12 +5,20 @@
 package org.fcitx.fcitx5.android.scene
 
 import org.fcitx.fcitx5.android.scene.Fixtures.ok
+import org.fcitx.fcitx5.android.scene.engine.MarkContent
 import org.fcitx.fcitx5.android.scene.engine.SceneBuilder
+import org.fcitx.fcitx5.android.scene.keys.ScrollItem
 import org.fcitx.fcitx5.android.scene.layout.LayoutReader
+import org.fcitx.fcitx5.android.scene.look.LookDefaults
+import org.fcitx.fcitx5.android.scene.look.LookTheme
+import org.fcitx.fcitx5.android.scene.look.LookThemeTest
+import org.fcitx.fcitx5.android.scene.rules.KeyMarks
 import org.fcitx.fcitx5.android.scene.skin.assertRows
+import org.fcitx.fcitx5.android.scene.theme.Argb
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * The number pads of 0.6.1 (user 2026-11-13): ⌫ at the top right of every pad, as on the nine keys; a place a pad has
@@ -27,20 +35,16 @@ class NumberPadsTest {
 
     private fun key(s: Scene, id: String) = s.keys.single { it.id == id }
 
-    // the key a pad had at the top right before ⌫ took it: right of 9 now
-    private val corners = mapOf("full" to "/", "phone" to "-")
+    // the key right of 9 on a pad that has one there; the other pads' place is blank
+    private val corners = mapOf("full" to "=")
 
     // a key's right edge as placed, the last key's a sum of widths
     private val eps = 1e-6
 
     // every pad, each with what it is: the rows of the tests below, each in every form
     private val pads = listOf(
-        "full" to "the 123 key's pad, whose / it had there moves below the space",
-        "phone" to "a dialler's, whose - moves below the space",
-        "digits" to "a PIN's, blank there before",
-        "signed" to "a signed number's",
-        "decimal" to "a decimal's",
-        "signed-decimal" to "a signed decimal's",
+        "full" to "the 123 key's pad, = right of 9",
+        "phone" to "a dialler's, blank right of 9",
         "datetime" to "a date's or time's",
     ).flatMap { (pad, why) -> Forms.all.keys.map { form -> Triple(pad, form, why) } }
 
@@ -80,9 +84,9 @@ class NumberPadsTest {
     ) { (pad, form, _) ->
         val s = scene(pad, form)
         val nine = Forms.scene("nine", Forms.env("nine", Forms.all.getValue(form)))
-        // the pad's key to the nine keys' in its place: the digits, ⌫, Return, 符, and 返回 where 123 is
+        // the pad's key to the nine keys' in its place: the digits, ⌫, Return and 符
         val match = (1..9).associate { "$it" to "$it" } +
-            mapOf("backspace" to "backspace", "enter" to "enter", "symbols" to "symbols", "back" to "numbers")
+            mapOf("backspace" to "backspace", "enter" to "enter", "symbols" to "symbols")
         for ((id, there) in match) {
             val b = key(s, id).bounds
             val n = key(nine, there).bounds
@@ -91,9 +95,15 @@ class NumberPadsTest {
             assertEquals(n.top, b.top, eps, "$id's top on the nine keys' $there")
             assertEquals(n.bottom, b.bottom, eps, "$id's bottom on the nine keys' $there")
         }
-        // 0 under 8, the digits' column as on a phone's
-        assertEquals(key(s, "8").bounds.left, key(s, "0").bounds.left, eps, "0 under 8")
-        assertEquals(key(s, "8").bounds.right, key(s, "0").bounds.right, eps, "0 under 8")
+        // 返回 starts where 123 does and fills 1's column; 0 and . in the digits' columns
+        val back = key(s, "back").bounds
+        val numbers = key(nine, "numbers").bounds
+        assertEquals(numbers.left, back.left, eps, "返回 starts where 123 does")
+        for ((id, above) in listOf("0" to "8", "back" to "1")) {
+            assertEquals(key(s, above).bounds.left, key(s, id).bounds.left, eps, "$id's left under $above")
+            assertEquals(key(s, above).bounds.right, key(s, id).bounds.right, eps, "$id's right under $above")
+        }
+        if (pad != "phone") assertEquals(key(s, "9").bounds.right, key(s, ".").bounds.right, eps, ". under 9")
     }
 
     // 符 as the letter boards' 符 (its words, its function face: drawn the same), the way back saying 返回 as the panels' does
@@ -105,12 +115,17 @@ class NumberPadsTest {
         val s = scene("full", form)
         val nine = Forms.scene("nine", Forms.env("nine", Forms.all.getValue(form)))
         val bottom = s.keys.filter { it.bounds.top == key(s, "0").bounds.top }.sortedBy { it.bounds.left }.map { it.id }
-        assertEquals(listOf("symbols", "back", ",", "0", "=", ".", "enter"), bottom, "the bottom row, left to right")
+        assertEquals(listOf("symbols", "back", "0", ".", "enter"), bottom, "the bottom row, left to right")
         val sym = key(s, "symbols")
         val letters = key(nine, "symbols")
         assertEquals(letters.label, sym.label, "符's words")
         assertEquals(letters.kind, sym.kind, "a function key, as the letter boards' 符")
-        assertEquals(letters.ops(false), sym.ops(false), "drawn as the nine keys' 符, in the same place")
+        val shapes = { k: KeyNode -> k.ops(false).filterNot { it is Op.Text } }
+        assertEquals(shapes(letters), shapes(sym), "drawn as the nine keys' 符, in the same place")
+        // a row's labels share one size, so where 返回 is squeezed (floating) 符's word comes out a little smaller
+        val word = { k: KeyNode -> k.ops(false).filterIsInstance<Op.Text>().single() }
+        assertEquals(word(letters).text, word(sym).text, "符's word")
+        assertTrue(word(sym).size in word(letters).size * 0.9..word(letters).size, "符's word near the nine keys' size")
         val back = key(s, "back")
         assertEquals(Forms.block.texts.back, back.label, "返回, the panels' word")
         assertEquals(key(nine, "numbers").kind, back.kind, "a function key as the 123 it stands for")
@@ -149,19 +164,12 @@ class NumberPadsTest {
         assertEquals("返回", Forms.block.texts.back, "the test's words are the app's Chinese")
     }
 
-    // nothing drawn at a blank place: each pad's ground (Scene.base) is the full pad's, which has no blank, in each form;
+    // nothing drawn at a blank place: the date pad's ground (Scene.base) is the full pad's, which has no blank, in each form;
     // and a finger there presses nothing
     @Test
     fun aBlankPlaceDrawsNothingAndTakesNoTouch() = assertRows(
-        listOf(
-            // each has other blanks (a PIN's the column left of the digits and three of the bottom row): the place right
-            // of 9, which every one of them leaves blank, is the one probed
-            "digits" to "a PIN's",
-            "signed" to "a signed number's",
-            "decimal" to "a decimal's",
-            "signed-decimal" to "a signed decimal's",
-            "datetime" to "a date's or time's",
-        ).flatMap { (pad, why) -> Forms.all.keys.map { form -> Triple(pad, form, why) } },
+        // its other blanks are two of the bottom row: the place right of 9 is the one probed
+        listOf("phone" to "a dialler's", "datetime" to "a date's or time's").flatMap { (pad, why) -> Forms.all.keys.map { form -> Triple(pad, form, why) } },
         { (pad, form, why) -> "$pad $form: $why" },
     ) { (pad, form, _) ->
         val s = scene(pad, form)
@@ -169,6 +177,20 @@ class NumberPadsTest {
         val nine = key(s, "9").bounds
         val back = key(s, "backspace").bounds
         assertNull(s.keyAt((back.left + back.right) / 2, (nine.top + nine.bottom) / 2), "right of 9, ⌫'s old place, presses nothing")
+    }
+
+    // a board copied from the app's when a PIN's, a decimal's and a signed field's pads were their own: their keys and
+    // blanks (when="pad=digits|…") never shown, each pad it is for laid out as 0.6.2's app's was
+    @Test
+    fun anOlderCopyWithTheMergedPadsConditionsIsLaidOutAsTheAppsPads() = assertRows(
+        listOf("full" to "123's and every number field's", "phone" to "a dialler's", "datetime" to "a date's, not its but drawn all the same"),
+        { (pad, why) -> "$pad: $why" },
+    ) { (pad, _) ->
+        val old = LayoutReader.layout(testData("../../../../../uat/fixtures/layouts/uat-number-1.0.layout")).ok()
+        val e = Forms.env("number", Forms.block).let { it.copy(input = it.input.copy(pad = pad)) }
+        val mine = SceneBuilder(Fixtures.materialLight, e, FakeMeasurer).build(old, Forms.fragments).ok()
+        val app = SceneBuilder(Fixtures.materialLight, e, FakeMeasurer).build(LayoutReader.layout(testData("layout-check/number-062.xml")).ok(), Forms.fragments).ok()
+        assertEquals(app.keys.map { it.id to it.bounds }, mine.keys.map { it.id to it.bounds })
     }
 
     // a pack's number.xml of 0.6.0, its blanks written with a look: still read, drawn nothing all the same (one rule for
@@ -181,5 +203,101 @@ class NumberPadsTest {
         val s = scene(text)
         assertEquals(scene(text.replace(" look=\"function\" class=\"alt-text\"", "")).base, s.base, "the keyboard's fill alone")
         assertEquals(listOf("1", "2"), s.keys.map { it.id })
+    }
+
+    // the marks are the scroll column's, left of 1 4 7 down the top three rows; = right of 9 on 123's pad alone; the lock on every pad
+    @Test
+    fun theMarksAreAScrollColumnAndHolding返回LocksOnEveryPad() = assertRows(pads, { (pad, form, why) -> "$pad $form: $why" }) { (pad, form, _) ->
+        val s = scene(pad, form)
+        val side = s.slots.single { it.kind == "scroll" }
+        assertEquals("number", side.list)
+        assertEquals(key(s, "1").bounds.top, side.bounds.top, eps, "from the row of 1")
+        assertEquals(key(s, "7").bounds.bottom, side.bounds.bottom, eps, "to the row of 7")
+        assertEquals(key(s, "4").bounds.left, side.bounds.right, eps, "left of 4")
+        assertEquals(pad == "full", s.keys.any { it.id == "=" }, "= on 123's pad alone")
+        assertEquals(pad != "phone", s.keys.any { it.id == "." }, ". but on the dialler's")
+        assertEquals("panel-lock", key(s, "back").actions["long-press"], "held, 返回 locks")
+        assertTrue(s.keys.none { it.id == "lock" }, "no lock key of its own")
+        for (id in listOf("+", "-", "*", "/", ",", "#", "(", ")", ":")) assertTrue(s.keys.none { it.id == id }, "$id is the column's")
+    }
+
+    // locked, 返回 is in the lock's state and a small lock sits in its top right corner, its words where they were
+    @Test
+    fun locked返回WearsALockInItsCorner() = assertRows(pads, { (pad, form, why) -> "$pad $form: $why" }) { (pad, form, _) ->
+        val e = Forms.env("number", Forms.all.getValue(form)).let { it.copy(input = it.input.copy(pad = pad)) }
+        val open = key(Forms.scene("number", e), "back")
+        val locked = key(Forms.scene("number", e.copy(states = mapOf("lock" to setOf(KeyState.Locked)))), "back")
+        assertTrue(KeyState.Locked !in open.states && KeyState.Locked in locked.states, "the lock's state on 返回")
+        fun badges(k: KeyNode) = k.ops(false).filterIsInstance<Op.Icon>().filter { it.name == "lock" }
+        assertTrue(badges(open).isEmpty(), "no lock while open")
+        val lock = badges(locked).single()
+        assertTrue(lock.box.centerX > locked.bounds.centerX && lock.box.centerY < locked.bounds.centerY, "in the top right corner: ${lock.box}")
+        assertTrue(lock.box.width < locked.bounds.height / 3, "small: ${lock.box}")
+        val words = { k: KeyNode -> k.ops(false).filterIsInstance<Op.Text>().map { it.x to it.baseline } }
+        assertEquals(words(open), words(locked), "返回's words not moved")
+    }
+
+    // a user's 返回 with a way marked in a top corner: the lock in the other; in both, the lock over the top left's mark
+    @Test
+    fun theLockTakesTheTopCornerLeftFree() {
+        val layout = LayoutReader.layout(testData("number.xml").replace("""long-press="panel-lock"/>""", """long-press="panel-lock" shortcut="my/back"/>""")).ok()
+        assertRows(listOf(emptyList(), listOf("up"), listOf("up", "down")), { "marked ${it.ifEmpty { "nowhere" }}" }) { ways ->
+            val e = Forms.env("number", Forms.block).let {
+                it.copy(
+                    states = mapOf("lock" to setOf(KeyState.Locked)),
+                    marks = it.marks.copy(
+                        upAt = KeyMarks.At.TopRight, downAt = KeyMarks.At.TopLeft,
+                        shortcuts = it.marks.shortcuts + ways.associate { w -> "my/back:$w" to MarkContent.Icon("content-copy") },
+                    ),
+                )
+            }
+            val back = key(SceneBuilder(Fixtures.materialLight, e, FakeMeasurer).build(layout, Forms.fragments).ok(), "back")
+            val icons = back.ops(false).filterIsInstance<Op.Icon>()
+            val lock = icons.single { it.name == "lock" }
+            assertEquals(ways.isEmpty(), lock.box.centerX > back.bounds.centerX, "the lock right only where nothing is: ${lock.box}")
+            val marks = icons.filter { it.name == "content-copy" }
+            assertEquals(if (ways.isEmpty()) 0 else 1, marks.size, "the top right's mark kept, the top left's given up")
+            assertTrue(marks.all { it.box.centerX > back.bounds.centerX }, "kept at the top right: $marks")
+        }
+    }
+
+    // the fixture's theme predates the rule: the app's own look draws the lock in the accent colour
+    @Test
+    fun theAppsLookTintsTheLockTheAccent() {
+        val look = LookDefaults.look(LookThemeTest.palette(LookThemeTest.themeFile("material-light.xml")))
+        val e = Forms.env("number", Forms.block).copy(states = mapOf("lock" to setOf(KeyState.Locked)))
+        val lock = key(Forms.scene("number", e, LookTheme.theme(look, "default", false)), "back").ops(false).filterIsInstance<Op.Icon>().single { it.name == "lock" }
+        assertEquals(Argb(look.palette.accentKeyBackgroundColor), lock.tint)
+    }
+
+    // where no view of the app's draws it (a card, the web): a command item its icon, whole and in proportion inside its
+    // item's place; a horizontal column's items side by side
+    @Test
+    fun aColumnsCommandIsItsIconInItsPlaceAcrossOrDown() {
+        val items = mapOf("number" to listOf(ScrollItem.Text("+"), ScrollItem.Command("select_to_start")))
+        val e = Forms.env("number", Forms.block).copy(scrollItems = items)
+        val down = Forms.scene("number", e).slots.single { it.kind == "scroll" }
+        // narrow: an item's place a third of a tenth of the width, narrower than the icon
+        val text = "<keyboard xmlns=\"https://youmo-ime/layout/1\" id=\"n\" name=\"n\" family=\"number\" columns=\"10\">" +
+            "<row><slot kind=\"scroll\" list=\"number\" direction=\"horizontal\" show=\"3\"/><key id=\"1\" label=\"1\" width=\"9\"/></row></keyboard>"
+        val across = SceneBuilder(Fixtures.materialLight, e, FakeMeasurer).build(LayoutReader.layout(text).ok(), emptyMap()).ok().slots.single()
+        assertRows(listOf(down to true, across to false), { (_, vertical) -> if (vertical) "down the pad's column" else "across a narrow one" }) { (slot, vertical) ->
+            val b = slot.bounds
+            val place = if (vertical) {
+                val h = b.height / slot.show
+                Box(b.left, b.top + h, b.right, b.top + 2 * h) to Box(b.left, b.top, b.right, b.top + h)
+            } else {
+                val w = b.width / slot.show
+                Box(b.left + w, b.top, b.left + 2 * w, b.bottom) to Box(b.left, b.top, b.left + w, b.bottom)
+            }
+            val icon = slot.ops.filterIsInstance<Op.Icon>().single()
+            assertEquals("select-to-start", icon.name)
+            val (second, first) = place
+            assertTrue(icon.box.left >= second.left - eps && icon.box.right <= second.right + eps, "${icon.box} across in $second")
+            assertTrue(icon.box.top >= second.top - eps && icon.box.bottom <= second.bottom + eps, "${icon.box} down in $second")
+            assertEquals(icon.box.width, icon.box.height, eps, "a square icon stays square")
+            val plus = slot.ops.filterIsInstance<Op.Text>().single { it.text == "+" }
+            assertTrue(plus.x in first.left..first.right && plus.baseline in first.top..first.bottom, "+ at ${plus.x}, ${plus.baseline} in $first")
+        }
     }
 }

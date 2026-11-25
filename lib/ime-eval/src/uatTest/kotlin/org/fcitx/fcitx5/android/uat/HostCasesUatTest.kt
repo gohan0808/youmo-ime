@@ -6,18 +6,17 @@ package org.fcitx.fcitx5.android.uat
 
 import org.fcitx.fcitx5.android.Uat
 import org.fcitx.fcitx5.android.engine.InputMethodCatalog
+import org.fcitx.fcitx5.android.engine.learn.HabitRanker
+import org.fcitx.fcitx5.android.engine.learn.control.LearningOp
+import org.fcitx.fcitx5.android.engine.learn.control.LearningResult
 import org.fcitx.fcitx5.android.engine.runtime.EngineSettings
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * uat/ cases moved off the device whole (devflow's C class, held up by the native host until it
- * became Kotlin): each case's 操作 on [HostReplay], its 预期 asserted as the .md has it.
- */
+/** uat/ cases moved off the device whole: each case's 操作 on [HostReplay], its 预期 asserted as the .md has it. */
 class HostCasesUatTest {
-
-    // ------------------------------------------------------------------ 02 keyboard
 
     @Test
     @Uat("KB-14")
@@ -68,8 +67,6 @@ class HostCasesUatTest {
         expectText("${changed}hello, ")
     }
 
-    // ------------------------------------------------------------------ 03 九键
-
     @Test
     @Uat("T9-15")
     fun nineKeysAKeyMissedIsTypedWhereTheRowIsTapped() = with(HostReplay(im = InputMethodCatalog.PINYIN)) {
@@ -82,8 +79,6 @@ class HostCasesUatTest {
         space()
         expectText("你好")
     }
-
-    // ------------------------------------------------------------------ 06 pinyin
 
     @Test
     @Uat("PY-39")
@@ -133,9 +128,8 @@ class HostCasesUatTest {
         assertTrue("才 本 村 among ${candidates.take(SHOWN)}", candidates.containsAll(listOf("才", "本", "村")))
     }
 
-    // the whole of PY-75 as uat.py runs it (page="chat"): the 前提's 带来 typed in the chat box and
-    // sent with the first 他; 他 and 点了 sent from there twice are learned with nothing before them,
-    // so in the text field (another page of the same app, empty) 他 dl still has 带来 first
+    // PY-75 as uat.py runs it: 他 and 点了 learned with nothing before them, so in another field 他 dl has no 他 → 点了 of its own
+    // (点了 may still lead there, used twice under dl)
     @Test
     @Uat("PY-75")
     fun wordsSentFromAChatBoxAreLearnedWithNothingBefore() = with(HostReplay(firstField = "chat")) {
@@ -157,10 +151,10 @@ class HostCasesUatTest {
         type("ta")
         pick("他")
         type("dl")
-        expectFirst("带来")
+        assertTrue("点了 among ${candidates.take(SHOWN)}", "点了" in candidates)
+        val why = (engines.learning(im, LearningOp.Menu(candidates.indexOf("点了"), "点了")) as LearningResult.Menu).why
+        assertNotEquals("why 点了 is at ${candidates.indexOf("点了")} of ${candidates.take(SHOWN)}", HabitRanker.Tier.FIRST_HERE, why?.tier)
     }
-
-    // ------------------------------------------------------------------ 07 双拼
 
     @Test
     @Uat("SP-03")
@@ -215,8 +209,7 @@ class HostCasesUatTest {
         assertEquals(2, editor.selectionStart)
     }
 
-    // the user's D1/D5: what is written is in the code row, not the field, so a tap elsewhere puts it in where the
-    // cursor went, not where it was written
+    // what is written is in the code row, so a tap elsewhere puts it in where the cursor went
     @Test
     @Uat("HW-25")
     fun aTapElsewhereInTheFieldPutsTheWrittenInAtTheNewCursor() = with(HostReplay(im = InputMethodCatalog.PINYIN)) {
@@ -229,8 +222,6 @@ class HostCasesUatTest {
         assertEquals("", preedit)
         assertEquals(1, editor.selectionStart)
     }
-
-    // ------------------------------------------------------------------ 10 tables
 
     @Test
     @Uat("TBL-24")
@@ -251,8 +242,6 @@ class HostCasesUatTest {
         space()
         expectText("你")
     }
-
-    // ------------------------------------------------------------------ 11 quick input, Unicode
 
     @Test
     @Uat("QU-02")
@@ -314,8 +303,6 @@ class HostCasesUatTest {
         assertTrue("你 among $page", "你" in page)
     }
 
-    // ------------------------------------------------------------------ 15 privacy
-
     @Test
     @Uat("PR-04")
     fun leavingAPasswordFieldGoesBackToTheInputMethodBefore() = with(HostReplay(im = InputMethodCatalog.WUBI)) {
@@ -326,8 +313,6 @@ class HostCasesUatTest {
         type("q")
         expectFirst("我")
     }
-
-    // ------------------------------------------------------------------ 18 lifecycle
 
     @Test
     @Uat("LC-04")

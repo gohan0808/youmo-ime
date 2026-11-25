@@ -1,8 +1,5 @@
-// The editing's forms (src/form.js and src/panels/, 060-render-p3 M2): each panel's operations write the style text
-// meant, find the style of exactly the same select= or add one, keep what they do not know, and the engine reads
-// the result; the cascade check names the style the engine says each value comes from.
-// contract: the forms' bounds (F.LIMITS) against the engine's E.limits(), and every value a form writes against what
-// the engine reads (no "does nothing" / "not supported" warning).
+// The editing's forms: each panel's operations write the style text meant, and the engine reads the result.
+// contract: the forms' bounds (F.LIMITS) against E.limits(), and every value a form writes against what the engine reads.
 // Run: ./gradlew :lib:keyboard-scene:youmoEngine, then node --test web/theme-maker/test/form.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -18,6 +15,7 @@ const src = join(here, '..', 'src');
 for (const f of ['lib.js', 'form.js', 'maker.js']) vm.runInThisContext(readFileSync(join(src, f), 'utf8'), { filename: f });
 globalThis.YoumoPanels = [];
 for (const f of readdirSync(join(src, 'panels')).sort()) vm.runInThisContext(readFileSync(join(src, 'panels', f), 'utf8'), { filename: f });
+const L = globalThis.YoumoLib;
 const F = globalThis.YoumoForm;
 const P = Object.fromEntries(globalThis.YoumoPanels.map((p) => [p.id, p]));
 globalThis.Path2D = class { constructor(d) { this.d = d; } };
@@ -42,7 +40,6 @@ test('a form edit changes the style of exactly that select=, the last one that g
   assert.equal(out, BASE.replace('fill="#111111"', 'fill="#333333"'), 'only the value moved; the attribute it does not know kept, its spacing too');
   const color = F.setProp(BASE, 'key.letter', 'color', '#444444');
   assert.equal(color, BASE.replace('color="#222222"', 'color="#444444"'));
-  // a property no style of it gives: the last of that select=
   assert.equal(F.setProp(BASE, 'key.letter', 'radius', '8dp'), BASE.replace('color="#222222"/>', 'color="#222222" radius="8dp"/>'));
 });
 
@@ -64,7 +61,7 @@ test('values are written escaped and read back as written', () => {
   const out = F.setProp(BASE, 'key', 'fill', 'a"b<c&');
   assert.ok(out.includes('fill="a&quot;b&lt;c&amp;"'));
   assert.equal(F.valueOf(out, 'key', 'fill'), 'a"b<c&');
-  // character references read as the XML reader reads them, in one pass (&amp;#65; is the text &#65;)
+  // in one pass (&amp;#65; is the text &#65;)
   assert.equal(F.unescape('&#65;&#x4e2d;&amp;#66;&lt;&apos;&#x110000;'), 'A中&#66;<\'&#x110000;');
 });
 
@@ -88,7 +85,6 @@ test('colours: changed, added, taken out, a dark version made of the light one a
   assert.deepEqual(F.variants(x), ['light']);
   assert.equal(F.elements(x, 'colors').length, 1);
   assert.equal(F.colors(F.setColor(x, 'mine', null)).mine, undefined);
-  // a theme with no <colors>: one is made, first in the theme
   const bare = '<theme xmlns="https://youmo-ime/theme/4" name="b" version="4.0">\n  <style select="key" fill="@key"/>\n</theme>\n';
   const made = F.setColor(bare, 'key', '#abcdef');
   assert.ok(made.indexOf('<colors>') < made.indexOf('<style'));
@@ -98,7 +94,6 @@ test('colours: changed, added, taken out, a dark version made of the light one a
   assert.equal(F.parseHex('@key'), null);
 });
 
-// R25 web-7: a theme of the app's 4100 styles (a 3.0 theme of 400 keys of their own, converted) is edited without a wait
 // the time limit is far above the few ms it takes, so a loaded CI runner does not fail it; quadratic took seconds
 test('a theme of 4100 styles: a change and the 按键 tab\'s dozen-odd values of it within a second, each style on its line', () => {
   const many = Array.from({ length: 4100 }, (_, i) => '  <style select="qwerty/k' + i + '" fill="#ff' + String(i % 10).repeat(6) + '"/>').join('\n');
@@ -114,14 +109,11 @@ test('a theme of 4100 styles: a change and the 按键 tab\'s dozen-odd values of
   const ms = performance.now() - t0;
   assert.equal(F.valueOf(changed, 'qwerty/k17', 'radius'), '4dp');
   assert.ok(ms < 1000, ms + ' ms');
-  // what styles() hands out is the caller's to sort or reverse: the next call is as before
   F.styles(changed).reverse();
   assert.equal(F.styles(changed)[0].select, at[0].select);
 });
 
-// the same written on one line (a minified theme.xml), where elements() counts no line break up to each element:
-// the line numbers right where there is no break to count. Not timed: the loop before F7898 was right here too, only
-// slow, and a clock limit on a whole minified theme is the kind that fails a loaded CI runner (F7909)
+// not timed: a clock limit on a whole minified theme is the kind that fails a loaded CI runner
 test('a theme of 4100 styles on one line: all of them found, all on line 1', () => {
   const many = Array.from({ length: 4100 }, (_, i) => '<style select="qwerty/k' + i + '" fill="#ff' + String(i % 10).repeat(6) + '"/>').join('');
   const xml = BASE.replace(/\n\s*/g, ' ').replace('</theme>', many + '</theme>');
@@ -130,7 +122,6 @@ test('a theme of 4100 styles on one line: all of them found, all on line 1', () 
   assert.deepEqual([...new Set(at.map((s) => s.line))], [1]);
 });
 
-// R25 web-4: a dark-only theme's <colors> without variant= are its dark colours (AMOLED, Deep Blue, Monokai start so)
 test('a dark-only theme: its colours shown and set in its one block, its switch adds a light version, never drops the dark', () => {
   const dark = F.setColor(E.themeSource('amoled-black'), 'key', '#ff222222');
   assert.deepEqual(F.variants(dark), ['dark']);
@@ -153,8 +144,7 @@ test('a dark-only theme: its colours shown and set in its one block, its switch 
   const r = read(both);
   assert.equal(r.theme.info(true).colors.key, '#ff222222');
   assert.equal(r.theme.info(false).colors.key, '#ff222222');
-  // 从背景图取色 on it: its one block is the dark version the app reads, so worked out for dark whatever the picture
-  // or the preview (a light picture once wrote a light palette there)
+  // worked out for dark whatever the picture (a light picture once wrote a light palette there)
   const bright = Array.from({ length: 20 }, () => [235, 235, 235]);
   const ops = P.colors.ops;
   assert.notEqual(ops.fromPicture(bright, true).key, ops.fromPicture(bright, false).key, 'the row tells the two apart');
@@ -164,8 +154,6 @@ test('a dark-only theme: its colours shown and set in its one block, its switch 
   }
 });
 
-// a dark-only theme written with <colors variant="dark"> (by hand: the built-in ones have no variant=): its light
-// version starts as its colours too, not the defaults of a light block it never had
 test('a dark-only theme whose block says variant="dark" gets a light version of its colours', () => {
   const x = E.themeSource('amoled-black').replace(/<colors>/, '<colors variant="dark">');
   assert.deepEqual(F.variants(x), ['dark']);
@@ -228,7 +216,6 @@ test('the 按键 panel writes each property as the engine reads it', () => {
   }
   assert.equal(F.valueOf(k.set(doc, 'key', 'radius', null).xml, 'key', 'radius'), null, 'cleared: the attribute gone');
   assert.equal(F.valueOf(k.set(doc, 'key', 'border', null).xml, 'key', 'border'), null, '不设: the wider style shows');
-  // past what the engine reads: kept to it, and the engine reads what is written
   const past = [['radius', 64, '24dp'], ['border', { width: 8, color: '#000000' }, '3dp #000000'], ['depth', 20, '8dp'],
     ['shadow', { dx: 0, dy: 40, blur: 30, color: '#000000' }, '0dp 16dp 16dp #000000'], ['inset', [30, 2.25], '24dp 2.3dp']];
   for (const [prop, v, text] of past) {
@@ -243,19 +230,130 @@ test('the 按键 panel writes each property as the engine reads it', () => {
   read(k.fill(doc, 'key', nine).xml);
 });
 
-test('an icon the app would refuse (a PNG, an SVG past its subset) is named, and a pack holding one cannot be saved', () => {
+// a PNG's signature and IHDR, [w]×[h], [pad] bytes more; a WebP of a VP8X chunk, moving where [animated]
+const png = (w, h, pad = 0) => {
+  const b = new Uint8Array(33 + pad);
+  b.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
+  new DataView(b.buffer).setUint32(16, w);
+  new DataView(b.buffer).setUint32(20, h);
+  b.set([8, 6, 0, 0, 0], 24);
+  return b;
+};
+const webp = (w, h, animated) => {
+  const b = new Uint8Array(30);
+  b.set([...'RIFF'].map((c) => c.charCodeAt(0)));
+  new DataView(b.buffer).setUint32(4, 22, true);
+  b.set([...'WEBPVP8X'].map((c) => c.charCodeAt(0)), 8);
+  new DataView(b.buffer).setUint32(16, 10, true);
+  b[20] = animated ? 0x02 : 0;
+  b.set([(w - 1) & 0xff, ((w - 1) >> 8) & 0xff, 0, (h - 1) & 0xff, ((h - 1) >> 8) & 0xff, 0], 24);
+  return b;
+};
+const LIM = { iconBytes: 65536, rasterIconBytes: 131072, rasterIconSide: 256, stickerBytes: 262144, stickerSide: 512, stickers: 120 };
+
+test('an icon the app would refuse (a PNG cut short, one too big or moving, an SVG past its subset) is named, and a pack holding one cannot be saved', () => {
   const t = P.text.ops;
-  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d]);
-  const stroked = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M0 0h24" stroke="#000" transform="scale(2)"/></svg>');
-  assert.equal(t.iconProblems(E, png, 65536).length, 1);
-  assert.ok(t.iconProblems(E, stroked, 65536).length > 0);
-  assert.ok(t.iconProblems(E, new Uint8Array(70000), 65536)[0].includes('65536'));
   const L = globalThis.YoumoLib;
+  const short = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d]);
+  const stroked = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M0 0h24" stroke="#000" transform="scale(2)"/></svg>');
+  assert.equal(t.iconProblems(E, L, short, LIM).length, 1);
+  assert.ok(t.iconProblems(E, L, stroked, LIM).length > 0);
+  assert.ok(t.iconProblems(E, L, new Uint8Array(70000), LIM)[0].includes('65536'));
+  assert.deepEqual(t.iconProblems(E, L, png(256, 16), LIM), [], 'a PNG of the app\'s side');
+  assert.deepEqual(t.iconProblems(E, L, webp(48, 48, false), LIM), [], 'a still WebP');
+  assert.match(t.iconProblems(E, L, png(257, 16), LIM)[0], /257×16/);
+  assert.match(t.iconProblems(E, L, png(16, 16, 131072), LIM)[0], /超过 128 KB/, 'a raster icon past its own bytes, not the SVG\'s');
+  assert.match(t.iconProblems(E, L, webp(48, 48, true), LIM)[0], /动态/);
   const FORMAT = { limits: { iconBytes: 65536, keyImageSide: 1024, pictureSide: 4096, keyImageBytes: 1 << 21, entries: 64, fileBytes: 1 << 25, totalBytes: 1 << 26 } };
-  for (const bad of [png, stroked]) {
-    const d = t.setIcon({ xml: nord, files: {}, layouts: {} }, 'backspace', bad);
-    assert.ok(globalThis.YoumoMaker.saveProblems(E, L, FORMAT, d).some((p) => p.message.includes('icon-backspace.svg')));
+  for (const bad of [short, stroked]) {
+    const d = t.setIcon({ xml: nord, files: {}, layouts: {} }, L, 'backspace', bad);
+    assert.ok(globalThis.YoumoMaker.saveProblems(E, L, FORMAT, d).some((p) => p.message.includes('icon-backspace.')));
   }
+});
+
+test('字和图标: a raster icon its file\'s type, tint= on and off, a name of the theme\'s own drawn by content= on a key\'s state', () => {
+  const t = P.text.ops;
+  const doc = { xml: nord, files: {}, layouts: {} };
+  const tinted = t.setIcon(doc, L, 'backspace', png(48, 48), true);
+  assert.match(tinted.xml, /<icon name="backspace" src="icon-backspace.png" tint="true"\/>/);
+  assert.deepEqual(t.tinted(tinted.xml), ['backspace']);
+  assert.equal(read(tinted.xml).theme.info(false).icons.backspace, 'icon-backspace.png');
+  const own = t.setTint(tinted, 'backspace', false);
+  assert.match(own.xml, /<icon name="backspace" src="icon-backspace.png"\/>/);
+  assert.equal(t.setTint(own, 'backspace', true).xml, tinted.xml);
+  read(own.xml);
+  const still = t.setIcon(doc, L, 'enter', webp(32, 32, false), true);
+  assert.match(still.xml, /src="icon-enter.webp" tint="true"/);
+  assert.doesNotMatch(t.setIcon(doc, L, 'enter', new TextEncoder().encode('<svg/>'), true).xml, /tint=/, 'an SVG is drawn in the icon colour: no tint=');
+
+  const app = ['backspace', 'shift'];
+  assert.ok(t.newIconName(nord, app, 'backspace-pressed'));
+  for (const bad of ['backspace', 'Back', 'a--b', '-a', '', 'a'.repeat(65)]) assert.ok(!t.newIconName(nord, app, bad), bad);
+  const pressed = t.setIcon(doc, L, 'backspace-pressed', png(48, 48));
+  assert.ok(!t.newIconName(pressed.xml, app, 'backspace-pressed'), 'taken');
+  const sel = 'qwerty/backspace:pressed icon';
+  const drawn = t.set(pressed, sel, 'content', 'icon(backspace-pressed)');
+  assert.equal(F.valueOf(drawn.xml, sel, 'content'), 'icon(backspace-pressed)');
+  const r = read(drawn.xml);
+  assert.ok(!r.warnings.some((w) => w.message.includes('backspace-pressed')), JSON.stringify(r.warnings));
+  const s = E.buildScene('qwerty', r.theme, ENV, E.fixedMeasurer());
+  assert.ok(s.ok, JSON.stringify(s.problems));
+  assert.match(s.scene.text(), /\n {4}\+\d+ icon backspace-pressed [^\n]* raster\n/, 'the pressed state draws it');
+  assert.ok(read(pressed.xml).warnings.some((w) => w.message.includes('backspace-pressed')), 'a name no content= draws is said to be undrawn');
+  const back = t.setIcon(pressed, L, 'backspace-pressed', null);
+  assert.equal(back.xml, nord);
+  assert.deepEqual(Object.keys(back.files), []);
+  // one of its own taken off while content= draws it: the reader would refuse the name, so the values naming it go
+  const both = t.set(t.set(drawn, 'qwerty/backspace icon', 'color', '#ff0000'), 'qwerty/backspace icon', 'content', 'icon(backspace-pressed)');
+  const dropped = t.dropIcon(both, 'backspace-pressed');
+  read(dropped.xml);
+  assert.doesNotMatch(dropped.xml, /backspace-pressed/);
+  assert.equal(dropped.xml, t.set(doc, 'qwerty/backspace icon', 'color', '#ff0000').xml, 'a style left with its colour kept, one left bare gone');
+  assert.deepEqual(Object.keys(dropped.files), []);
+  assert.equal(t.dropIcon(t.setIcon(drawn, L, 'backspace', png(16, 16)), 'backspace').xml, drawn.xml, 'another name\'s values kept');
+  for (const [w, h] of [[0, 0], [1, 0], [0, 1]]) assert.deepEqual(t.iconProblems(E, globalThis.YoumoLib, png(w, h), LIM), ['读不出图片的大小'], w + '×' + h + ': the app reads no image');
+});
+
+test('按键: a sticker over a key, its words hidden, as the engine reads it; one past the app\'s limits refused; its file gone with it', () => {
+  const k = P.keys.ops;
+  const L = globalThis.YoumoLib;
+  const doc = { xml: nord, files: {}, layouts: {} };
+  const made = k.addSticker(doc, L, LIM, 'qwerty/q', 'Q.png', png(120, 120));
+  assert.equal(F.valueOf(made.xml, 'qwerty/q', 'sticker'), 'sticker-q.png');
+  assert.deepEqual(Object.keys(made.files), ['sticker-q.png']);
+  const pressed = k.addSticker(made, L, LIM, 'qwerty/q:pressed', 'Q.png', webp(120, 120, false));
+  assert.equal(F.valueOf(pressed.xml, 'qwerty/q:pressed', 'sticker'), 'sticker-q.webp');
+  assert.deepEqual(k.stickers(pressed.xml), ['sticker-q.png', 'sticker-q.webp']);
+  const hidden = { ...pressed, xml: F.setProp(pressed.xml, 'qwerty/q label', 'hidden', 'true') };
+  const r = read(hidden.xml);
+  const s = E.buildScene('qwerty', r.theme, ENV, E.fixedMeasurer());
+  assert.ok(s.ok, JSON.stringify(s.problems));
+  const q = s.scene.text().split('\n').filter((l) => l.includes('sticker "sticker-q.png"'));
+  assert.ok(q.length && q.every((l) => l.includes('stand-in=text')), 'the hidden letter its stand-in: ' + q);
+  assert.match(s.scene.text(), /sticker "sticker-q.webp"/);
+  for (const [bytes, why] of [[png(513, 10), /513|512/], [webp(64, 64, true), /动态/], [png(16, 16, 262144), /超过 256 KB/], [new Uint8Array([1, 2, 3]), /PNG/]]) {
+    assert.throws(() => k.addSticker(doc, L, LIM, 'qwerty/w', 'w.png', bytes), why);
+  }
+  assert.throws(() => k.addSticker(made, L, { ...LIM, stickers: 1 }, 'qwerty/w', 'w.png', png(10, 10)), /最多 1/);
+  assert.ok(k.addSticker(made, L, { ...LIM, stickers: 1 }, 'qwerty/q', 'q2.png', png(10, 10)), 'one in place of the only one');
+  const shared = { ...made, xml: F.setProp(made.xml, 'qwerty/w', 'sticker', 'sticker-q.png') };
+  assert.throws(() => k.addSticker(shared, L, { ...LIM, stickers: 1 }, 'qwerty/q', 'q2.png', png(10, 10)), /最多 1/, 'the one it replaces stays, named by w');
+  for (const [w, h] of [[0, 0], [1, 0]]) assert.throws(() => k.addSticker(doc, L, LIM, 'qwerty/w', 'w.png', png(w, h)), /读不出图片的大小/, w + '×' + h);
+  // its words hidden for it come back with the sticker gone, or none over a wider one
+  for (const v of [null, 'none']) {
+    const shown = k.sticker(hidden, 'qwerty/q', v);
+    assert.equal(F.valueOf(shown.xml, 'qwerty/q label', 'hidden'), null, String(v));
+    const text = E.buildScene('qwerty', read(shown.xml).theme, ENV, E.fixedMeasurer()).scene.text();
+    assert.match(text, /\n {4}text "q" /, String(v));
+  }
+  assert.equal(F.valueOf(k.sticker(hidden, 'qwerty/q', 'sticker-q.webp').xml, 'qwerty/q label', 'hidden'), 'true', 'another sticker keeps them hidden');
+  const none = k.sticker(pressed, 'qwerty/q:pressed', 'none');
+  assert.equal(F.valueOf(none.xml, 'qwerty/q:pressed', 'sticker'), 'none');
+  assert.deepEqual(Object.keys(none.files), ['sticker-q.png'], 'the file no style names any more goes');
+  read(none.xml);
+  const off = k.sticker(k.sticker(none, 'qwerty/q:pressed', null), 'qwerty/q', null);
+  assert.equal(off.xml, nord);
+  assert.deepEqual(Object.keys(off.files), []);
 });
 
 test('the forms\' bounds are the engine\'s', () => {
@@ -295,12 +393,12 @@ test('the 字和图标 panel: each part apart, its properties as the engine read
   for (const n of ['a', 'b', 'c', 'd']) four = t.addFont(four, n + '.ttf', ttf);
   assert.throws(() => t.addFont(four, 'e.ttf', ttf), /4/);
   const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M0 0h24v24z"/></svg>');
-  assert.deepEqual(t.iconProblems(E, svg, 65536), []);
-  const icon = t.setIcon(doc, 'backspace', svg);
+  assert.deepEqual(t.iconProblems(E, globalThis.YoumoLib, svg, LIM), []);
+  const icon = t.setIcon(doc, L, 'backspace', svg);
   assert.match(icon.xml, /<icon name="backspace" src="icon-backspace.svg"\/>/);
   assert.ok(icon.xml.lastIndexOf('<icon') > icon.xml.lastIndexOf('<style'), 'icons last');
   assert.equal(read(icon.xml).theme.info(false).icons.backspace, 'icon-backspace.svg');
-  const back = t.setIcon(icon, 'backspace', null);
+  const back = t.setIcon(icon, L, 'backspace', null);
   assert.equal(back.xml, nord);
   assert.deepEqual(Object.keys(back.files), []);
 });
@@ -334,6 +432,49 @@ test('the 背景 panel: a picture with a cut for each orientation, its crop kept
   read(gone.xml);
 });
 
+test('the 背景 panel: the dark version\'s own picture written after the light one, read by its variant=, tuned and cut apart; the light one taken off takes it', () => {
+  const b = P.background.ops;
+  const pic = (n) => ({ type: 'png', src: new Uint8Array([n]), cuts: { portrait: { bytes: new Uint8Array([n + 1]), type: 'png', rect: [0, 0, 100, 50] } } });
+  const light = b.setPicture({ xml: nord, files: {}, layouts: {} }, pic(1));
+  assert.ok(b.darkPictureOffered(light.xml));
+  assert.ok(!b.darkPictureOffered(nord), 'no light picture yet');
+  assert.ok(!b.darkPictureOffered(P.colors.ops.dark(light, false).xml), 'no dark version');
+  const both = b.setPicture(light, pic(5), 'dark');
+  assert.ok(both.xml.indexOf('<picture src="picture.png"') < both.xml.indexOf('<picture variant="dark" src="picture-dark.png"'), 'light first, as ThemeWriter writes them');
+  assert.deepEqual(F.picture(both.xml, 'dark'), { src: 'picture-dark.png', brightness: 100, blur: 0, cuts: { portrait: { file: 'picture-dark-portrait.png', rect: [0, 0, 100, 50] } } });
+  assert.equal(F.picture(both.xml).src, 'picture.png');
+  assert.deepEqual(Object.keys(both.files).sort(), ['picture-dark-portrait.png', 'picture-dark.png', 'picture-portrait.png', 'picture.png']);
+  const r = read(both.xml);
+  assert.deepEqual(r.warnings.map((w) => w.message).filter((m) => !m.includes('min-app')), [], 'the 0.6.3 note alone (the maker writes min-app on save)');
+  const tuned = b.tune(both, { brightness: 60 }, 'dark');
+  assert.equal(F.picture(tuned.xml, 'dark').brightness, 60);
+  assert.equal(F.picture(tuned.xml).brightness, 100, 'the light one as it was');
+  const cut = b.setCut(tuned, 'landscape', { bytes: new Uint8Array([9]), type: 'png', rect: [0, 0, 100, 30] }, 'dark');
+  assert.equal(F.picture(cut.xml, 'dark').cuts.landscape.file, 'picture-dark-landscape.png');
+  assert.equal(F.picture(cut.xml).cuts.landscape, undefined);
+  read(cut.xml);
+  const noDark = b.setPicture(cut, null, 'dark');
+  assert.equal(noDark.xml, light.xml);
+  assert.deepEqual(Object.keys(noDark.files).sort(), ['picture-portrait.png', 'picture.png']);
+  const none = b.setPicture(cut, null);
+  assert.equal(F.picture(none.xml), null);
+  assert.equal(F.picture(none.xml, 'dark'), null, 'a dark one alone the app refuses');
+  assert.deepEqual(Object.keys(none.files), []);
+  read(none.xml);
+  const off = P.colors.ops.dark(both, false);
+  assert.equal(F.picture(off.xml, 'dark'), null, 'no dark version: no dark picture');
+  assert.deepEqual(Object.keys(off.files).sort(), ['picture-portrait.png', 'picture.png']);
+  read(off.xml);
+  // hand-written dark first: each still found by its variant=, a light one put in before it
+  const darkFirst = nord.replace('<style', '<picture variant="dark" src="d.png"/>\n  <picture src="l.png"/>\n  <style');
+  assert.equal(F.picture(darkFirst).src, 'l.png');
+  assert.equal(F.picture(darkFirst, 'dark').src, 'd.png');
+  const onlyDark = nord.replace('<style', '<picture variant="dark" src="d.png"><cut orientation="portrait" file="d-p.png"/></picture>\n  <style');
+  const added = F.setPicture(onlyDark, { src: 'l.png', brightness: 100, blur: 0, cuts: { portrait: { file: 'l-p.png', rect: null } } });
+  assert.ok(added.xml.indexOf('src="l.png"') < added.xml.indexOf('src="d.png"'), added.xml);
+  read(added.xml);
+});
+
 test('the crop is the biggest box of the keyboard\'s ratio, zoomed and moved inside the picture', () => {
   assert.deepEqual(F.cropRect(4000, 3000, 2), [0, 500, 4000, 2500]);
   assert.deepEqual(F.cropRect(1000, 3000, 2), [0, 1250, 1000, 1750]);
@@ -356,11 +497,9 @@ test('the cascade check names the style the engine says each value comes from', 
   assert.equal(src('q', 'label', false).color, lineOf('key'), 'inherited from the key');
   assert.deepEqual(E.sources('qwerty', r.theme, ENV, { widget: 'key', key: 'no-such-key' }).sources, []);
   assert.equal(E.sources('qwerty', r.theme, ENV, { widget: 'bar' }).ok, false);
-  // what the panel shows: each property, its value, the style's select= and line
   const rows = P.keys.ops.sources(E, F, { xml: x }, r.theme, 'qwerty', ENV, { key: 'q' });
   const fill = rows.find((row) => row.property === 'fill');
   assert.deepEqual(fill, { property: 'fill', value: 'linear(90deg, #ff0000 0%, #0000ff 100%)', select: 'key.letter', line: lineOf('key.letter') });
-  // every property's source has that property, as the engine read it
   for (const row of rows) assert.ok(F.styles(x).find((s) => s.line === row.line).attrs.some((a) => a[0] === row.property), row.property);
 });
 
@@ -380,11 +519,9 @@ test('从背景图取色: see-through keys of the picture\'s lightness, text tha
   assert.equal(F.colors(made.xml, 'dark').accentKey, '#88c0d0', 'the light version shown: the dark one kept');
 });
 
-// ---- M3: 栏, 弹出, 面板和窗口, 尺寸, 动效, 信息, 源码 ----
 
 const PNG4 = new Uint8Array(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAEElEQVR4nGPQCFgARwzEcQC/wxGBfpfKIQAAAABJRU5ErkJggg==', 'base64'));
 
-// a value the form would write of [p] (its kind's middle)
 function sampleOf(p) {
   switch (p.kind) {
     case 'color': return '#ff123456';
@@ -466,7 +603,6 @@ test('动效: every MOTION property, each effect kind and a clamped value, writt
   const base = ops.addEffectImage({ xml: nord, files: {}, layouts: {} }, L, 'Dot.png', PNG4);
   const file = base.file;
   const parse = { transition: ops.parseTransition, appear: ops.parseAppear, effect: ops.parseEffect };
-  // [prop, value written, value read back], each the form's own: percent and dp as numbers, the rest objects
   const rows = [
     ['transition', { ms: 120, easing: 'ease-out' }, { ms: 120, easing: 'ease-out' }],
     ['press-scale', 95, '95%'],
@@ -474,9 +610,7 @@ test('动效: every MOTION property, each effect kind and a clamped value, writt
     ['appear', { kind: 'fade', ms: 200 }, { kind: 'fade', ms: 200 }],
     ['effect', { kind: 'none' }, { kind: 'none' }],
     ['effect', { kind: 'ripple-image', file, radius: 150, ms: 300 }, { kind: 'ripple-image', file, radius: 150, ms: 300 }],
-    // past the bounds: count 12 at most, spread 64dp at most
     ['effect', { kind: 'particles', file, count: 40, spread: 99, ms: 400 }, { kind: 'particles', file, count: 12, spread: 64, ms: 400 }],
-    // a ripple's radius 10..200 %, its duration 1..600 ms (the engine's)
     ['effect', { kind: 'ripple-image', file, radius: 0, ms: 0 }, { kind: 'ripple-image', file, radius: 10, ms: 1 }],
     ['effect', { kind: 'ripple-image', file, radius: 999, ms: 300 }, { kind: 'ripple-image', file, radius: 200, ms: 300 }],
   ];
@@ -588,25 +722,19 @@ test('按键音: a sound goes in <sounds> after the icons, one per key, its old 
   d = s.removeSound(s.removeSound(d, 'letter'), 'space');
   assert.ok(!/<sounds?\b/.test(d.xml));
   assert.deepEqual(Object.keys(d.files), ['star.svg']);
-  // a key a later app knows: kept as it is, taken out alone
   const later = F.setSound(F.setSound(nord, 'future', 'f.wav').xml, 'space', 's.ogg').xml;
   assert.deepEqual(F.removeSound(later, 'space').gone, ['s.ogg']);
   assert.match(F.removeSound(later, 'space').xml, /<sounds>\s*<sound key="future" src="f.wav"\/>\s*<\/sounds>/);
-  // a hand-written <sounds/> opens into a pair that reads back
   const empty = F.setSound(nord.replace('</theme>', '  <sounds/>\n</theme>'), 'space', 's.ogg').xml;
   assert.match(empty, /<sounds>\s*<sound key="space" src="s.ogg"\/>\s*<\/sounds>/);
   assert.deepEqual(JSON.parse(JSON.stringify(read(empty).theme.info(false).sounds)), [{ key: 'space', src: 's.ogg' }]);
-  // the same format twice: the new file is sound-space-2.ogg, the old one gone (one file left)
   let same = s.setSound({ xml: nord, files: {}, layouts: {} }, E, 'space', 'a.ogg', ogg);
   same = s.setSound(same, E, 'space', 'b.ogg', ogg);
   assert.deepEqual(Object.keys(same.files).filter((f) => f.startsWith('sound-space')), ['sound-space-2.ogg']);
-  // replacing keeps a later app's attributes on the <sound>: only src= changes
   const extra = F.setSound(F.setSound(nord, 'space', 'a.ogg').xml.replace('src="a.ogg"', 'src="a.ogg" volume="50"'), 'space', 'b.ogg').xml;
   assert.match(extra, /<sound key="space" src="b.ogg" volume="50"\/>/);
-  // a key given twice (the engine refuses that): the one listed is the one changed
   const twice = nord.replace('</theme>', '  <sounds>\n    <sound key="space" src="a.ogg"/>\n    <sound key="space" src="b.ogg"/>\n  </sounds>\n</theme>');
   assert.equal(F.sounds(F.setSound(twice, 'space', 'c.ogg').xml).space, 'c.ogg');
-  // a hand-written <sound></sound>: only its open tag changes, its close stays and the file reads back
   const paired = F.setSound(nord.replace('</theme>', '  <sounds>\n    <sound key="space" src="a.ogg"></sound>\n  </sounds>\n</theme>'), 'space', 'b.ogg').xml;
   assert.match(paired, /<sound key="space" src="b.ogg"><\/sound>/);
   assert.deepEqual(JSON.parse(JSON.stringify(read(paired).theme.info(false).sounds)), [{ key: 'space', src: 'b.ogg' }]);
@@ -616,7 +744,6 @@ test('the 内缩 note names only the scene-only key rules with an inset that out
   const both = '<theme><style select="key" inset="2dp"/><style select="@compact key" inset="0dp 1dp"/>'
     + '<style select="@compact @landscape key" inset="0dp 2dp"/><style select="@landscape key" inset="1dp"/></theme>';
   const rows = [
-    // [why, xml, sel, expected]
     ['on key: every scene-only key rule with an inset wins in its scene', both, 'key', ['@compact key', '@compact @landscape key', '@landscape key']],
     ['on @landscape key: only the rule of more scenes than it outranks it', both, '@landscape key', ['@compact @landscape key']],
     ['on @compact key itself: the rule being edited is not named to itself', both, '@compact key', ['@compact @landscape key']],

@@ -17,7 +17,7 @@ class SavedPhrasesTest {
 
     private val wubi = dictionary("a 工", "aaaa 工", "aaaa 恭恭敬敬", "aaad 工期", "wqiy 你", "wun 们", "vbg 好")
 
-    // the record of 0.4, its tables' saved phrases converted into it once
+    // an older build's record, its tables' saved phrases converted into it once
     private fun log(vararg saved: Pair<String, String>) = savedLog(*saved, im = WUBI)
 
     private fun phrases(log: LearnLog, table: TableDictionary = wubi) = table.savedIn(log, WUBI)
@@ -26,7 +26,10 @@ class SavedPhrasesTest {
     fun aPhraseSavedIsOfferedUnderItsCode() {
         val saved = phrases(log("wqwu" to "你们"))
         assertTrue(saved.isSaved("wqwu", "你们"))
-        assertEquals(listOf("你们"), TableSession(wubi, TableOptions.WUBI.copy(autoSelect = false), saved = saved).type("wqw").second.candidates)
+        val session = { TableSession(wubi, TableOptions.WUBI.copy(autoSelect = false), saved = saved) }
+        assertEquals(listOf("你们"), session().type("wqwu").second.candidates)
+        // not on its code's start: what a prefix showed before stays as it was
+        assertEquals(emptyList<String>(), session().type("wqw").second.candidates)
     }
 
     @Test
@@ -35,17 +38,19 @@ class SavedPhrasesTest {
         log.absorb(listOf(TableWordRow("engine-cangjie", "wqwu", "你们", 1)))
         val saved = phrases(log)
         assertFalse(saved.isSaved("aaaa", "恭恭敬敬"))
-        assertEquals(emptyList<Pair<String, String>>(), saved.saved(""))
+        assertEquals(emptyList<Pair<String, String>>(), saved.all())
         // a later table without it, left out as rare: the user picked it, it stays theirs
         assertTrue(phrases(log, dictionary("aaaa 工", "aaaa 敬", "wqiy 你")).isSaved("aaaa", "恭恭敬敬"))
     }
 
     @Test
-    fun savedPhrasesAreFoundByTheStartOfTheirCodeInCodeOrder() {
+    fun savedPhrasesAreFoundByTheirWholeCodeInCodeOrderAndLeadOnFromItsStart() {
         val saved = phrases(log("wqwu" to "你们", "wuwq" to "们你", "wqvb" to "你好"))
-        assertEquals(listOf("wqvb" to "你好", "wqwu" to "你们"), saved.saved("wq"))
-        assertEquals(listOf("wqwu" to "你们"), saved.saved("wqw"))
-        assertEquals(3, saved.saved("").size)
+        assertEquals(emptyList<Pair<String, String>>(), saved.saved("wq"))
+        assertEquals(listOf("wqwu" to "你们"), saved.saved("wqwu"))
+        assertEquals(listOf("wqvb" to "你好", "wqwu" to "你们", "wuwq" to "们你"), saved.all())
+        assertTrue(saved.hasText("们你"))
+        assertFalse(saved.hasText("你"))
         assertTrue(saved.leadsAnywhere("wu"))
         assertFalse(saved.leadsAnywhere("wv"))
         assertFalse(saved.leadsAnywhere("wqwuw"))
@@ -57,14 +62,12 @@ class SavedPhrasesTest {
         val saved = phrases(log)
         assertTrue(saved.isSaved("wqwu", "你们"))
         saved.forget("wqwu", "你们")
-        // nothing saved of it: nothing written
         val records = log.state.tableWords.size
         saved.forget("aaaa", "工")
         assertEquals(records, log.state.tableWords.size)
         assertFalse(saved.isSaved("wqwu", "你们"))
         assertEquals(setOf("你好"), log.state.tableWords.keys.map { it.third }.toSet())
-        // the record read again, the same
-        assertEquals(listOf("wqvb" to "你好"), phrases(log).saved(""))
+        assertEquals(listOf("wqvb" to "你好"), phrases(log).all())
     }
 
     @Test
@@ -75,5 +78,15 @@ class SavedPhrasesTest {
         assertFalse(saved.leadsAnywhere(""))
         saved.forget("wqwu", "你们")
         assertTrue(removed.isEmpty())
+        assertFalse(saved.remember("wqwu", "你们"))
+    }
+
+    @Test
+    fun aWordRememberedIsSavedUnderItsCodeInTheRecord() {
+        val log = log()
+        val saved = phrases(log)
+        assertTrue(saved.remember("iije", "汪小明"))
+        assertTrue(saved.isSaved("iije", "汪小明"))
+        assertEquals(setOf(Triple(WUBI, "iije", "汪小明")), log.state.tableWords.keys)
     }
 }

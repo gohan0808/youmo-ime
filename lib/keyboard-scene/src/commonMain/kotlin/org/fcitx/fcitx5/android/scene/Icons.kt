@@ -17,8 +17,9 @@ object Icons {
     /** A shortcut's command's (TextBoardScene.icon of each KeyCommand). */
     val COMMANDS = listOf(
         "select-all", "content-copy", "content-cut", "content-paste", "undo", "redo", "delete-sweep", "restore",
-        "field-start", "field-end", "cursor-move", "clipboard", "quick-input", "emoji", "voice", "trad-simp",
-        "choose-keyboard", "hide-keyboard", "swipe-select", "stroke-h", "stroke-s", "stroke-p", "stroke-n", "stroke-z",
+        "field-start", "field-end", "select-to-start", "select-to-end", "cursor-move", "clipboard", "quick-input", "emoji", "voice", "trad-simp",
+        "choose-keyboard", "language", "choose-input-method", "hide-keyboard", "swipe-select",
+        "stroke-h", "stroke-s", "stroke-p", "stroke-n", "stroke-z",
     )
 
     /** A key's own (a layout's `icon=`, the keys the app draws an icon on). */
@@ -28,7 +29,7 @@ object Icons {
     )
 
     /**
-     * The bar's own, a name for each thing done that no command does (061-toolbar-icons §2.2; the bar's buttons
+     * The bar's own, a name for each thing done that no command does (the bar's buttons
      * doing a command's job go by the command's name): the menu key's two states, the toolbar's buttons, the
      * candidate bar's and the floating keyboard's strip's. Keys may name them too.
      */

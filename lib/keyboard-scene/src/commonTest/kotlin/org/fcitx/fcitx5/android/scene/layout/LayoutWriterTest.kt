@@ -19,7 +19,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-// a layout as the maker saves it and the app exports it (061-custom-layout §12): read back, the same layout
+// a layout as the maker saves it and the app exports it: read back, the same layout
 class LayoutWriterTest {
     private val boards = listOf(
         "emoji-search", "emoji", "emoticon", "expanded-side", "k14", "k18", "nine", "number-row", "number",
@@ -38,7 +38,7 @@ class LayoutWriterTest {
     }
 
     // a control in a name (pasted on the maker's page): left out as written, as the reader drops one, so what is written
-    // reads back (R26 F8187)
+    // reads back
     @Test
     fun aCharacterXmlHasNoneForIsLeftOut() {
         val l = LayoutReader.layout(testData("qwerty.xml")).ok()
@@ -60,6 +60,18 @@ class LayoutWriterTest {
                 assertEquals(SceneText.of(scene(file)).replace(line, ""), SceneText.of(scene(again)).replace(line, ""), "$name $size")
             }
         }
+    }
+
+    @Test
+    fun aScrollSlotsLookIsWrittenWhereItIsNotAColumnsOwn() {
+        fun slot(attrs: String) = LayoutWriter.write(
+            LayoutReader.layout(
+                "<keyboard xmlns=\"${LayoutReader.NAMESPACE}\" id=\"t\" name=\"t\" family=\"number\">" +
+                    "<row><slot kind=\"scroll\" list=\"number\"$attrs/><key id=\"a\" label=\"a\"/></row></keyboard>",
+            ).ok(),
+        ).lines().single { "<slot" in it }.trim()
+        assertEquals("<slot kind=\"scroll\" list=\"number\"/>", slot(" look=\"function\" face=\"keep\""))
+        assertEquals("<slot kind=\"scroll\" list=\"number\" face=\"default\" look=\"letter\"/>", slot(" look=\"letter\" face=\"default\""))
     }
 
     @Test

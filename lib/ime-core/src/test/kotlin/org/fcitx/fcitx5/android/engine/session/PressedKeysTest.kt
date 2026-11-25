@@ -5,6 +5,7 @@
 package org.fcitx.fcitx5.android.engine.session
 
 import org.fcitx.fcitx5.android.engine.pinyin.NineKeyLetters
+import org.fcitx.fcitx5.android.engine.pinyin.ZhuyinKeys
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -23,6 +24,12 @@ class PressedKeysTest {
     }
 
     @Test
+    fun zhuyinsTonesAreNoKeysAsTheSeparatorIsNone() {
+        keys.insert(0, "a${ZhuyinKeys.toneCode(3)}b'c")
+        assertEquals("abc", keys.keys(0, 5))
+    }
+
+    @Test
     fun aSyllableTakenIsItsDigitsHoweverLongItsSpelling() {
         keys.insert(0, "926")
         // 9 2 6 taken as zhan, fuzzy: four letters for three digits, then a separator
@@ -33,7 +40,6 @@ class PressedKeysTest {
         assertEquals("926", keys.keys(0, 4))
         keys.insert(5, "4")
         assertEquals("9264", keys.keys(0, 6))
-        // given back, its digits as they were
         keys.putBack(0, 5, was)
         assertEquals("9264", keys.keys(0, 4))
         assertEquals(4, keys.length)
@@ -43,18 +49,15 @@ class PressedKeysTest {
     fun aLetterDeletedInASyllableTakenLeavesTheOthersOnTheirKeys() {
         keys.insert(0, "64")
         keys.replace(0, 2, 2, "64", added = 1)
-        // n i ' : the i deleted
         keys.delete(1, "ni'", NineKeyLetters.STANDARD)
         assertEquals("6", keys.keys(0, 2))
         assertEquals(2, keys.length)
     }
 
-    // review-1a-core S5: a key typed within a syllable taken goes where it is typed, the syllable a key a letter
     @Test
     fun aKeyTypedInASyllableTakenSplitsIt() {
         keys.insert(0, "9264")
         keys.replace(0, 3, 4, "926", added = 1)
-        // zhan'4, 3 typed at place 2: zh3an'4
         keys.insert(2, "3", input = "zhan'4", letters = NineKeyLetters.STANDARD)
         assertEquals(7, keys.length)
         assertEquals("943264", keys.keys(0, 7))

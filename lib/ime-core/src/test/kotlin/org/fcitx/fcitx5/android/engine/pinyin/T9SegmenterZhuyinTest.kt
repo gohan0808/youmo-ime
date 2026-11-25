@@ -4,6 +4,7 @@
  */
 package org.fcitx.fcitx5.android.engine.pinyin
 
+import org.fcitx.fcitx5.android.assertRows
 import org.fcitx.fcitx5.android.engine.phrase.PhraseKeys
 import org.fcitx.fcitx5.android.engine.pinyin.SyllableGraph.Kind
 import org.junit.Assert.assertEquals
@@ -32,7 +33,6 @@ class T9SegmenterZhuyinTest {
     @Test
     fun dachenReadsEachSyllableByItsSymbolsAndATone() {
         val graph = dachen.segment(dachen("ㄋㄧˇㄏㄠˇ"))
-        // ㄋ alone is 嗯's n as well
         assertEquals(setOf("n", "ni"), graph.syllablesFrom(0))
         val ni = graph.edgeOf(0, "ni")
         assertEquals(3, graph.to(ni))
@@ -40,10 +40,8 @@ class T9SegmenterZhuyinTest {
         assertEquals(setOf("hao"), graph.syllablesFrom(3))
         assertEquals(3, graph.tone(graph.edgeOf(3, "hao")))
         assertEquals(dachen("ㄋㄧ"), graph.text(ni))
-        // no tone typed: none
         val bare = dachen.segment(dachen("ㄓㄨㄥ"))
         assertEquals(0, bare.tone(bare.edgeOf(0, "zhong")))
-        // ㄓ alone is zhi whole, and the start of zhong
         val zh = dachen.segment(dachen("ㄓ"))
         assertTrue(zh.syllablesFrom(0).contains("zhi"))
         assertTrue(zh.syllablesFrom(0, Kind.EXTENDED).contains("zhong"))
@@ -55,7 +53,6 @@ class T9SegmenterZhuyinTest {
         assertTrue(graph.syllablesFrom(0).contains("ni"))
         val ni = graph.edgeOf(0, "ni")
         assertTrue(graph.syllablesFrom(graph.to(ni)).contains("hao"))
-        // ㄇㄋㄜ then ㄔㄘㄣㄧ: mi and ni alike
         assertTrue(graph.syllablesFrom(0).contains("mi"))
     }
 
@@ -66,6 +63,29 @@ class T9SegmenterZhuyinTest {
         assertTrue(read.contains("ni"))
         assertFalse(read.contains("mi"))
     }
+
+    // the flags [syllable] is read with from [at], or null if not read
+    private fun SyllableGraph.flagsOf(at: Int, syllable: String): Int? = edges(at).firstNotNullOfOrNull { e ->
+        matches(e).indexOf(Syllables.id(syllable)).takeIf { it >= 0 }?.let { matches(e).flags(it) }
+    }
+
+    private fun on(vararg fuzzy: Fuzzy) = T9Segmenter(fuzzy.toSet(), abbreviations = false, letters = ZhuyinKeys.NINE)
+
+    private val ni = ZhuyinKeys.symbolCode('ㄋ').toString() + nine("ㄧ")
+    private val zh = ZhuyinKeys.symbolCode('ㄓ').toString()
+
+    // a taken syllable is its pinyin and a taken initial its symbol typed as itself: each reads the fuzzy pairs on, priced fuzzy
+    @Test
+    fun aTakenSyllableOrSymbolReadsTheFuzzyPairsOn() = assertRows(
+        "a taken syllable reads its partner" to { assertEquals(SyllableMatches.FUZZY, on(Fuzzy.IN_ING).segment("jing'").flagsOf(0, "jin")) },
+        "a taken syllable reads itself unflagged" to { assertEquals(0, on(Fuzzy.IN_ING).segment("jing'").flagsOf(0, "jing")) },
+        "a symbol typed as itself reads its partner's syllables" to { assertEquals(SyllableMatches.FUZZY, on(Fuzzy.L_N).segment(ni).flagsOf(0, "li")) },
+        "a symbol typed as itself reads its own unflagged" to { assertEquals(0, on(Fuzzy.L_N).segment(ni).flagsOf(0, "ni")) },
+        "ㄓ alone reads zi under z ↔ zh" to { assertEquals(SyllableMatches.FUZZY, on(Fuzzy.Z_ZH).segment(zh).flagsOf(0, "zi")) },
+        "with all off a taken syllable reads no partner" to { assertNull(nine.segment("jing'").flagsOf(0, "jin")) },
+        "with all off a symbol reads no partner" to { assertNull(nine.segment(ni).flagsOf(0, "li")) },
+        "with all off ㄓ reads no zi" to { assertNull(nine.segment(zh).flagsOf(0, "zi")) },
+    )
 
     @Test
     fun theInputShowsAsItsSymbolsAndMarks() {
@@ -100,7 +120,6 @@ class T9SegmenterZhuyinTest {
         assertNull(T9Segmenter().spaceTone)
     }
 
-    // a custom phrase's key is pinyin's letters: zhuyin typed finds it (design 051 §3.3)
     @Test
     fun zhuyinTypedReadsAsAPhrasesPinyinKey() {
         fun keys(typed: String, on: T9Segmenter) = PhraseKeys.of(typed, on.letters, ways = on::phraseWays)!!
@@ -116,13 +135,10 @@ class T9SegmenterZhuyinTest {
     fun theBarsSyllablesAndInitialsAreShownInZhuyin() {
         assertEquals("ㄋㄧ", nine.shownOffered("ni"))
         assertEquals("ㄓㄨㄥ", nine.shownOffered("zhong"))
-        // initials, r's ㄖ not 儿's ㄦ, m's ㄇ not 呣's
         assertEquals("ㄓ", nine.shownOffered("zh"))
         assertEquals("ㄖ", nine.shownOffered("r"))
         assertEquals("ㄇ", nine.shownOffered("m"))
-        // not a syllable nor an initial: as it is
         assertEquals("xyz", nine.shownOffered("xyz"))
-        // pinyin's nine keys: as offered
         val pinyin = T9Segmenter(abbreviations = false, letters = NineKeyLetters.STANDARD)
         assertEquals("ni", pinyin.shownOffered("ni"))
         assertEquals("r", pinyin.shownOffered("r"))
@@ -137,7 +153,6 @@ class T9SegmenterZhuyinTest {
         assertTrue(shown, shown.endsWith("ˇ"))
         assertFalse(shown, shown.any { it in 'a'..'z' })
         assertEquals("ㄖ", nine.asTyped("r"))
-        // pinyin's nine keys unchanged
         val pinyin = T9Segmenter(abbreviations = false, letters = NineKeyLetters.STANDARD)
         assertEquals(NineKeyLetters.STANDARD.asTyped("mi'"), pinyin.asTyped("mi'"))
     }

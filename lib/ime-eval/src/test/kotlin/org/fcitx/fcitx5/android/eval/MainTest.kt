@@ -13,7 +13,6 @@ import org.fcitx.fcitx5.android.engine.pinyin.NineKeyLetters
 import org.fcitx.fcitx5.android.engine.pinyin.PinyinSegmenter
 import org.fcitx.fcitx5.android.engine.pinyin.Syllables
 import org.fcitx.fcitx5.android.engine.rerank.SentencePicker
-import org.fcitx.fcitx5.android.engine.rerank.SentenceRefiner
 import org.fcitx.fcitx5.android.engine.user.UserModel
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -67,10 +66,7 @@ class MainTest {
         return tmp.newFile("pinyin.data").apply { writeBytes(bytes) }
     }
 
-    /**
-     * What release-report.sh's `cell` reads: the first word in the column named [name], in the
-     * row whose first cell is [row], of the table whose header names it.
-     */
+    /** What release-report.sh's `cell` reads: the first word in column [name] of the row starting [row]. */
     private fun cell(output: String, name: String, row: String): String? {
         var column = -1
         for (line in output.lines()) {
@@ -84,10 +80,7 @@ class MainTest {
         return null
     }
 
-    /**
-     * Stands in for the ime-eval launcher, noting each call in `eval.calls` beside it: `t9` and
-     * `pinyin` write empty files, `score` and `learn` print [scores] and [learning].
-     */
+    /** A stand-in ime-eval launcher noting each call in `eval.calls`: `t9` and `pinyin` write empty files, `score` and `learn` print [scores] and [learning]. */
     private fun launcher(scores: String, learning: String, readings: String = "words: 2, read right: 2 (100.00%), gate 98%\n", readingsExit: Int = 0): File {
         val dir = tmp.newFolder()
         File(dir, "score").writeText(scores)
@@ -113,7 +106,6 @@ class MainTest {
         }
     }
 
-    /** release-report.sh run over [launcher], against [base] if given: its exit status, what it printed, and the dir it wrote to. */
     private fun releaseReport(launcher: File, base: File? = null): Triple<Int, String, File> {
         val out = tmp.newFolder()
         val printed = tmp.newFile()
@@ -137,7 +129,6 @@ class MainTest {
 
     @Test
     fun optionsAreCheckedBeforeAnythingRuns() {
-        // every one a usage error, caught before a file is opened
         val usageErrors = listOf(
             arrayOf("pinyin", "d", "s", "r", "--half"), // no value
             arrayOf("pinyin", "d", "s", "r", "--half", "tune", "--half", "tune"), // twice
@@ -150,9 +141,9 @@ class MainTest {
             arrayOf("pinyin", "d", "s", "r", "--touch", "qwerty:s0.2"), // clean or slip
             arrayOf("pinyin", "d", "s", "r", "--touch", "dvorak:s0.2:clean"), // no such keyboard
             arrayOf("pinyin", "d", "s", "r", "--touch", "qwerty:s0.2:clean", "--taps", "sigma0.2:1", "--scheme", "g14"), // not both
-            arrayOf("pinyin", "d", "s", "r", "--touch", "qwerty:s0.2:clean:x"), // a seed is a number (review F8254)
+            arrayOf("pinyin", "d", "s", "r", "--touch", "qwerty:s0.2:clean:x"), // a seed is a number
             arrayOf("pinyin", "d", "s", "r", "--touched", "t.tsv"), // the set --touch tapped: none
-            // read as given, not the app's floor reported as asked (review F8254)
+            // read as given, not the app's floor reported as asked
             arrayOf("table-slips", "d", "s", "--floor", "low"),
             arrayOf("table-slips", "d", "s", "--topping-floor", "NaN"),
             arrayOf("pinyin", "d", "s", "r", "--threads", "0"),
@@ -167,6 +158,10 @@ class MainTest {
             arrayOf("ksc", "d", "s", "--threads", "many"),
             arrayOf("ksc", "d", "s", "--neighbours", "on"), // not ksc's
             arrayOf("pinyin", "d", "s", "r", "--typos", "maybe"),
+            // --fuzzy types pinyin into the nine keys' session: not without them, nor 双拼's or a table's codes
+            arrayOf("pinyin-glide", "d", "s", "--fuzzy", "all"),
+            arrayOf("pinyin-glide", "d", "s", "--keys", "nine", "--fuzzy", "all", "--shuangpin", "Ziranma"),
+            arrayOf("pinyin-glide", "d", "s", "--keys", "nine", "--fuzzy", "all", "--table", "t.data"),
             arrayOf("pinyin", "d", "s", "r", "--scheme", "t9", "--typos", "off"), // the nine keys read none
             arrayOf("ksc", "d", "s", "--typos", "off"), // not ksc's
             arrayOf("pinyin", "d", "s", "r", "--scheme", "xiaohe", "--sp-abbrev", "maybe"),
@@ -197,15 +192,15 @@ class MainTest {
             // a preset in the table's order ranks no 重码 by the text before: every row would be the same
             arrayOf("table", "d", "s", "--pinyin", "p"),
             arrayOf("table", "d", "s", "--preset", "cangjie", "--pinyin", "p"),
-            // the large model without the small, which the 性能档位's high never has
-            arrayOf("table", "d", "s", "--preset", "wubi", "--pinyin", "p", "--refine", "m"),
-            arrayOf("handwriting", "d", "r", "--refine", "m"),
+            // a tier that runs a model without the models, or one there is not
+            arrayOf("pinyin", "d", "s", "r", "--tier", "medium"),
+            arrayOf("ksc", "d", "s", "--tier", "high"),
+            arrayOf("pinyin", "d", "s", "r", "--tier", "max", "--models", "m"),
             // a model option without what reads it: the 重码 are weighed only with --pinyin, model weights only with a model
-            arrayOf("table", "d", "s", "--preset", "wubi", "--rerank", "m"),
-            arrayOf("table", "d", "s", "--preset", "wubi", "--rerank", "m", "--refine", "m"),
+            arrayOf("table", "d", "s", "--preset", "wubi", "--models", "m"),
             arrayOf("handwriting", "d", "r", "--model-weights", "1"),
             // the models read the sentences at one ink weight
-            arrayOf("handwriting", "d", "r", "--rerank", "m", "--weights", "1,2"),
+            arrayOf("handwriting", "d", "r", "--models", "m", "--weights", "1,2"),
             arrayOf("voice-post", "s", "--source", "best"),
             // the tagger's json and --source tagged go together: labels without a table, or a table nothing reads
             arrayOf("voice-post", "s", "--source", "tagged"),
@@ -213,12 +208,17 @@ class MainTest {
             arrayOf("voice-post", "s", "--source", "tagged", "--tagger", "t.json", "--guard", "maybe"),
             // the guards are the tagger's labels': with any other source --guard would change nothing and say so nowhere
             arrayOf("voice-post", "s", "--source", "app", "--guard", "off"),
+            // the user's words need the engine's data to read their pinyin; a bonus or picked stretches need the words
+            arrayOf("voice-post", "s", "--words", "w.tsv"),
+            arrayOf("voice-post", "s", "--data", "d"),
+            arrayOf("voice-post", "s", "--bonus", "1.5,1"),
+            arrayOf("voice-post", "s", "--picked", "out"),
+            arrayOf("voice-post", "s", "--words", "w.tsv", "--data", "d", "--bonus", "1.5"),
             arrayOf(),
         )
         for (args in usageErrors) assertEquals(args.joinToString(" "), 2, exit(*args))
     }
 
-    // review F8111: table-slips' --touched is its own taps, its preset left out (plain) or not; only pinyin's needs --touch
     @Test
     fun tableSlipsWritesItsTouchedSetWithoutAPreset() {
         val table = CodeTable.Builder()
@@ -230,7 +230,7 @@ class MainTest {
         val set = tmp.newFile("s.tsv").apply { writeText("x\t甲丁\tdaily\n") }
         val touched = File(tmp.root, "touched.tsv")
         assertEquals(0, exit("table-slips", tableFile.path, set.path, "--touched", touched.path))
-        // a few keys, short of a line's 60: written all the same (review F8207)
+        // a few keys, short of a line's 60: written all the same
         assertTrue(touched.readText(), touched.readLines().any { it.isNotBlank() })
     }
 
@@ -242,7 +242,6 @@ class MainTest {
         assertEquals(COMMANDS.size, COMMANDS.map { it.name }.toSet().size)
         val lines = USAGE.lines().map { it.removePrefix("usage:").trimStart() }
         for (command in COMMANDS) {
-            // each with the options it takes, and no other
             val line = lines.single { it.startsWith("${command.name} ") }
             assertEquals(command.name, command.options, Regex("--([a-z-]+)").findAll(line).map { it.groupValues[1] }.toSet())
         }
@@ -320,7 +319,6 @@ class MainTest {
             return out.lines().first { it.startsWith(Metrics.ALL) }.split(Regex(" +"))[1]
         }
         assertEquals("2", samples())
-        // the two texts fall in different halves
         assertEquals(setOf("1"), Halves.NAMES.map { samples("--half", it) }.toSet())
     }
 
@@ -341,19 +339,13 @@ class MainTest {
         val chat = tmp.newFile("chat.tsv").apply { writeText("nihao\t尼好\tdaily\nnihao\t你好\tdaily\n") }
         val learning = StringBuilder()
         assertEquals(0, runCli(arrayOf("learn", dataFile().path, chat.path, "--neighbours", "on"), learning, StringBuilder()))
-        // a correction made twice is first (U-02)
+        // a correction made twice is first
         assertEquals("100.0%", cell(learning.toString(), "top1", "tune, typed a third time"))
         assertEquals("100.0%", cell(learning.toString(), "top1", "held-out, learning nothing"))
         assertEquals("0.0%", cell(learning.toString(), "top1", "held-out, tune learned"))
     }
 
-    /**
-     * release-report.sh itself, over what `score` and `learn` print: the nine-key sets typed on the
-     * nine keys first; against a BASE it wrote itself, a set reported only that BASE has no results
-     * for reported without the comparison, and a gate set without them, or with them read with
-     * other options, failing it before any set is run, every such set named; a p printed in E
-     * notation read as a number; and its exits: 1 when the gate fails, 2 when it cannot read a number.
-     */
+    /** release-report.sh over what `score` and `learn` print: against a BASE, gates, E notation, exit codes. */
     @Test
     fun theReleaseReportGatesOnWhatTheCommandsPrint() {
         assumeTrue("needs bash", File("/bin/bash").canExecute())
@@ -380,7 +372,7 @@ class MainTest {
         val made = calls.readLines()
         assertTrue(made.joinToString("\n"), made.any { it.startsWith("t9 ") && it.endsWith("/t9-chat.set.tsv") })
         assertTrue(made.joinToString("\n"), made.any { it.startsWith("pinyin ") && "/t9-chat.set.tsv " in it && "--scheme t9-strict" in it })
-        // grouped 双拼's sets typed by `shuangpin --keys`, read by their scheme (review N6)
+        // grouped 双拼's sets typed by `shuangpin --keys`, read by their scheme
         assertTrue(made.joinToString("\n"), made.any { it.startsWith("shuangpin xiaohe ") && it.endsWith("/sp18-chat.set.tsv --keys 18") })
         assertTrue(made.joinToString("\n"), made.any { it.startsWith("pinyin ") && "/spnine-chat.set.tsv " in it && "--scheme xiaohe-nine" in it })
         // the 14 keys' sets typed as codes by `t9 --keys 14`, not as digits
@@ -399,8 +391,7 @@ class MainTest {
         assertEquals(report, 1, gated)
         assertTrue(report, "web: top1 0.0%, against BASE won 0 lost 12 p $p FAIL" in report)
         assertTrue(report, "context: top1 0.0%, no results in BASE to compare to" in report)
-        // a gate set BASE has no results for, or read otherwise (a BASE from before neighbouring keys), cannot
-        // pass: found before any set is run, every one named
+        // a gate set BASE has no results for, or read with other options, cannot pass: found before any set runs, each named
         File(base, "chat.tsv").delete()
         val before = calls.readLines()
         val (missing, toldMissing) = releaseReport(eval, base)
@@ -434,7 +425,7 @@ class MainTest {
         assertTrue(toldCrashed, "readings: the run failed" in toldCrashed)
     }
 
-    // a history made from the tree (R27 F8530): the likeliest words with their readings, as --history and the device read them
+    // a history made from the tree: the likeliest words with their readings, as --history and the device read them
     @Test
     fun aHistoryIsTheDictionarysLikeliestWords() {
         val data = dataFile()
@@ -499,8 +490,7 @@ class MainTest {
 
     @Test
     fun spAbbrevOffReadsAKeyAloneOnlyWhereItAndTheNextMakeNoSyllable() {
-        // 自然码 ufmuh: shen whole, then m, sh, h by their initials; mu and uh (shang) are pairs, so m
-        // and u alone are 简拼 in the middle: 什么时候 only with it read, and only as a word typed before (--history)
+        // 自然码 ufmuh: m and u alone are 简拼 in the middle, so 什么时候 only with it read and as a word typed before
         val data = tmp.newFile("abbrev.data").apply {
             writeBytes(
                 PinyinDataBuilder().layers(listOf(WordLayers.BASE)).unigram("<unk>", -7f, 0f).unigram("什么时候", -3f, 0f)
@@ -527,8 +517,7 @@ class MainTest {
         val free = candidates("--sp-abbrev", "0")
         val dear = candidates("--sp-abbrev", "-4")
         assertTrue("$free $dear", free.indexOf("什么时候") in 0 until dear.indexOf("什么时候"))
-        // a grouped keyboard's segmenter takes it too (R27 F8542): off was measured on, had it dropped it. On the 18 keys
-        // u, m and h are keys of one letter, so ufmuh reads as on the 26 (only f shares fg): off, no whole syllable reaches it
+        // a grouped keyboard's segmenter takes it too: on the 18 keys u, m and h are one-letter keys
         assertEquals(listOf("u", "m", "h"), "umh".map { NineKeyLetters.G18.letters(NineKeyLetters.G18.key(it)) })
         val g18 = tmp.newFile("set18.tsv").apply { writeText("${"ufmuh".map(NineKeyLetters.G18::key).joinToString("")}\t什么时候\tdaily\n") }
         fun grouped(vararg abbrev: String): List<String> {
@@ -549,47 +538,33 @@ class MainTest {
             assertEquals(0, runCli(arrayOf("ksc", data.path, set.path, "--threads", threads), out, StringBuilder()))
             return out.toString()
         }
-        // one session for all four, and one for each
         val oneThread = report("1")
         assertEquals(report("4"), oneThread)
         assertEquals(listOf("pair", "2", "2", "50.0%"), oneThread.lines().first { it.startsWith("pair") }.split(Regex(" +")).take(4))
     }
 
-    /** What each reranker made was asked: the contexts it read, and the slices of a pause it was given. */
-    private class Recording(override val slices: Int = SentenceRefiner.SLICES) : SentencePicker, SentenceRefiner {
+    /** What each reranker made was asked: the contexts it read. */
+    private class Recording : SentencePicker {
         val contexts = HashSet<String>()
-        var refined = 0
 
         override fun pick(context: String, readings: List<String>, scores: List<Float>): Int {
             contexts += context
             return 0
-        }
-
-        // never done: the session stops asking after its slices
-        override fun refine(context: String, readings: List<String>, scores: List<Float>, budget: Int): Int? {
-            contexts += context
-            refined++
-            return null
         }
     }
 
     @Test
     fun kscTypesEachSampleWithRerankersOfItsOwnAfterItsOwnContext() {
         val pickers = ArrayList<Recording>()
-        val refiners = ArrayList<Recording>()
         val typist = Typist(
             PinyinData.load(ByteBuffer.wrap(dataFile().readBytes())), PinyinSegmenter(),
             reranker = { Recording().also { pickers += it } },
-            refiner = { Recording(slices = 2).also { refiners += it } },
         )
         typist.type(Sample("nihao", "你好", "daily"))
         // a context that ends with what the sample before committed
         typist.type(Sample("hao", "号", "pair", "他你好"))
         // read from the sample's own context, not kept from that commit, by rerankers that read nothing before
         assertEquals(listOf(setOf(""), setOf("他你好")), pickers.map { it.contexts })
-        assertEquals(listOf(setOf(""), setOf("他你好")), refiners.map { it.contexts })
-        // a pause as long as the sample's refiner says, not the default's
-        assertEquals(listOf(2, 2), refiners.map { it.refined })
     }
 
     @Test
@@ -618,7 +593,7 @@ class MainTest {
         assertEquals(5, bench().size)
         File(dir, "notes.txt").writeText("mine")
         assertThrows(IllegalArgumentException::class.java) { bench() }
-        // F2907: one commit forms no word, its cost NaN rather than a crash
+        // one commit forms no word: its cost NaN rather than a crash
         val one = StringBuilder()
         val args = arrayOf("learn-log-bench", tmp.newFolder("one").path, "--commits", "1", "--days", "1", "--counts", data.path)
         assertEquals(0, runCli(args, one, StringBuilder()))

@@ -12,15 +12,19 @@ import android.view.accessibility.AccessibilityManager
 import android.widget.FrameLayout
 import androidx.annotation.VisibleForTesting
 import java.util.LinkedList
+import kotlin.math.floor
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import org.fcitx.fcitx5.android.R
+import org.fcitx.fcitx5.android.core.InputMethodNames
 import org.fcitx.fcitx5.android.data.InputFeedbacks
 import org.fcitx.fcitx5.android.data.theme.ThemeManager
 import org.fcitx.fcitx5.android.input.UndoChipPlacement
 import org.fcitx.fcitx5.android.input.broadcast.PunctuationComponent
 import org.fcitx.fcitx5.android.input.dependency.TypedComponent
 import org.fcitx.fcitx5.android.input.dependency.context
+import org.fcitx.fcitx5.android.input.dependency.fcitx
 import org.fcitx.fcitx5.android.input.dependency.imeScope
 import org.fcitx.fcitx5.android.input.dependency.theme
 import org.fcitx.fcitx5.android.input.keyboard.KeyAction
@@ -34,6 +38,7 @@ import org.fcitx.fcitx5.android.input.keyboard.canvas.PopupScenes
 import org.fcitx.fcitx5.android.input.keyboard.canvas.SceneBoard
 import org.fcitx.fcitx5.android.input.keyboard.keyTextScale
 import org.fcitx.fcitx5.android.input.shortcut.EditMenuLayout
+import org.fcitx.fcitx5.android.input.shortcut.InputMethodMenu
 import org.fcitx.fcitx5.android.input.shortcut.KeyShortcut
 import org.fcitx.fcitx5.android.scene.engine.Env
 import org.fcitx.fcitx5.android.scene.engine.PopupMotion
@@ -57,6 +62,7 @@ class PopupComponent :
 
     private val imeScope by manager.imeScope()
     private val context by manager.context()
+    private val fcitx by manager.fcitx()
     private val theme by manager.theme()
     private val punctuation: PunctuationComponent by manager.must()
 
@@ -66,12 +72,11 @@ class PopupComponent :
 
     private val showingContainerUi = HashMap<KeyRef, PopupContainerUi>()
 
-    // 060-render-p3 A2: how each popup shown goes (its theme's `transition`, null: at once), and the views
-    // fading out now, each with what is done once it has gone
+    // each popup's theme `transition` (null: at once), and the views fading out now with what follows
     private val goings = HashMap<View, Transition>()
     private val fading = HashMap<View, () -> Unit>()
 
-    // when the last bubble came up: one sooner than its motion after it does not move (as a key typed fast, A1)
+    // a bubble sooner than its motion after the last does not move (as a key typed fast)
     private var lastPreviewAt = Long.MIN_VALUE / 2
 
     private val keyBottomMargin by lazy {
@@ -80,9 +85,8 @@ class PopupComponent :
     }
     private val hideThreshold = 100L
 
-    // the popups of the keys the canvas draws, the engine's scenes (060-render-p2 S2), in the theme they
-    // draw in now: made again where it changed (the keyboard shown now refused its keys' scene, or no
-    // longer: another keyboard, a rotation), the pooled popups made for the old let go with them
+    // in the theme the popups draw in now: remade where that changed (the shown keyboard's keys fell back
+    // or no longer), the pooled popups let go with them
     private var scenesMade: Pair<String, PopupScenes>? = null
     private val scenes: PopupScenes
         get() {
@@ -92,45 +96,36 @@ class PopupComponent :
             return PopupScenes(root, theme, measuring).also { scenesMade = drawn to it }
         }
 
-    /** The popups' engine as they would draw now: a test's, that it follows the keys' theme. */
     @VisibleForTesting
     internal val scenesNow: PopupScenes get() = scenes
 
-    /** The popups kept for the next: a test's, that none made in an old theme is. */
     @VisibleForTesting
     internal val pooled: List<PopupEntryUi> get() = freeEntryUi
 
-    /** [key]'s bubble up now: a test's, that it draws in the theme the keys do. */
     @VisibleForTesting
     internal fun showing(key: KeyRef): PopupEntryUi? = showingEntryUi[key]
 
-    /** The engine's text measured through this: a test's, to make it fail. */
+    /** A test's, to make it fail. */
     @VisibleForTesting
     internal var measuring: (TextMeasurer) -> TextMeasurer = { it }
 
-    /**
-     * The engine that draws [key]'s popups, every key's (a picker's cell too); null where the theme
-     * did not convert: no popup then, logged, never another drawing (060: the views are gone).
-     */
+    /** Null where the theme did not convert: no popup then, logged, never another drawing. */
     private fun scenesFor(key: KeyRef): PopupScenes? =
         scenes.takeIf { it.ready } ?: null.also { Timber.w("no popup for %s: neither the theme's scene nor the built-in's converted", key) }
 
-    // [dp] in px as the engine's rules size a scene's popup ([Popups.px])
     private fun PopupScenes.px(dp: Double) = Popups.px(dp, density).toInt()
 
-    /**
-     * Where the edit menu goes, the input view's to say: a notice [width] × [height]'s place now
-     * and the bar's middle, in window pixels ([EditMenuLayout.place]). Null, or none given: over the key.
-     */
+    /** In window pixels ([EditMenuLayout.place]). Null: over the key. */
     var menuRoom: ((width: Int, height: Int) -> MenuRoom?)? = null
 
-    /** The edit menu opened where the notices go ([menuRoom]): the notice's window, over it, put away or hidden. */
+    /** The notice's window over it is put away or hidden. */
     var onMenuShown: (menu: Rect) -> Unit = {}
 
-    /** That menu gone: a notice [onMenuShown] hid is back. */
     var onMenuGone: () -> Unit = {}
 
-    // the key whose edit menu is up where the notices go, for [onMenuGone]
+    /** How many cells a row fits: a floating keyboard is narrower than the window this component covers. */
+    var keyboardWidth: () -> Int = { rootBounds.width() }
+
     private var menuAbove: KeyRef? = null
 
     class MenuRoom(val notice: UndoChipPlacement.Place, val barMiddle: Int)
@@ -167,7 +162,7 @@ class PopupComponent :
             return
         }
         val scenes = scenesFor(key) ?: return
-        // a bubble fading back to the pool first, to be taken again (after scenesFor: a theme changed clears the pool)
+        // a fading bubble back to the pool first (after scenesFor: a theme change clears the pool)
         endFades()
         val popup = (freeEntryUi.pollFirst() ?: PopupEntryUi(context, scenes)).apply {
             lastShowTime = SystemClock.uptimeMillis()
@@ -192,8 +187,7 @@ class PopupComponent :
         previewMoves(popup, bounds)
     }
 
-    // a new bubble coming up as its theme says, unless it comes sooner than the motion after the last (any
-    // fading out ended in showPopup, as a key's press ends the others' fades, A1)
+    // unless it comes sooner than the motion after the last
     private fun previewMoves(popup: PopupEntryUi, bounds: Rect) {
         val now = SystemClock.uptimeMillis()
         val since = now - lastPreviewAt
@@ -206,14 +200,10 @@ class PopupComponent :
         PopupMoves.appear(popup.root, a, (bounds.centerX() - lp.leftMargin).toFloat(), (bounds.centerY() - lp.topMargin).toFloat())
     }
 
-    /**
-     * [widget]'s motion (`popup`, `preview`, `menu`) in its theme, null where none or where nothing may move
-     * now (键盘动效, battery saver: [KeyMotionSwitch], asked only of a theme that moves).
-     */
+    /** Null where none, or where nothing may move now ([KeyMotionSwitch], asked only of a theme that moves). */
     private fun motionOf(widget: String): PopupMotion? {
         val s = scenes.takeIf { it.ready && it.moves } ?: return null.also { motions = null }
-        // read once for a theme's scenes in an environment (its size, and the input method, field, orientation… that
-        // `@im=`-like styles are scoped by: an Env is a value), not a SceneBuilder made for each bubble shown
+        // an Env is a value: read once per theme's scenes in an environment, not a SceneBuilder per bubble
         val env = s.env()
         val known = motions?.takeIf { it.scenes == s && it.env == env }?.byWidget
             ?: HashMap<String, PopupMotion?>().also { motions = MotionCache(s, env, it) }
@@ -223,16 +213,15 @@ class PopupComponent :
         return m.takeIf { KeyMotionSwitch.on(context) }
     }
 
-    // the widgets' motions read for a theme's scenes in an environment ([motionOf])
     private class MotionCache(val scenes: PopupScenes, val env: Env, val byWidget: HashMap<String, PopupMotion?>)
 
     private var motions: MotionCache? = null
 
-    // [view] gone from [root] in its fade, or at once ([atOnce], none set, or motion off now); then [gone]
+    // at once where [atOnce], none set, or motion off now
     private fun goAway(view: View, atOnce: Boolean, gone: () -> Unit) {
         val t = goings.remove(view)
         val done = { root.removeView(view); PopupMoves.settle(view); gone() }
-        // TalkBack: a view fading out would still take the hover over it (its keys read, the key under not)
+        // TalkBack: a fading view would still take the hover over it
         if (atOnce || t == null) return done()
         if (!KeyMotionSwitch.on(context) || exploring()) return done()
         fading[view] = done
@@ -241,7 +230,6 @@ class PopupComponent :
 
     private fun exploring() = context.getSystemService(AccessibilityManager::class.java)?.isTouchExplorationEnabled == true
 
-    // every fade out ended at once: its view gone
     private fun endFades() {
         if (fading.isEmpty()) return
         fading.keys.toList().forEach { v ->
@@ -250,21 +238,19 @@ class PopupComponent :
         }
     }
 
-    // [text] in [popup] over a key [keyWidth] px across, as [fit] has it (null: a character, its
-    // size); false where the engine could not make its scene, the one before kept
+    // [fit] null: a character, its size; false where the engine could not make its scene, the one before kept
     private fun show(popup: PopupEntryUi, text: String, fit: PreviewLabel.Fit?, keyWidth: Int): Boolean =
         popup.showScene(fit?.text ?: text, fit?.size?.toDouble(), keyWidth)
 
     private fun updatePopup(key: KeyRef, content: String, words: Boolean) {
-        // a long press's keys shown, showKeyboard dismissed the bubble: a letter's preview, wrapped by
-        // its long press, still sends this on every move, not to show it again over them
+        // a long press's keys shown: a letter's preview still sends this on every move, not to show it over them
         if (key in showingContainerUi) return
         showingEntryUi[key]?.apply {
             val fit = if (words && PreviewLabel.isWords(content)) wordsFit(content, this) else null
             val text = fit?.text ?: content
             if (sceneText == text && sceneSize == fit?.size?.toDouble()) return
             if (!show(this, text, fit, trigger.width())) {
-                // not the text before left up while a lift types this one: none, as showPopup's
+                // not the text before left up while a lift types this one
                 dismissJobs.remove(key)?.cancel()
                 return dismissPopupEntry(key, this, atOnce = true)
             }
@@ -272,20 +258,16 @@ class PopupComponent :
         }
     }
 
-    /**
-     * A swipe's shortcut named in [popup] ([PreviewLabel]): words at a function key's size, as the
-     * keys' text is scaled (紧凑, floating), in a bubble no wider than five of them or the key.
-     */
+    /** Words at a function key's size, scaled as the keys' text is, in a bubble no wider than five keys or the key. */
     private fun wordsFit(label: String, popup: PopupEntryUi): PreviewLabel.Fit? {
         val scale = keyTextScale(context)
         val width = popup.trigger.width()
-        // asked again on every move of the finger past the threshold: measured once for the same label
+        // asked on every move past the threshold: measured once per label
         lastFit?.takeIf { it.label == label && it.scale == scale && it.width == width }?.let { return it.fit }
         return sceneWordsFit(label, width)?.also { lastFit = FitFor(label, scale, width, it) }
     }
 
-    // the engine's: its sizes px, measured as the scene draws them ([PopupScenes]); none where it
-    // could not say, the label then shown as a character is
+    // none where the engine could not say: the label then shown as a character is
     private fun sceneWordsFit(label: String, width: Int): PreviewLabel.Fit? {
         val b = scenes.builder() ?: return null
         val (size, least) = scenes.made("words' size", b.previewWordsSize()) ?: return null
@@ -303,20 +285,17 @@ class PopupComponent :
     private var lastFit: FitFor? = null
 
     /**
-     * Over the key [bounds], [width] wide, by default as the engine sizes it: as wide as the key's
-     * face and its text, never narrower than its least (Popups).
-     * From [left], by default centred over the key, kept inside the keyboard: a table's roots
-     * (TextKeyboard) over A were wider than the half of it left of A.
+     * [width] by default as the engine sizes it ([Popups]). [left] by default centred and kept inside the
+     * keyboard: a table's roots over A were wider than the half of it left of A.
      */
     private fun place(
         popup: PopupEntryUi,
         bounds: Rect,
-        // the engine's: the key's, its text's or the least, whichever is widest (Popups)
         width: Int = popup.sceneView.sceneWidth,
         left: Int = ((bounds.left + bounds.right - width) / 2).let { if (root.width > width) it.coerceIn(0, root.width - width) else it },
     ) {
         popup.trigger.set(bounds)
-        // the scene's its own height, and room round it for its shadow ([PopupSceneView.outset])
+        // room round it for its shadow ([PopupSceneView.outset])
         val height = popup.sceneView.sceneHeight
         val out = popup.sceneView.outset
         // align popup bottom with key border bottom [^1]
@@ -324,7 +303,7 @@ class PopupComponent :
         val w = width + out.left + out.right
         val h = height + out.top + out.bottom
         val l = left - out.left
-        // new ones lay the whole input view out again: not for a move or a press that changes nothing
+        // new params lay the whole input view out again: not for a move that changes nothing
         if ((popup.root.layoutParams as? FrameLayout.LayoutParams)?.isAt(w, h, l, top) == true) return
         popup.root.layoutParams = FrameLayout.LayoutParams(w, h).apply {
             topMargin = top
@@ -344,7 +323,7 @@ class PopupComponent :
         var focus = -1
         var actions: List<KeyAction>? = null
         when (keyboard) {
-            // a key of no name (a theme's): its character's built-in list, no setting reaches it (060-keys-unify S6)
+            // a key of no name (a theme's): its character's built-in list, no setting reaches it
             is KeyDef.Popup.Keyboard.Preset -> {
                 val preset = KeyDefaults.preset(keyboard.label, keyboard.caps) ?: return
                 keys = (preset.row + preset.symbols).map { it.text }.toTypedArray()
@@ -372,9 +351,7 @@ class PopupComponent :
             // made as it opens (BaseKeyboard.onPopupAction): none here is no list now
             is KeyDef.Popup.Keyboard.Named -> return
         }
-        // the keys float over the key on their own: the bubble under the one in focus, as one shape
-        // with it, was as wide as the key pressed, and so were they
-        // sized by the engine's rules (Popups)
+        // the keys float over the key on their own: a bubble under the one in focus made them as wide as the key
         val scenes = scenesFor(key) ?: return
         val keyboardUi = PopupKeyboardUi(
             context,
@@ -422,13 +399,46 @@ class PopupComponent :
         showPopupContainer(key, menuUi, "menu")
     }
 
-    private fun showEditMenu(key: KeyRef, bounds: Rect, password: Boolean) {
+    private fun showEditMenu(key: KeyRef, bounds: Rect, password: Boolean, down: Boolean): Boolean {
         val cells = EditMenuLayout.CELLS
-        val scenes = scenesFor(key) ?: return
+        val scenes = scenesFor(key) ?: return false
         val cell = scenes.px(Popups.MENU_CELL_DP)
-        // up where the notices go, out from under the finger; a notice there put away, its window over the row
-        val at = menuRoom?.invoke(cell * cells.size, cell)?.let { room ->
-            EditMenuLayout.place(room.notice, bounds.centerX(), cell, rootBounds.left, rootBounds.right, rootBounds.top, room.barMiddle)
+        val items = cells.map {
+            // what TalkBack reads of the cell
+            val looks = KeyShortcutLooks.of(it)
+            KeyDef.Popup.Menu.Item(context.getString(looks.label), looks.icon, KeyAction.ShortcutAction(KeyShortcut.Command(it)))
+        }
+        val disabled = cells.indices.filter { EditMenuLayout.disabled(cells[it], password) }.toSet()
+        return showFixedMenu(key, bounds, scenes, items, PopupMenuUi.Fixed(EditMenuLayout.START, down = down), disabled, cell)
+    }
+
+    private fun showInputMethodMenu(key: KeyRef, bounds: Rect, down: Boolean): Boolean {
+        val scenes = scenesFor(key) ?: return false
+        // cells of words, as wide as the engine draws those (Popups.menuKeys)
+        val width = floor(scenes.px(Popups.MENU_CELL_DP) * Popups.MENU_WORDS_WIDTH).toInt().coerceAtLeast(1)
+        val (enabled, current) = fcitx.runImmediately { enabledImeCached to inputMethodEntryCached.uniqueName }
+        val byName = enabled.associateBy { it.uniqueName }
+        val menu = InputMethodMenu.of(enabled.map { it.uniqueName }, current, keyboardWidth() / width)
+        val items = menu.cells.map { cell ->
+            when (cell) {
+                // the names the space shows
+                is InputMethodMenu.Cell.Method -> KeyDef.Popup.Menu.Item(
+                    InputMethodNames.of(context, byName.getValue(cell.uniqueName)), 0, KeyAction.SwitchInputMethodAction(cell.uniqueName),
+                )
+                InputMethodMenu.Cell.More -> KeyDef.Popup.Menu.Item(context.getString(R.string.input_method_menu_more), 0, KeyAction.ShowInputMethodPickerAction)
+            }
+        }
+        return showFixedMenu(key, bounds, scenes, items, PopupMenuUi.Fixed(menu.start, down = down), menu.disabled, width)
+    }
+
+    /** A row picked by the finger's travel, [fixed]'s start over the key, where notices go ([EditMenuLayout.place]). */
+    private fun showFixedMenu(
+        key: KeyRef, bounds: Rect, scenes: PopupScenes, items: List<KeyDef.Popup.Menu.Item>, fixed: PopupMenuUi.Fixed, disabled: Set<Int>, cellWidth: Int,
+    ): Boolean {
+        val cell = scenes.px(Popups.MENU_CELL_DP)
+        // out from under the finger; a notice there put away
+        val at = menuRoom?.invoke(cellWidth * items.size, cell)?.let { room ->
+            EditMenuLayout.place(room.notice, bounds.centerX(), cellWidth, rootBounds.left, rootBounds.right, rootBounds.top, room.barMiddle, items.size, fixed.start)
         }
         val menuUi = PopupMenuUi(
             context,
@@ -436,28 +446,22 @@ class PopupComponent :
             rootBounds,
             bounds,
             { dismissPopup(key) },
-            cells.map {
-                // its name as the settings and the swipe's preview say it: what TalkBack reads of the cell
-                val looks = KeyShortcutLooks.of(it)
-                KeyDef.Popup.Menu.Item(context.getString(looks.label), looks.icon, KeyAction.ShortcutAction(KeyShortcut.Command(it)))
-            }.toTypedArray(),
+            items.toTypedArray(),
             onFocusMoved = { InputFeedbacks.hapticFeedback(it) },
-            fixed = PopupMenuUi.Fixed(
-                start = EditMenuLayout.START,
-                disabled = cells.indices.filter { EditMenuLayout.disabled(cells[it], password) }.toSet(),
-                at = at,
-            ),
+            fixed = PopupMenuUi.Fixed(fixed.start, at, fixed.down),
             scenes = scenes,
+            disabled = disabled,
         )
-        if (menuUi.unmade) return
+        if (menuUi.unmade) return false
         showingEntryUi[key]?.let {
             dismissPopupEntry(key, it, atOnce = true)
         }
         if (at != null) {
             menuAbove = key
-            onMenuShown(Rect(at.left, at.top, at.left + cell * cells.size, at.top + cell))
+            onMenuShown(Rect(at.left, at.top, at.left + cellWidth * items.size, at.top + cell))
         }
         showPopupContainer(key, menuUi, "menu")
+        return true
     }
 
     private fun showPopupContainer(key: KeyRef, ui: PopupContainerUi, widget: String) {
@@ -469,7 +473,7 @@ class PopupComponent :
                 topMargin = ui.triggerBounds.top + ui.offsetY - rootBounds.top - out.top
             })
         }
-        // a focus moved can change the shadow's room: the box kept where it is, the view moved round it
+        // a focus move can change the shadow's room: the box kept, the view moved round it
         (ui.root as? PopupSceneView)?.onOutsetChanged = { was, now ->
             (ui.root.layoutParams as? FrameLayout.LayoutParams)?.apply {
                 leftMargin += was.left - now.left
@@ -478,9 +482,7 @@ class PopupComponent :
             }
         }
         showingContainerUi[key] = ui
-        // out of the key pressed (its middle, in the container's pixels); it goes at once, the
-        // character picked typed already, or in its theme's fade (A2). Focus follows the finger by
-        // position, not by its scale: a finger slides over it as it comes up
+        // grows out of the key pressed. Focus follows the finger by position, not scale: it slides over as it comes up
         val pivotX = (ui.triggerBounds.width() / 2 - ui.offsetX + out.left).toFloat()
         val pivotY = (ui.triggerBounds.height() / 2 - ui.offsetY + out.top).toFloat()
         val m = motionOf(widget)
@@ -532,8 +534,7 @@ class PopupComponent :
         goAway(popup.root, atOnce) { pool(popup) }
     }
 
-    // back to the pool only if made in the theme drawn now: one showing when it changed would
-    // otherwise come back from the pool drawing in the old
+    // only if made in the theme drawn now, else it would come back drawing the old one
     private fun pool(popup: PopupEntryUi) {
         PopupMoves.settle(popup.root)
         if (popup.scenes === scenesMade?.second) freeEntryUi.add(popup)
@@ -570,7 +571,8 @@ class PopupComponent :
                 is PopupAction.PreviewUpdateAction -> updatePopup(key, content, words)
                 is PopupAction.ShowKeyboardAction -> showKeyboard(key, keyboard, bounds)
                 is PopupAction.ShowMenuAction -> showMenu(key, menu, bounds)
-                is PopupAction.ShowEditMenuAction -> showEditMenu(key, bounds, password)
+                is PopupAction.ShowEditMenuAction -> outShown = showEditMenu(key, bounds, password, down)
+                is PopupAction.ShowInputMethodMenuAction -> outShown = showInputMethodMenu(key, bounds, down)
                 is PopupAction.TriggerAction -> outAction = triggerFocused(key)
             }
         }
@@ -578,10 +580,8 @@ class PopupComponent :
 
     companion object {
         /**
-         * [keyboard]'s labels, those set apart ([KeyDef.Popup.Keyboard.Explicit.symbolsFrom]) as
-         * [mapped]: shown as the engine will type them, as a Preset's are. So is a mark in the row
-         * before them (the 14 keys' corner, as its key shows it); its letters and digits are as
-         * they are, and nothing of one committed as it is ([KeyDef.Popup.Keyboard.Explicit.asIs]).
+         * Those set apart are [mapped], shown as the engine will type them, as a Preset's are; so is a mark in
+         * the row before them (the 14 keys' corner). Letters and digits are as they are.
          */
         internal fun explicitLabels(keyboard: KeyDef.Popup.Keyboard.Explicit, mapped: (String) -> String): Array<String> =
             Array(keyboard.items.size) {

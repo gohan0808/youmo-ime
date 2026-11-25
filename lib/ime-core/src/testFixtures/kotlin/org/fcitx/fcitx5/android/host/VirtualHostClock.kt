@@ -7,10 +7,7 @@ package org.fcitx.fcitx5.android.host
 import org.fcitx.fcitx5.android.engine.learn.LearnClock
 import org.fcitx.fcitx5.android.engine.platform.Clock
 
-/**
- * A [HostClock] that moves only when told ([advance]), and the engines' [Clock] (the [LearnClock]
- * learning reads), on the same time (UTC, from [epochMillis]): a test or a replay runs the same keys to the same result.
- */
+/** A [HostClock] and the engines' [Clock] that move only when told ([advance]), on one UTC time. */
 class VirtualHostClock(private val epochMillis: Long = 0) : HostClock, Clock {
     private class Timer(val at: Long, val seq: Long, val task: () -> Unit) {
         var cancelled = false
@@ -44,15 +41,9 @@ class VirtualHostClock(private val epochMillis: Long = 0) : HostClock, Clock {
             timers.removeAll { it.cancelled }
             val next = timers.filter { it.at <= until }.minWithOrNull(compareBy<Timer>({ it.at }, { it.seq })) ?: break
             timers.remove(next)
-            // never back: a timer due before a task's [spend] ran out runs late, as on a busy thread
             now = maxOf(now, next.at)
             next.task()
         }
         now = maxOf(now, until)
-    }
-
-    /** Time a task takes as it runs: the clock moves on [millis] without running timers, as a busy thread's does. */
-    fun spend(millis: Long) {
-        now += millis
     }
 }

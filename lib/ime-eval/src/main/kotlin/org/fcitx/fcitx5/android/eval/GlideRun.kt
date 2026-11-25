@@ -17,17 +17,14 @@ import kotlin.math.ln
 import kotlin.math.sqrt
 import kotlin.random.Random
 
-/**
- * Glide typing measured: each word of each sentence glided as a finger would, its keys' centres
- * each off by [GlideRun.wobble] key widths (a Gaussian's sigma), joined by lines, after the words
- * meant before it; right if the decoder's first word is the word (its case aside), top3 if among
- * its first three. Words of one key (I, a) are not glided.
- */
+/** Glide typing measured: each word glided through its keys' centres off by [GlideRun.wobble] key widths, scored top1 and top3. */
 internal class GlideRun(private val data: EnglishData, private val weights: GlidePath.Weights = GlidePath.Weights()) {
     class Result {
         var words = 0
         var right = 0
         var top3 = 0
+        /** pinyin-glide with a session: its first candidate the word. */
+        var sessionRight = 0
         var nanos = 0L
         /** Words left out: a key the layout lacks (微软's ; for ing), or all on one key. */
         var skipped = 0
@@ -41,6 +38,7 @@ internal class GlideRun(private val data: EnglishData, private val weights: Glid
             words += other.words
             right += other.right
             top3 += other.top3
+            sessionRight += other.sessionRight
             nanos += other.nanos
             skipped += other.skipped
             samplesSkipped += other.samplesSkipped
@@ -108,11 +106,7 @@ internal class GlideRun(private val data: EnglishData, private val weights: Glid
     }
 
     companion object {
-        /**
-         * [keys]' centres on [layout], each moved by a Gaussian of sigma [wobble], a key again
-         * (a letter doubled, the nine keys' next on the same) once, joined as a finger's touch points
-         * are: one every [TOUCH] key widths, each a little off the line.
-         */
+        /** [keys]' centres on [layout], each wobbled, a doubled key once, joined as a finger's touch points every [TOUCH] key widths. */
         fun path(keys: String, wobble: Float, random: Random, layout: GlideLayout = GlideLayout.QWERTY): FloatArray {
             val corners = ArrayList<Pair<Float, Float>>()
             var last = ' '

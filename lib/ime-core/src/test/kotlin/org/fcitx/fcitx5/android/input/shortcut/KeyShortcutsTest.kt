@@ -42,7 +42,7 @@ class KeyShortcutsTest {
         assertEquals(text, KeyShortcuts.parse(stored).resolve("full/q"))
     }
 
-    // review S3: a text pasted from a PC, its lines ended by \r\n, stored and read back whole
+    // a text pasted from a PC, its lines ended by \r\n, stored and read back whole
     // contract: the stored line format (key, tab, command or text:), which a later version must read back
     @Test
     fun textRoundTripsItsCarriageReturns() {
@@ -55,8 +55,7 @@ class KeyShortcutsTest {
         assertEquals(KeyShortcut.Text("a\rb"), KeyShortcuts.parse("full/q\ttext:a\rb").resolve("full/q"))
     }
 
-    // a backup's lines ended by \r\n: a command or none still read; a text loses the line's \r (it
-    // would otherwise be typed every time), its own \r stored escaped and kept
+    // a backup's \r\n lines: a command or none still read; a text loses the line's \r, its own \r stored escaped
     @Test
     fun aLineEndedByCarriageReturnStillReads() {
         val shortcuts = KeyShortcuts.parse("a/b\tnone\r\nc/d\tcopy\r\n")
@@ -70,6 +69,21 @@ class KeyShortcutsTest {
     @Test
     fun aBackslashBeforeNothingEscapedIsKept() {
         assertEquals(KeyShortcut.Text("a\\b\\"), KeyShortcuts.parse("full/q\ttext:a\\b\\").resolve("full/q"))
+    }
+
+    @Test
+    fun theInputMethodCommandsRoundTripByTheirKeys() {
+        KeyCommand.entries.forEach { assertEquals(it, KeyCommand.ofKey(it.key)) }
+        val shortcuts = KeyShortcuts.Empty.with("full/q", KeyShortcut.Command(KeyCommand.SwitchInputMethod))
+            .with("full/w", KeyShortcut.Command(KeyCommand.ChooseInputMethod))
+        assertEquals(shortcuts, KeyShortcuts.parse(shortcuts.serialize()))
+        assertEquals(KeyShortcut.Command(KeyCommand.ChooseInputMethod), KeyShortcuts.parse("full/w\tchoose_input_method").resolve("full/w"))
+        // the settings' list is this order: the two after 切键盘, 收起键盘 after them
+        val at = KeyCommand.entries.indexOf(KeyCommand.ChooseKeyboard)
+        assertEquals(
+            listOf(KeyCommand.ChooseKeyboard, KeyCommand.SwitchInputMethod, KeyCommand.ChooseInputMethod, KeyCommand.HideKeyboard),
+            KeyCommand.entries.subList(at, at + 4),
+        )
     }
 
     // contract: the stored line format (key, tab, command or text:), which a later version must read back
@@ -105,15 +119,6 @@ class KeyShortcutsTest {
         assertEquals(paste, shortcuts.resolve("full/a"))
         assertEquals(KeyShortcuts.Empty, shortcuts.without("full/a"))
         assertSame(shortcuts, shortcuts.without("full/b"))
-    }
-
-    @Test
-    fun presetsAppliedToAPageLeaveItsOtherKeys() {
-        val shortcuts = KeyShortcuts.Empty.with("full/a", paste).with("full/s", paste).with("t9/2", paste)
-        val applied = shortcuts.withPresets("full")
-        assertFalse(applied.isSet("full/a"))
-        assertEquals(paste, applied.resolve("full/s"))
-        assertEquals(paste, applied.resolve("t9/2"))
     }
 
     @Test

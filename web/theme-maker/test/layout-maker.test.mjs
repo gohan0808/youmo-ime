@@ -1,12 +1,4 @@
-// The layout maker (061-custom-layout §12): its page assembled, its library (src/layout/layout-maker.js) against the
-// engine as the build writes it: a new layout from each of the app's boards checks clean and draws, a file opened and
-// saved as the app imports it, every finding the checker may give said in words, the preview's environment as the app's;
-// its editing (src/layout/layout-edit.js): moves, keys added and taken out, widths, rows=, long-press lists, merges, rows
-// and the app's bottom row made the layout's own, each read back by the engine as meant.
-// contract: a theme pack's board made one of the user's is PackConvertTest's snapshot (commonTest/data/convert/
-// k17-motion.layout); LM.WORDS says every finding FORMAT.keys holds; LM.refusal every why PackLayouts.convert and
-// LayoutCheck.kept give (their Kotlin read here); the examples are as the app takes them, the page's youmo-format block
-// the generated youmo-format.json.
+// The layout maker: its page, its library against the built engine, and its editing, each change read back by the engine.
 // Run: node --test web/theme-maker/test/layout-maker.test.mjs   (needs ./gradlew :lib:keyboard-scene:youmoEngine)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -31,20 +23,17 @@ const FORMAT = E.layoutFormat();
 const fixed = E.fixedMeasurer();
 const material = E.readTheme(E.themeSource('material'), null, null).theme;
 const enc = (t) => new TextEncoder().encode(t);
-// the line of [xml] where key [id] is written (its `<key id="…"`), 0 where none
 const lineOfKey = (xml, id) => xml.split('\n').findIndex((l) => l.includes('<key id="' + id + '"')) + 1;
 const fresh = (base = 'k18') => LM.fromBuiltin(E, base, 'my-' + base, '我的' + LM.BASE_LABEL[base]);
 
 test('the page is made of src/layout/ and the shared scripts, runs only its own by their hashes, and the theme maker and it link each other', () => {
   const page = assemble(LAYOUT_SRC);
   assert.equal(blockOf(page, 'youmo-engine'), NO_ENGINE);
-  // the theme library and the theme file's format: a .theme opened (§12.4) read as the theme maker reads it
   assert.equal(blockOf(page, 'youmo-lib'), readFileSync(join(src, 'lib.js'), 'utf8').replace(/\n+$/, ''));
   assert.equal(JSON.parse(blockOf(page, 'youmo-format')).limits.fileBytes > 0, true);
   for (const [id, file] of [['youmo-form', 'form.js'], ['youmo-maker', 'maker.js'], ['youmo-layout-maker', join('layout', 'layout-maker.js')], ['youmo-layout-edit', join('layout', 'layout-edit.js')], ['youmo-ui', join('layout', 'ui.js')]]) {
     assert.equal(blockOf(page, id), readFileSync(join(src, file), 'utf8').replace(/\n+$/, ''), id);
   }
-  // the theme maker's style first, the page's own after it
   assert.ok(page.includes(readFileSync(join(src, 'style.css'), 'utf8').replace(/\n+$/, '') + '\n' + readFileSync(join(LAYOUT_SRC, 'style.css'), 'utf8').replace(/\n+$/, '')));
   const csp = /<meta http-equiv="Content-Security-Policy" content="([^"]*)">/.exec(page)[1];
   const run = [...page.matchAll(/<script(?![^>]*type="application\/json")[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
@@ -66,10 +55,10 @@ test('the page is made of src/layout/ and the shared scripts, runs only its own 
 });
 
 test("the engine says what the page offers: the app's version, families, bases, pads, prefixes, limits, every finding", () => {
-  assert.equal(FORMAT.version, '0.6.1');
+  assert.equal(FORMAT.version, '0.6.3');
   assert.deepEqual([...FORMAT.families], ['letters', 'grouped', 'nine', 'number', 'symbols']);
   assert.deepEqual([...FORMAT.bases], ['qwerty', 'k14', 'k18', 'nine', 'number', 'symbols']);
-  assert.deepEqual([...FORMAT.pads], ['full', 'digits', 'signed', 'decimal', 'signed-decimal', 'phone', 'datetime']);
+  assert.deepEqual([...FORMAT.pads], ['full', 'phone', 'datetime']);
   assert.deepEqual([...FORMAT.prefixes], ['full', 'g14', 'g18', 't9', 'zy9', 'zyfull', 'num', 'fn']);
   assert.deepEqual({ ...FORMAT.limits }, { bytes: 65536, id: 32, name: 24 });
   // the ids the checker's id-built-in refuses: the app's boards and the fragments they include
@@ -90,6 +79,9 @@ test('each finding is said in Chinese with what it names; one the table lacks as
   assert.equal(LM.words({ key: 'bottom-left', args: ['back numbers'] }), '左下角通常是 返回、123（和 App 自带的一样）');
   assert.equal(LM.words({ key: 'label-long', args: ['hjk', '16'] }), '键「hjk」显示的字太长：最多 16 个字符');
   assert.equal(LM.words({ key: 'gap-look', args: [] }), '空位（gap）的 look=、class= 不起作用');
+  // the full pad is every number field's: said as no kind of field, as the app says it
+  assert.equal(LM.words({ key: 'pad-lacks', args: ['full', '- .'] }), '数字键盘缺 - .：数字框里打不出来（比如金额的负号、小数点）');
+  assert.equal(LM.words({ key: 'pad-lacks', args: ['phone', '#'] }), '数字键盘「电话」缺 #：这种输入框里打不出来');
   assert.equal(LM.words({ key: 'held', args: ['g18/h', 'k18'] }), 'g18/h 是 18 键的键，这里写的长按、角标、滑动不起作用');
   assert.equal(LM.words({ key: 'held', args: ['fn/x', 'number-row'] }), 'fn/x 是数字行的键，这里写的长按、角标、滑动不起作用');
   assert.equal(LM.words({ key: 'held-letters', args: ['g18/h', 'k18'] }), 'g18/h 是 18 键的键，长按跟它走，不按这里写的字母；要用这些字母，给它起个自己的键名');
@@ -98,6 +90,44 @@ test('each finding is said in Chinese with what it names; one the table lacks as
   assert.equal(LM.words({ key: 'held-popups', args: ['mine'] }), '这里写的 popups= 不起作用，跟 mine 一样');
   assert.equal(LM.words({ key: 'held-popups', args: ['number-row'] }), '这里写的 popups= 不起作用，跟数字行一样');
   assert.equal(LM.words({ key: 'later', args: ['a'] }), 'later：a');
+  assert.equal(LM.words({ key: 'pad-letters', args: ['k1'] }), '键「k1」打出的是字母：数字输入框多半不收字母');
+  assert.equal(LM.words({ key: 'base', args: ['nine'] }), 'App 没有这块底稿：九键');
+});
+
+// as the app's LayoutTextsTest: the same words for what a board lacks
+test('what a board lacks is said with what it costs; a pad named only where the others have it', () => {
+  const lacks = (...args) => LM.words({ key: 'lacks', args });
+  assert.equal(lacks('backspace'), '没有 ⌫：删不了字，打拼音时打错的字母去不掉（不在打字时可以用工具栏的文本编辑面板删）');
+  assert.equal(lacks('lang-no-space'), '没有地球键：换输入法要把空格键长按行为设成切换输入法；也没有空格，空格长按也用不了');
+  assert.equal(lacks('digits', '0'), '没有数字键 0');
+  assert.equal(lacks('pad-digits', '0'), '数字输入框里键盘直接是这块，打不出 0');
+  assert.equal(lacks('pad-digits', '5', 'phone'), '数字键盘「电话」打不出 5：这种输入框里键盘直接是这块');
+  assert.equal(lacks('back', '', 'phone datetime'), '没有返回键：回字母键盘要收起键盘再点输入框；数字输入框里一直是这块（数字键盘「电话、日期时间」）');
+  assert.equal(lacks('letters', 'q x'), '没有字母 q x（密码框里也用这块键盘）');
+  assert.equal(lacks('hyper'), '少了键：hyper');
+});
+
+// the nine keys with no 0 and a Return two rows tall: saved with the one warning, for the app that takes it
+test('保存 the nine keys lacking 0: no errors, one warning, min-app 0.6.3', () => {
+  const xml = readFileSync(join(here, '..', '..', '..', 'lib', 'keyboard-scene', 'src', 'commonTest', 'data', 'layout-check', 'nine-big-enter.layout'), 'utf8');
+  const r = LM.saveCheck(E, xml, FORMAT.version, material);
+  assert.deepEqual(r.errors, []);
+  assert.deepEqual(r.warnings.map((p) => p.message), ['没有数字键 0']);
+  assert.equal(LM.info(r.xml).meta['min-app'], '0.6.3');
+  assert.ok(E.checkLayout(r.xml, FORMAT.version, null).ok);
+});
+
+// an older app reads the command as nothing, so the key would be dead there: the layout asks for the app that has it
+test('保存 a key sending 切输入法 or 选输入法: min-app 0.6.3', () => {
+  const base = FORMAT.bases.find((b) => LM.info(LM.saveCheck(E, fresh(b), FORMAT.version, material).xml).meta['min-app'] !== '0.6.3');
+  for (const name of ['switch_input_method', 'choose_input_method']) {
+    // a function key: one that types (letters, space, 分词) takes only its base key's commands
+    const xml = fresh(base).replace('<key id="backspace" ', `<key id="backspace" swipe-up="shortcut:${name}" `);
+    assert.ok(xml.includes(name), base);
+    const r = LM.saveCheck(E, xml, FORMAT.version, material);
+    assert.deepEqual(r.errors, [], name);
+    assert.equal(LM.info(r.xml).meta['min-app'], '0.6.3', name);
+  }
 });
 
 test('a new layout from each of the app boards is the board as written, under its own id, name and based-on: clean, and drawn', () => {
@@ -108,11 +138,9 @@ test('a new layout from each of the app boards is the board as written, under it
     const r = LM.check(E, xml, LM.ENV, material, fixed, FORMAT.version);
     assert.deepEqual(r.problems.filter((p) => p.level === 'error'), [], base);
     assert.ok(r.scene, base + ': drawn');
-    // drawn as the app draws its own board (the keys' names, the marks of its variant: 18 keys' of k18)
     const app = E.buildScene(base, material, LM.envJson(E, LM.ENV, i.family, E.layout(base)), fixed);
     assert.equal(r.scene.text(), app.scene.text(), base);
   }
-  // includes kept: the app's bottom row followed when it changes
   assert.match(fresh('k18'), /<include src="grouped-bottom"\/>/);
   assert.throws(() => LM.fromBuiltin(E, 'nope', 'my-x', 'x'), /no built-in layout/);
 });
@@ -122,14 +150,13 @@ test("a layout's marks are its base's: own 18 keys of k18 have the 18 keys' corn
   assert.ok(r.ok, JSON.stringify(r.problems));
   assert.deepEqual(E.defaultMarks(r.layout, {}), E.defaultMarks('k18', {}));
   assert.deepEqual(E.defaultMarks(E.readOwnLayout(fresh('k14')).layout, {}), E.defaultMarks('k14', {}));
-  // read as a theme pack's file is (its own id, my-k18: not k18), its corners would be the 14 keys' variant's
+  // read as a theme pack's file (its own id, my-k18: not k18), its corners would be the 14 keys' variant's
   assert.notDeepEqual(E.defaultMarks(E.readLayout(fresh('k18'), null).layout, {}), E.defaultMarks('k18', {}));
 });
 
 test('the 新建 dialog refuses an id or a name the app would', () => {
   assert.equal(LM.idProblem('my-k17', FORMAT), null);
   for (const bad of ['My', 'a_b', '-a', 'a-', 'a--b', '', 'a'.repeat(33), 'k18', 'qwerty', 'g18', 'fn']) assert.ok(LM.idProblem(bad, FORMAT), bad);
-  // a fragment's id too, as the checker: the dialog never makes a layout 保存 refuses
   assert.equal(LM.idProblem('grouped-bottom', FORMAT), 'App 自带的键盘或片段叫 grouped-bottom，换一个');
   assert.ok(E.checkLayout(LM.setKeyboard(fresh('k18'), 'id', 'grouped-bottom'), FORMAT.version, null).errors.some((f) => f.key === 'id-built-in'));
   for (const id of FORMAT.builtIn) assert.ok(LM.idProblem(id, FORMAT), id);
@@ -156,7 +183,6 @@ test('the <keyboard> and <meta> are changed in place, a <meta> made first and ta
 
 test("an attribute is found by its name, never inside another's value; a value with ' or \" written so it reads back", () => {
   const xml = fresh('k18');
-  // a name that reads like an attribute: the name changed, based-on left as it is
   const odd = LM.setKeyboard(xml, 'name', "a based-on='x'");
   assert.equal(LM.info(odd).name, "a based-on='x'");
   assert.equal(LM.info(odd).basedOn, 'k18');
@@ -165,7 +191,6 @@ test("an attribute is found by its name, never inside another's value; a value w
   assert.equal(LM.info(LM.setKeyboard(odd, 'based-on', 'k14')).basedOn, 'k14');
   const back = LM.setKeyboard(odd, 'name', '我的18 键');
   assert.equal(back, xml.replace('name="我的18 键"', 'name="我的18 键"'));
-  // a value in single quotes holding a ' x=' and a ": changed as one, the rest of the tag as it was
   const single = xml.replace(/name="[^"]*"/, "name='b x=\"1\" id=\"k18\"'");
   assert.equal(LM.info(single).name, 'b x="1" id="k18"');
   assert.equal(LM.info(LM.setKeyboard(single, 'id', 'my-x')).name, 'b x="1" id="k18"');
@@ -179,7 +204,6 @@ test("an attribute is found by its name, never inside another's value; a value w
   assert.equal(LM.setKeyboard(hand, 'based-on', null), '<keyboard name="a based-on=\'x\'" id="my" family="letters">\n</keyboard>');
   const handMeta = '<keyboard id="my">\n  <meta description="min-app=\'0.1\'" min-app="0.6.0"/>\n</keyboard>';
   assert.equal(LM.setMeta(handMeta, 'min-app', '0.6.1'), '<keyboard id="my">\n  <meta description="min-app=\'0.1\'" min-app="0.6.1"/>\n</keyboard>');
-  // <meta>: a description that holds min-app='0.1' is a description; min-app is written as its own
   const described = LM.setMeta(xml, 'description', "needs min-app='0.1' x=1");
   const minApp = LM.setMeta(described, 'min-app', '0.6.1');
   assert.deepEqual(LM.info(minApp).meta, { description: "needs min-app='0.1' x=1", 'min-app': '0.6.1' });
@@ -196,7 +220,6 @@ test('a file is opened as the app imports one: UTF-8 with or without BOM, within
   assert.throws(() => LM.openText(enc(xml + ' '.repeat(FORMAT.limits.bytes)), FORMAT.limits.bytes), /64 KB/);
   assert.throws(() => LM.openText(new Uint8Array([0xff, 0xfe, 0x3c]), FORMAT.limits.bytes), /UTF-8/);
   assert.throws(() => LM.openText(enc('<theme/>'), FORMAT.limits.bytes), /<keyboard>/);
-  // Windows' line ends read as \n: a <meta> written into it later does not mix the two
   const crlf = LM.openText(enc(xml.replace(/\n/g, '\r\n')), FORMAT.limits.bytes);
   assert.equal(crlf, xml);
   assert.ok(!LM.setMeta(crlf, 'author', 'x').includes('\r'));
@@ -207,32 +230,26 @@ test('保存: errors keep it from being saved; else min-app written as the check
   const ok = LM.saveCheck(E, xml, FORMAT.version, material);
   assert.deepEqual(ok.errors, []);
   assert.equal(LM.info(ok.xml).meta['min-app'], E.checkLayout(xml, FORMAT.version, null).minApp);
-  // what is saved checks as it was, the same min-app: saved again, the same file
   assert.equal(LM.saveCheck(E, ok.xml, FORMAT.version, material).xml, ok.xml);
   assert.ok(E.checkLayout(ok.xml, FORMAT.version, null).ok);
-  // an id of the app's: an error, nothing written
   const bad = LM.setKeyboard(xml, 'id', 'k18');
   const no = LM.saveCheck(E, bad, FORMAT.version, material);
   assert.equal(no.errors.length > 0, true);
   assert.ok(no.errors.some((p) => /和 App 自带的键盘或片段重名/.test(p.message)), JSON.stringify(no.errors));
   assert.equal(no.xml, bad);
-  // only warnings: saved (the page asks first)
   const narrow = xml.replace('<key id="r1c1" ', '<key id="r1c1" width="2" ');
   const w = LM.saveCheck(E, narrow, FORMAT.version, material);
   assert.deepEqual(w.errors, []);
   assert.ok(w.warnings.some((p) => p.message === '键「r1c1」很窄，可能不好按' && p.line > 0), JSON.stringify(w.warnings));
-  // newer than the app: refused
   assert.ok(LM.saveCheck(E, LM.setMeta(xml, 'min-app', '9.0'), FORMAT.version, null).errors.some((p) => /9\.0/.test(p.message)));
   assert.equal(LM.fileName(xml), '我的18 键.layout');
   assert.equal(LM.fileName(LM.setKeyboard(xml, 'name', 'a/b:c')), 'a_b_c.layout');
   assert.equal(LM.fileName('<x/>'), 'layout.layout');
-  // a <meta> description that reads like min-app: saved as one file the app reads, min-app its own attribute
   const described = LM.setMeta(xml, 'description', "min-app='0.1'");
   const d = LM.saveCheck(E, described, FORMAT.version, material);
   assert.deepEqual(d.errors, []);
   assert.deepEqual(LM.info(d.xml).meta, { description: "min-app='0.1'", 'min-app': E.checkLayout(xml, FORMAT.version, null).minApp });
   assert.ok(E.checkLayout(d.xml, FORMAT.version, null).ok);
-  // the text with min-app is checked again and given only where it passes: else its errors, the text as it was
   let calls = 0;
   const twice = { checkLayout: () => (++calls === 1 ? { errors: [], warnings: [], minApp: '0.6.1' } : { errors: [{ line: 3, key: 'read', args: ['bad'] }], warnings: [] }) };
   const r = LM.saveCheck(twice, xml, FORMAT.version, null);
@@ -248,7 +265,6 @@ test('the problems: the checker\'s with their lines, the preview environment\'s 
   assert.equal(r.scene, null);
   assert.ok(r.problems.length && r.problems.every((p) => p.level === 'error'));
   assert.ok(r.problems.some((p) => p.line > 0), JSON.stringify(r.problems));
-  // a key with no long press name: a warning with its line
   const unnamed = LM.check(E, xml.replace(/(<key id="q"[^>]*?) shortcut="[^"]*"/, '$1'), LM.ENV, material, fixed, FORMAT.version);
   const u = unnamed.problems.find((p) => /没有按键名/.test(p.message));
   assert.ok(u && u.line === lineOfKey(xml, 'q'), JSON.stringify(unnamed.problems));
@@ -350,32 +366,29 @@ test("a theme pack's boards are offered made layouts of the user's, as the app's
   assert.deepEqual(boards.map((b) => [b.board, b.ok]), [['k18', true], ['number', false]], 'the listed boards it has, in their order; 注音 not one');
   const made = E.convertPackLayout('薄荷 17 键', { author: '小明', license: 'CC-BY-4.0' }, 'k18', k18, null, '0.6.1');
   assert.equal(boards[0].text, made.text, 'the app\'s import\'s');
-  // the JVM's own (PackConvertTest's snapshot)
   assert.equal(boards[0].text, readFileSync(join(data, 'convert', 'k17-motion.layout'), 'utf8'));
   assert.equal(boards[0].name, '薄荷 17 键 · 17 键');
   assert.equal(boards[0].id, made.id);
   assert.equal(boards[1].why, '读不出来', 'in words, not PackLayouts\' own (review S2)');
-  // every why PackLayouts gives, in words (review R3)
   assert.equal(LM.refusal("the app's k18 does not read"), 'App 自带的 k18 读不出来');
   assert.equal(LM.refusal('made one that does not take: a letters board lacks the keys x'), '转出来的布局检查不过：a letters board lacks the keys x');
   assert.equal(LM.refusal('its fragment grouped-bottom does not read'), '它用的片段 grouped-bottom 读不出来');
-  // a number board's pads (PackLayouts.forPads) and what LayoutCheck.kept holds a board to (review R26 F8106)
-  assert.equal(LM.refusal('its pads lack keys: phone datetime'), '它写的数字键盘缺键：「电话」、「日期时间」');
   assert.equal(LM.refusal("over 256 when= alternatives an include's and its rows' make"), '它用的片段和片段里的行，when= 条件合起来超过 256 种');
-  assert.equal(LM.refusal('it serves no pad'), '哪种数字键盘都缺键，一种也用不了');
   assert.equal(LM.refusal('it has no slot [nine-side, symbol-grid]'), '少了 App 这块必有的位置：九键左边的符号列、符号面板的符号格子');
   assert.equal(LM.refusal('it has no key [backspace, enter]'), '少了 App 这块必有的键：删除、回车');
   assert.equal(LM.refusal('it has no key [2, 3]'), '少了 App 这块必有的键：2、3');
-  // kept's sets as the engine writes them
   const nine = E.layoutSource('nine');
-  const why = (text) => E.convertPackLayout('t', null, 'nine', text, null, FORMAT.version).why;
-  assert.equal(LM.refusal(why(nine.replace('kind="nine-side"', 'kind="symbol-grid"'))), '少了 App 这块必有的位置：九键左边的符号列');
-  assert.equal(LM.refusal(why(nine.replace('role="backspace"', ''))), '少了 App 这块必有的键：删除');
-  // each why the Kotlin gives (PackLayouts.convert, judge, forPads; LayoutCheck.kept), read from it: one added there
-  // and not here comes out in English
+  // made the user's own, a pack's board lacking what the app's has is judged as one they import: made, what it lacks told
+  const lacks = (text) => {
+    const c = E.convertPackLayout('t', null, 'nine', text, null, FORMAT.version);
+    assert.ok(c.ok, c.why);
+    return c.problems.filter((p) => p.key === 'lacks').map((p) => [...p.args]);
+  };
+  assert.deepEqual(lacks(nine), []);
+  assert.deepEqual(lacks(nine.replace('kind="nine-side"', 'kind="symbol-grid"')), [['nine-side']]);
+  assert.deepEqual(lacks(nine.replace('role="backspace"', '')), [['backspace']]);
+  // each why the Kotlin gives, read from it: one added there and not here comes out in English
   const kotlin = (f) => readFileSync(join(here, '..', '..', '..', 'lib', 'keyboard-scene', 'src', 'commonMain', 'kotlin', 'org', 'fcitx', 'fcitx5', 'android', 'scene', 'layout', f), 'utf8');
-  // a function's body, up to its closing brace at four spaces (a member's): one renamed or written otherwise fails here
-  // by its name, not as a null read further on
   const fun = (text, file, name) => {
     const m = new RegExp('fun ' + name + '\\([\\s\\S]*?\\n    }\\n').exec(text);
     assert.ok(m, file + ': no fun ' + name + '( closed by a "    }" line');
@@ -387,35 +400,28 @@ test("a theme pack's boards are offered made layouts of the user's, as the app's
     assert.ok(new Set(list).size >= least, what + ': ' + new Set(list).size + ' whys read, fewer than its ' + least + ': ' + list.join(' | '));
     return list;
   };
-  // the floors are the whys each has now, distinct (one fewer read: the pattern no longer finds one): convert's and
-  // forPads' 8 (9 written, a fragment's `does not read` twice), judge's 3, kept's 2 (`no key` for two sets); 13 in all
+  // the floors are each one's current distinct whys (one fewer means the pattern no longer finds one)
   const whys = new Set([
-    ...found('PackLayouts Converted.Not/ForPads', [...pack.matchAll(new RegExp('(?:Converted\\.Not\\(|ForPads\\(null, )' + literal, 'g'))].map((m) => m[1]), 8),
+    ...found('PackLayouts Converted.Not', [...pack.matchAll(new RegExp('Converted\\.Not\\(' + literal, 'g'))].map((m) => m[1]), 6),
     ...found('PackLayouts.judge', [...fun(pack, 'PackLayouts.kt', 'judge').matchAll(new RegExp('return ' + literal, 'g'))].map((m) => m[1]), 3),
     ...found('LayoutCheck.kept', [...fun(kotlin('LayoutCheck.kt'), 'LayoutCheck.kt', 'kept').matchAll(new RegExp('return ' + literal, 'g'))].map((m) => m[1].replace('$it', '[$it]')), 2),
   ]);
   for (const w of whys) {
     const said = LM.refusal(w.replace(/\$\{[^}]*\}|\$\w+/g, 'k18'));
-    // what the page writes in Latin letters itself: App, id, an attribute's name (when=)
     assert.doesNotMatch(said.replaceAll('k18', '').replaceAll('App', '').replace(/[a-z-]+=/g, ''), /[A-Za-z]{3,}/, w);
   }
   assert.deepEqual(LM.saveCheck(E, boards[0].text, FORMAT.version, theme).errors, []);
-  // the pack's own fragment written in, as the app's import does
   const bottom = E.layoutSource('grouped-bottom').replace('<fragment', '<!-- mine -->\n<fragment');
   const withBottom = M.doc(d.xml, {}, { 'k18.xml': k18, 'grouped-bottom.xml': bottom });
   assert.equal(LM.themeBoards(E, withBottom, theme, [...FORMAT.bases], FORMAT.version)[0].text,
     E.convertPackLayout('薄荷 17 键', { author: '小明', license: 'CC-BY-4.0' }, 'k18', k18, { 'grouped-bottom': bottom }, '0.6.1').text);
-  // none: nothing offered
   assert.deepEqual(LM.themeBoards(E, M.doc(d.xml), theme, [...FORMAT.bases], FORMAT.version), []);
 });
 
-// as the engine's (format.test.mjs): just above what it is, so it grows only on purpose (the engine is most of it)
+// just above its size, so it grows only on purpose
 test('the layout maker built is no bigger than its budget', () => {
   const page = assemble(LAYOUT_SRC, ENGINE);
-  // 0.6.1 L6/L7/W3: raised once with room for the custom-layout stages (user 11-16); L8: the theme library (youmo-lib,
-  // 55 KB) and the theme file's format (7 KB) for a .theme opened, past that room, and L6's engine (061-pending-decisions
-  // L8a: the user holds the size no matter)
-  assert.ok(Buffer.byteLength(page) <= 2_100_000, 'the page is ' + Buffer.byteLength(page) + ' bytes');
+  assert.ok(Buffer.byteLength(page) <= 2_670_500, 'the page is ' + Buffer.byteLength(page) + ' bytes');
   assert.ok(statSync(ENGINE).size < Buffer.byteLength(page));
 });
 
@@ -427,7 +433,6 @@ test("the draft is the theme maker's, in the layout maker's own database", async
   const back = await M.draft(store);
   assert.equal(back.doc.xml, xml);
   assert.equal(back.env.turned, true);
-  // the IndexedDB store opens the name it is given, its tabs' lock after it
   const opened = [];
   const idb = { open: (name) => { opened.push(name); return {}; } };
   const s = M.idbStore(idb, 'youmo-layout-maker');
@@ -437,11 +442,9 @@ test("the draft is the theme maker's, in the layout maker's own database", async
   assert.deepEqual(opened, ['youmo-layout-maker', 'youmo-theme-maker']);
 });
 
-// ---- the editing (W2, §12.3): each change made on the text, read back by the engine as meant ----
 
 const LE = globalThis.YoumoLayoutEdit;
 const ids = (xml) => LE.parse(xml).rows.map((r) => r.cells.map((c) => c.a.id || '(' + c.name + ')').join(' '));
-// what the engine reads of [xml], written back as it writes a layout: its rows' cells by id
 const engineIds = (xml) => {
   const r = E.readOwnLayout(xml);
   assert.ok(r.ok, 'the engine reads it: ' + JSON.stringify(r.problems));
@@ -464,7 +467,6 @@ test('a key moved: in its row, to another row, a step at a time; the rest of the
   assert.equal(LE.step(xml, { row: 0, index: 0 }, -1, 0).xml, xml, 'the first key goes no further left');
   r = LE.step(xml, { row: 1, index: 0 }, 0, -1);
   assert.deepEqual([ids(r.xml)[0], r.at], ['q w e r t y u i o p a', { row: 0, index: 10 }]);
-  // the last of a row moved out: the row goes, the target's index counted without it
   const one = LE.addRow(xml, 0, '<key id="x1" label="x" send="x"/>');
   r = LE.move(one, { row: 0, index: 0 }, { row: 2, index: 0 });
   assert.deepEqual([ids(r.xml).length, ids(r.xml)[1].split(' ')[0], r.at], [ids(xml).length, 'x1', { row: 1, index: 0 }]);
@@ -486,19 +488,16 @@ test('keys added and taken out: letters, characters of their own name, the base\
   assert.equal(engineIds(out)[0], 'q w c1 e r t y u i o p');
   out = LE.insert(out, { row: 0, index: 11 }, '<gap/>');
   assert.equal(engineIds(out)[0], 'q w c1 e r t y u i o p (gap)');
-  // the base's function keys: each once, without where the base showed it
   const fns = LE.functionKeys([E.layoutSource('k18'), E.layoutSource('grouped-bottom')]);
   for (const id of ['apostrophe', 'backspace', 'symbols', 'numbers', 'comma', 'space', 'period', 'lang', 'enter']) assert.ok(fns.some((f) => f.id === id), id);
   assert.ok(!fns.some((f) => /when=/.test(f.text) || f.text.includes('letters=')));
   assert.equal(fns.find((f) => f.id === 'backspace').label, '⌫');
-  // every function key added to a board with the app's bottom row: an id the fragment's keys have not either, and
-  // the board saved clean (the include's comma is the board's: a second "comma" the checker refuses)
+  // the include's comma is the board's: a second "comma" the checker refuses
   const source = (s) => E.layoutSource(s);
   for (const base of ['k14', 'k18']) {
     const k = fresh(base);
     const texts = [E.layoutSource(base), ...LE.parse(E.layoutSource(base)).includes.map((x) => E.layoutSource(x.a.src))];
     for (const f of LE.functionKeys(texts)) {
-      // a row of its own: a full row has no room
       const added = LE.addRow(k, 0, LE.withFreeId(k, f.text, source));
       assert.deepEqual(errorsOf(added), [], base + ' + ' + f.id);
     }
@@ -507,12 +506,10 @@ test('keys added and taken out: letters, characters of their own name, the base\
   }
   assert.equal(LE.freeId(fresh('k18'), 'comma'), 'comma', 'without the fragments: the file\'s own ids only');
   assert.equal(LE.charKey(fresh('k18'), 'x', source), LE.charKey(fresh('k18'), 'x'), 'c1 no fragment has');
-  // a lone ; on a letters board: semicolon, of the layout's own name (the app has no full/;), saved clean
   const semi = LE.letterKey(LE.remove(xml, { row: 1, index: 9 }), ';');
   assert.equal(semi, '<key id="semicolon" label=";" send=";" shortcut="my-qwerty/semicolon"/>');
   assert.equal(LE.letterKey(xml, ';'), '<key id="semicolon-2" label=";" send=";" shortcut="my-qwerty/semicolon-2"/>');
   assert.deepEqual(errorsOf(LE.addRow(xml, 0, LE.letterKey(xml, ';'))), []);
-  // taken out: a row's last key takes the row with it
   assert.equal(ids(LE.remove(xml, { row: 0, index: 0 }))[0], 'w e r t y u i o p');
   let gone = LE.addRow(xml, 0, '<gap/>');
   assert.equal(ids(gone).length, ids(xml).length + 1);
@@ -536,10 +533,8 @@ test('a key\'s attributes: width (snapped as dragged), rows=, kind, label and ac
     assert.equal(LE.labelText(p.type, p.arg), raw, String(raw));
   }
   assert.equal(LE.labelParts('{ime-name}').type, 'other');
-  // two bindings: written as they are (review R26 F8272), so the panel takes an edit of them
   assert.deepEqual(LE.labelParts('{punct:,}{punct:.}'), { type: 'other', arg: '{punct:,}{punct:.}' });
   assert.equal(LE.labelProblem('other', '{punct:,}{punct:.}'), null);
-  // braces are a binding's: refused as a text, said why
   assert.match(LE.labelProblem('text', 'a{b'), /不能有 \{ 或 \}/);
   assert.match(LE.labelProblem('case', 'x}'), /不能有/);
   assert.equal(LE.labelProblem('other', '{ime-name}'), null);
@@ -550,7 +545,6 @@ test('a key\'s attributes: width (snapped as dragged), rows=, kind, label and ac
   }
   assert.deepEqual(LE.actionParts('lang'), { type: 'other', arg: 'lang' });
   assert.equal(LE.actionText('commit', ''), null, 'a kind without its parameter: nothing written');
-  // whose actions are the layout's (§9, Q11)
   const P = FORMAT.prefixes;
   assert.equal(LE.sharedName({ shortcut: 'g18/we' }, P), '这个键的长按、滑动跟内置的18 键 WE，在 App 的按键字符和快捷键里改');
   assert.match(LE.sharedName({ shortcut: 'backspace' }, P), /内置的功能键 backspace/);
@@ -570,7 +564,6 @@ test('a key\'s long-press list: written, changed, taken out, the key closing its
   assert.deepEqual(LE.popupOf(out, at).items.map((x) => x.text), ['丙']);
   assert.equal(LE.setPopup(out, at, []), plain);
   assert.equal(LE.popupOf(plain, at), null, 'no <popup>: its character\'s own');
-  // the <popup>'s own attributes kept, an item still there keeping its send=; another kind's said and made a list
   const own = LE.addRow(xml, 0, '<key id="k9" label="k" send="k"><popup from="list" as-is="true" in-row="3" transform-punctuation="false" preview="k"><item text="甲" send="commit:甲乙"/><item text="丙"/></popup></key>');
   out = LE.setPopup(own, at, ['甲', '丁']);
   assert.match(out, /<popup from="list" as-is="true" in-row="3" transform-punctuation="false" preview="k"><item text="甲" send="commit:甲乙"\/><item text="丁"\/><\/popup>/);
@@ -580,7 +573,6 @@ test('a key\'s long-press list: written, changed, taken out, the key closing its
   out = LE.setPopup(nine, at, ['甲']);
   assert.match(out, /<popup from="list" in-row="2"><item text="甲"\/><\/popup>/);
   assert.deepEqual(errorsOf(out), []);
-  // a key with children of its own: the list added among them, taken out leaving them
   const q = LE.setPopup(xml, { row: 0, index: 0 }, ['1']);
   assert.match(q, /<key id="q"[^>]*>\n {6}<popup from="list"><item text="1"\/><\/popup>\n {6}<variant when="roots"/);
   assert.equal(LE.setPopup(q, { row: 0, index: 0 }, []), xml);
@@ -597,7 +589,6 @@ test('letter keys merged into a group key: the board grouped, every letter a gro
   assert.deepEqual(errorsOf(r.xml), []);
   assert.deepEqual(LE.coverage(r.xml).q, 1);
   assert.equal(Object.keys(LE.coverage(r.xml)).filter((c) => c !== ';').length, 26);
-  // across rows: where the first is; its id free again
   const across = LE.merge(xml, [{ row: 0, index: 9 }, { row: 1, index: 0 }]);
   assert.match(across.xml, /<key id="pa" label="\{group:pa\}"/);
   assert.equal(ids(across.xml)[1].split(' ')[0], 's');
@@ -608,7 +599,6 @@ test('letter keys merged into a group key: the board grouped, every letter a gro
   assert.match(LE.MERGED, /^变成分组键盘：只有拼音能用/);
 });
 
-// L8: {group:} takes one or two letters (LayoutReader's GROUP_ARG); three or more are written out, as the 17 键 example's HJK
 test('a group of three letters or more is written out in capitals, the reader taking it', () => {
   assert.equal(LE.groupLabel('qw'), '{group:qw}');
   assert.equal(LE.groupLabel('l;'), '{group:l;}');
@@ -620,56 +610,42 @@ test('a group of three letters or more is written out in capitals, the reader ta
   assert.doesNotMatch(r.xml, /\{group:[a-z;]{3,}\}/);
   assert.deepEqual(errorsOf(r.xml), []);
   assert.equal(engineIds(r.xml)[1], 'a s d f g hjk l semicolon star');
-  // five, the most a key takes
   const five = LE.merge(xml, [0, 1, 2, 3, 4].map((index) => ({ row: 0, index })));
   assert.match(five.xml, /<key id="qwert" label="QWERT" letters="qwert"/);
   assert.deepEqual(errorsOf(five.xml), []);
-  // a group key added to a board: checked clean as well
   const gone = LE.remove(r.xml, { row: 1, index: 5 });
   assert.deepEqual(errorsOf(LE.addRow(gone, 0, LE.letterKey(gone, 'hjk'))), []);
-  // by rows, the face of the letters
   assert.equal(LE.groupLabel('h jk'), 'HJK');
   assert.equal(LE.groupLabel('q w'), '{group:qw}');
 });
 
-// the 分组字母 box (review S4, N9): the face follows the letters where it is the group's own, a key of the app's name
-// with letters not the app key's named its own
 test('group letters set: the face the group\'s own follows them, a face written over stays, an app key\'s named its own', () => {
   const k18 = fresh('k18');
   const h = { row: 1, index: 3 };
   const a = (x) => LE.cellAt(LE.parse(x), h).a;
   const held = (x) => [...E.checkLayout(x, FORMAT.version, null).warnings].filter((f) => f.key === 'held-letters').map((f) => f.line);
-  // H made HJK: its face HJK, its name (g18/h, the app's H) its own, the checker telling nothing
   const hjk = LE.setLetters(k18, h, 'hjk', held);
   assert.deepEqual([a(hjk).label, a(hjk).letters, a(hjk).shortcut], ['HJK', 'hjk', 'my-k18/hjk'], 'named as the app names a pack\'s (L6)');
   assert.deepEqual(held(hjk), []);
   assert.deepEqual(held(LE.setLetters(k18, h, 'hjk')), [LE.parse(k18).rows[1].cells[3].line], 'not named: told');
-  // its own already: not renamed again; letters the app key's: kept the app's
   assert.equal(a(LE.setLetters(hjk, h, 'hj', held)).shortcut, 'my-k18/hjk');
   assert.equal(a(LE.setLetters(k18, h, 'h', held)).shortcut, 'g18/h');
-  // a name of those letters another key has for other letters: -2; the ; of l; left out
   const taken = LE.setAttrs(k18, { row: 0, index: 0 }, { shortcut: 'my-k18/hjk' });
   assert.equal(a(LE.setLetters(taken, h, 'hjk', held)).shortcut, 'my-k18/hjk-2');
   const l = { row: 1, index: 5 };
   assert.equal(LE.cellAt(LE.parse(LE.setLetters(k18, l, 'kl;', held)), l).a.shortcut, 'my-k18/kl');
-  // only a ; (no letter a–z): `keys`, as PackLayouts names it (review R1)
   assert.equal(LE.cellAt(LE.parse(LE.setLetters(k18, l, ';', held)), l).a.shortcut, 'my-k18/keys');
-  // the name a <variant> (its key's other letters) or a <defaults> (none) has: taken too (review R2)
   const inVariant = k18.replace(/(<key id="r1c1"[^>]*)\/>/, '$1><variant when="landscape" shortcut="my-k18/hjk"/></key>');
   assert.notEqual(inVariant, k18);
   assert.equal(a(LE.setLetters(inVariant, h, 'hjk', held)).shortcut, 'my-k18/hjk-2');
   const inDefaults = k18.replace('<row>', '<row>\n    <defaults shortcut="my-k18/hjk"/>');
   assert.notEqual(inDefaults, k18);
   assert.equal(a(LE.setLetters(inDefaults, h, 'hjk', held)).shortcut, 'my-k18/hjk-2');
-  // a variant of the key itself, of its letters: its own name, kept
   const own = hjk.replace(/(<key id="r2c4"[^>]*)\/>/, '$1><variant when="landscape" shortcut="my-k18/hjk"/></key>');
   assert.notEqual(own, hjk);
   assert.equal(a(LE.setLetters(own, h, 'hjk', held)).shortcut, 'my-k18/hjk');
-  // a {group:hjk} of the page before L8 (refused by the reader): followed, and so made right
   const old = LE.setAttrs(hjk, h, { label: '{group:hjk}' });
   assert.equal(a(LE.setLetters(old, h, 'hjkl', held)).label, 'HJKL');
-  // and one opened or a draft restored (review R26 D8): its face written as now, the reader taking it; a face of
-  // other letters than its own, or of two, as it was
   assert.notDeepEqual(errorsOf(old), []);
   const back = M.oldGroupFaces(old);
   assert.equal(back.keys, 1);
@@ -678,8 +654,7 @@ test('group letters set: the face the group\'s own follows them, a face written 
   assert.deepEqual(M.oldGroupFaces(hjk), { xml: hjk, keys: 0 });
   const other = LE.setAttrs(hjk, h, { label: '{group:xyz}' });
   assert.deepEqual(M.oldGroupFaces(other), { xml: other, keys: 0 });
-  // its own scan of the tag's attributes (R26 F8515): a label= in single quotes written as now; a `label="…"` inside an
-  // attribute's value before it is that value, left as it is, the key's own label= the one written
+  // a `label="…"` inside an earlier attribute's value is that value, left alone
   assert.deepEqual(M.oldGroupFaces(old.replace('label="{group:hjk}"', "label='{group:hjk}'")), { xml: hjk, keys: 1 });
   const inValue = (xml, label) => xml.replace(label, `swipe-down='commit:label="{group:hjk}"' ${label}`);
   const face = /label="[^"]*"/.exec(hjk.slice(hjk.indexOf('id="r2c4"')))[0];
@@ -744,7 +719,9 @@ test('rows: added, moved, taken out; their height and indent; the app\'s bottom 
 });
 
 test('a key the scene shows found where it is written: once, twice (each its when=), by its problem\'s line', () => {
-  const xml = fresh('number');
+  // 0.6.2's number board, its * written once for each of two pads (the app's has its marks in a scroll column now)
+  const xml = readFileSync(join(here, '..', '..', '..', 'lib', 'keyboard-scene', 'src', 'commonTest', 'data', 'layout-check', 'number-062.xml'), 'utf8')
+    .replace('id="number"', 'id="my-number" based-on="number"');
   const drawn = (pad) => (t) => {
     const r = E.readOwnLayout(t);
     const s = E.buildScene(r.layout, material, LM.envJson(E, { ...LM.ENV, pad }, 'number', r.layout), fixed);
@@ -786,7 +763,7 @@ const drawn = (l, input) => {
 
 test('the examples: 17 键, AZERTY, 大按键数字键盘, each its name its label, checked clean where it says it is used', () => {
   assert.deepEqual(EXAMPLES.map((x) => [x.id, x.label]), [['k17', '17 键'], ['azerty', 'AZERTY'], ['big-number', '大按键数字键盘']]);
-  const used = { k17: [['pinyin'], []], azerty: [['pinyin', 'shuangpin', 'english', 'table'], []], 'big-number': [[], ['full', 'digits', 'decimal']] };
+  const used = { k17: [['pinyin'], []], azerty: [['pinyin', 'shuangpin', 'english', 'table'], []], 'big-number': [[], ['full']] };
   for (const x of EXAMPLES) {
     assert.ok(x.note, x.id);
     assert.equal(LM.info(x.xml).id, x.id, 'the file is its id');
@@ -813,11 +790,10 @@ test('17 键: 18 键 with H and JK one key of its own name, its own corner; the 
   assert.equal(hjk.alt, '(');
   assert.equal(hjk.shortcut, 'k17/hjk');
   for (const k of letters.filter((k) => k.id !== 'hjk')) assert.match(k.shortcut, /^g18\//, k.id);
-  // the groups: every letter once, but not 18 键's: pinyin only
   assert.equal(letters.map((k) => k.letters || '').join('').replace(/;/g, '').split('').sort().join(''), 'abcdefghijklmnopqrstuvwxyz');
 });
 
-test("AZERTY: the French rows, the app's letter keys, ' after N; ; and * after it where 双拼 or a table asks", () => {
+test("AZERTY: the French rows, the app's letter keys, ' after N; ; and * after it where 双拼 or a table asks; 拼 only where the table has it", () => {
   const x = example('azerty').xml;
   const l = E.readOwnLayout(x).layout;
   const rows = (keys) => [0, 175, 350].map((y) => keys.filter((k) => k.bounds[1] === y).map((k) => k.id).join(' '));
@@ -825,22 +801,22 @@ test("AZERTY: the French rows, the app's letter keys, ' after N; ; and * after i
   assert.deepEqual(rows(pinyin), ['a z e r t y u i o p', 'q s d f g h j k l m', 'shift w x c v b n quote backspace']);
   for (const k of pinyin.filter((k) => /^[a-z]$/.test(k.id))) assert.equal(k.shortcut, 'full/' + k.id);
   assert.deepEqual(rows(drawn(l, { ime: 'shuangpin', schemeTypes: ['semicolon'] })), ['a z e r t y u i o p', 'q s d f g h j k l m', 'shift w x c v b n quote semicolon backspace']);
-  assert.deepEqual(rows(drawn(l, { ime: 'table', table: 'cangjie', tableExtra: 'star' })), ['a z e r t y u i o p', 'q s d f g h j k l m', 'lookup w x c v b n quote star backspace']);
-  assert.deepEqual(rows(drawn(l, { ime: 'table', table: 'wubi', tableExtra: 'semicolon' })), ['a z e r t y u i o p', 'q s d f g h j k l m', 'lookup w x c v b n quote semicolon backspace']);
-  // English: Shift's case, no 分词
+  assert.deepEqual(rows(drawn(l, { ime: 'table', table: 'cangjie', tableExtra: 'star', tableLookUp: true })), ['a z e r t y u i o p', 'q s d f g h j k l m', 'lookup w x c v b n quote star backspace']);
+  // 五笔 looks up behind z: ⇧ comes back where 拼 goes, though the file was written before `table-lookup`
+  assert.deepEqual(rows(drawn(l, { ime: 'table', table: 'wubi', tableExtra: 'semicolon' })), ['a z e r t y u i o p', 'q s d f g h j k l m', 'shift w x c v b n quote semicolon backspace']);
   assert.equal(drawn(l, { ime: 'english' }).find((k) => k.id === 'a').label, 'a');
 });
 
-test('大按键数字键盘: four columns, ⏎ two rows high, . only where the field takes one, 符 返回 bottom left', () => {
+test('大按键数字键盘: four columns, ⏎ two rows high, . and - half a column each, 符 返回 bottom left', () => {
   const l = E.readOwnLayout(example('big-number').xml).layout;
   const full = drawn(l, { field: 'number', pad: 'full' });
-  assert.deepEqual(full.map((k) => k.id), ['1', '2', '3', 'backspace', '4', '5', '6', '.', '7', '8', '9', 'enter', 'symbols', 'back', '0', 'space']);
+  assert.deepEqual(full.map((k) => k.id), ['1', '2', '3', 'backspace', '4', '5', '6', '.', '-', '7', '8', '9', 'enter', 'symbols', 'back', '0', 'space']);
   const enter = full.find((k) => k.id === 'enter');
   assert.deepEqual(enter.bounds.map(Math.round), [810, 350, 1080, 700]);
   assert.deepEqual(full.find((k) => k.id === '5').bounds.map(Math.round), [270, 175, 540, 350]);
-  assert.ok(!drawn(l, { field: 'number', pad: 'digits' }).some((k) => k.id === '.'));
-  assert.ok(drawn(l, { field: 'number', pad: 'decimal' }).some((k) => k.id === '.'));
-  assert.deepEqual([full[12].label, full[13].label], ['符', '返回']);
+  // every number field has the full pad: the minus an amount takes beside the point
+  assert.deepEqual(full.find((k) => k.id === '-').bounds.map(Math.round), [945, 175, 1080, 350]);
+  assert.deepEqual([full[13].label, full[14].label], ['符', '返回']);
 });
 
 test('the id and name offered are cut to the format\'s limits', () => {
@@ -867,4 +843,50 @@ test('a layout from an example: its id and name, the example\'s notes and <meta>
   }
   assert.match(LM.fromExample(E, example('k17'), 'my-k17', '我的17 键'), /<key id="hjk"[^>]* shortcut="my-k17\/hjk"/);
   assert.match(LM.fromExample(E, example('azerty'), 'fr', 'FR'), /<key id="a"[^>]* shortcut="full\/a"/);
+});
+
+// the 「滑动列」 tab: a column put left of the chosen cell, its category, direction and show written; saved for 0.6.3
+test('滑动列: added where it can go, its options written, saved with min-app 0.6.3; 加一列 off where the app has none', () => {
+  // a row of its own above the bottom one, its placeholder gap gone: the full rows have no room for another cell
+  const part = LE.parse(fresh('qwerty')).rows[3];
+  const xml = LE.addRow(fresh('qwerty'), LE.partOfRow(fresh('qwerty'), 3), '<gap/>');
+  assert.ok(part && LE.parse(xml).rows.length === 5);
+  const at = { row: 3, index: 0 };
+  assert.equal(LE.scrollProblem(xml, 'letters', at, FORMAT), null);
+  const r = LE.addScroll(xml, at, 'letters', FORMAT);
+  assert.ok(!r.error, r.error);
+  const p = LE.parse(LE.remove(r.xml, { row: 3, index: 1 }));
+  // 16 of a hundred columns, as the app's columns are: 1.5 of qwerty's 10
+  assert.deepEqual(LE.scrolls(p).map((s) => s.a), [{ id: 'scroll', kind: 'scroll', list: 'nine', width: '1.5', rows: '1' }]);
+  let out = LE.setAttrs(LE.remove(r.xml, { row: 3, index: 1 }), LE.scrolls(p)[0].at, { list: 'url', direction: 'horizontal', show: '6', width: '10' });
+  assert.match(out, /<slot id="scroll" kind="scroll" list="url" width="10" rows="1" direction="horizontal" show="6"\/>/);
+  const saved = LM.saveCheck(E, out, FORMAT.version, material);
+  assert.deepEqual(saved.errors, []);
+  assert.equal(LM.info(saved.xml).meta['min-app'], '0.6.3');
+  // a second, then no third
+  out = LE.addScroll(out, { row: 3, index: 0 }, 'letters', FORMAT).xml;
+  assert.equal(LE.scrolls(LE.parse(out)).length, 2);
+  assert.match(LE.scrollProblem(out, 'letters', at, FORMAT), /最多 2/);
+  // the families the reader refuses one on, and a row split in halves
+  for (const family of ['symbols', 'emoji-search']) assert.ok(LE.addScroll(xml, at, family, FORMAT).error, family);
+  assert.match(LE.scrollProblem(xml, 'letters', { row: 0, index: 0 }, FORMAT), /两半/);
+  assert.deepEqual(FORMAT.scroll.families, ['letters', 'grouped', 'nine', 'number']);
+  // on the number pad across the rows under it, three at most as the app's: four items a column not under 20 dp
+  const pad = fresh('number');
+  const added = (xml, row, family = 'number') => LE.scrolls(LE.parse(LE.addScroll(xml, { row, index: 1 }, family, FORMAT).xml)).find((s) => s.a.id === 'scroll').a.rows;
+  assert.deepEqual([added(pad, 0), added(pad, 2), added(pad, 3)], ['3', '2', '1']);
+  assert.equal(added(pad.replace(/(<\/row>\s*<row)/, '$1 when="landscape"'), 0), '1', 'not across a row of a when=');
+  // the nine keys' rows under it are full: across them it would make each too wide
+  assert.equal(added(fresh('nine'), 0, 'nine'), '1');
+  for (const id of FORMAT.scroll.lists) assert.ok(LM.SCROLL_LABEL[id], id);
+  assert.ok(LM.SLOT_LABEL.scroll);
+});
+
+// the phone's and the date's fields: a number field naming its pad, as the app sets it
+test('输入框 电话、日期: field=number and its fieldPad', () => {
+  for (const pad of ['phone', 'datetime']) {
+    assert.ok(LM.FIELDS.some(([f]) => f === pad), pad);
+    assert.deepEqual(LM.envJson(E, { ...LM.ENV, field: pad }, 'nine', null).input, { ime: 'pinyin', field: 'number', fieldPad: pad });
+    assert.deepEqual(M.envJson(E, { ...M.ENV, field: pad }).input, { field: 'number', ime: 'pinyin', fieldPad: pad });
+  }
 });

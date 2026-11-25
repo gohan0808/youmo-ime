@@ -10,24 +10,46 @@ import android.graphics.ColorFilter
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.PixelFormat
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffColorFilter
+import android.graphics.RectF
 import android.graphics.drawable.Drawable
 import org.fcitx.fcitx5.android.scene.Box
 import org.fcitx.fcitx5.android.scene.theme.Argb
 
 /**
- * A theme's icon ([PackIcons.Outline]) in [tint] (its icon-color), rastered once at [pixelWidth] × [pixelHeight]
- * (the size it shows at, the canvas's scale applied, as a vector drawable's raster is) and drawn as that bitmap
- * in its bounds after: a key's display list redrawn each frame does not fill thousands of curves again.
- * The paths drawn as the web's preview draws them (CanvasPainter.icon): placed by [SvgSubset.Icon.fit], one
- * without a colour of its own in the tint, one with its own colour faded by the tint's alpha, each times its opacity.
+ * Rastered once at the size it shows at and drawn as that bitmap after: a key's display list redrawn each frame
+ * does not fill thousands of curves again. The paths drawn as the web's preview draws them (CanvasPainter.icon).
+ * A PNG or WebP is decoded at that size already ([PackIcons.Raster]), centred: in [tint] where [tintMask], else in its
+ * own colours at [tint]'s alpha.
  */
-class PackIconDrawable(private val outline: PackIcons.Outline, private val tint: Argb, private val pixelWidth: Int, private val pixelHeight: Int) : Drawable() {
+class PackIconDrawable(
+    private val icon: PackIcons.PackIcon,
+    private val tint: Argb,
+    private val pixelWidth: Int,
+    private val pixelHeight: Int,
+    private val tintMask: Boolean = false,
+) : Drawable() {
 
     private val raster: Bitmap? by lazy { raster() }
     private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
+    private var alpha = OPAQUE.toInt()
+    private val dst = RectF()
+
+    // an ImageView sets its own filter (null too) on any drawable it shows: a mask must not be cleared by that
+    private val mask =
+        if (icon is PackIcons.Raster && tintMask) PorterDuffColorFilter(tint.value or OPAQUE_RGB, PorterDuff.Mode.SRC_IN) else null
+
+    init {
+        paint.colorFilter = mask
+    }
 
     private fun raster(): Bitmap? {
         if (pixelWidth <= 0 || pixelHeight <= 0 || tint.transparent) return null
+        val outline = when (icon) {
+            is PackIcons.Raster -> return icon.bitmap
+            is PackIcons.Outline -> icon
+        }
         val b = Bitmap.createBitmap(pixelWidth, pixelHeight, Bitmap.Config.ARGB_8888)
         val c = Canvas(b)
         val fit = outline.icon.fit(Box(0.0, 0.0, pixelWidth.toDouble(), pixelHeight.toDouble()))
@@ -44,20 +66,31 @@ class PackIconDrawable(private val outline: PackIcons.Outline, private val tint:
     }
 
     override fun draw(canvas: Canvas) {
-        raster?.let { canvas.drawBitmap(it, null, bounds, paint) }
+        val r = raster ?: return
+        if (icon !is PackIcons.Raster) {
+            paint.alpha = alpha
+            canvas.drawBitmap(r, null, bounds, paint)
+            return
+        }
+        // the drawn size is in pixels of the box, the bounds in the canvas's units; a bitmap lent is of another size
+        val w = icon.width * bounds.width().toFloat() / pixelWidth
+        val h = icon.height * bounds.height().toFloat() / pixelHeight
+        dst.set(bounds.exactCenterX() - w / 2, bounds.exactCenterY() - h / 2, bounds.exactCenterX() + w / 2, bounds.exactCenterY() + h / 2)
+        paint.alpha = Math.round(alpha * tint.alpha / OPAQUE).toInt()
+        canvas.drawBitmap(r, null, dst, paint)
     }
 
-    // its raster's size: an ImageView's wrap_content (a bar's or a panel's icon) as a vector's 24 dp would be
+    // an ImageView's wrap_content as a vector's 24 dp would be
     override fun getIntrinsicWidth(): Int = pixelWidth
 
     override fun getIntrinsicHeight(): Int = pixelHeight
 
     override fun setAlpha(alpha: Int) {
-        paint.alpha = alpha
+        this.alpha = alpha
     }
 
     override fun setColorFilter(colorFilter: ColorFilter?) {
-        paint.colorFilter = colorFilter
+        paint.colorFilter = mask ?: colorFilter
     }
 
     @Deprecated("Deprecated in Java")
@@ -65,5 +98,6 @@ class PackIconDrawable(private val outline: PackIcons.Outline, private val tint:
 
     private companion object {
         const val OPAQUE = 255.0
+        const val OPAQUE_RGB = 0xFF000000.toInt()
     }
 }

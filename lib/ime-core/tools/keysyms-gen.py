@@ -10,10 +10,9 @@ build calls it; its outputs are committed.
 Writes
   lib/ime-core/src/main/kotlin/org/fcitx/fcitx5/android/host/KeySymUnicodeTable.kt
   lib/ime-core/src/main/kotlin/org/fcitx/fcitx5/android/host/KeySymNameTable.kt
-  lib/ime-core/src/test/resources/keysyms/{name-to-sym,sym-to-name,unicode-to-sym,sym-to-unicode}.tsv
+  lib/ime-core/src/test/resources/keysyms/{name-to-sym,unicode-to-sym,sym-to-unicode}.tsv
 
-The golden files are what fcitx's `Key::keySymFromString`, `keySymToString` (non-localized),
-`keySymFromUnicode` and `keySymToUnicode` return (src/lib/fcitx-utils/key.cpp:622-800 at the
+The golden files are what fcitx's `Key::keySymFromString`, `keySymFromUnicode` and `keySymToUnicode` return (src/lib/fcitx-utils/key.cpp:622-800 at the
 pinned commit), computed here by the same rules over the downloaded tables. unicode-to-sym and
 sym-to-unicode list only the entries the plain rules don't give (see their header lines), so the
 tests walk every code point / keysym and fall back to the rule.
@@ -63,14 +62,11 @@ def parse(src):
     names = re.findall(r'^"([^"]*)",?$', names_block, re.M)
     values_block = nt[nt.index("keyValueByNameOffset[]"):nt.index("keyNameOffsetByValue[]")]
     values = [int(v, 16) for v in re.findall(r"^0x([0-9a-f]+),?$", values_block, re.M)]
-    by_value = [(int(s, 16), int(o)) for s, o in
-                re.findall(r"^\{0x([0-9a-f]+), (\d+)\},?$", nt[nt.index("keyNameOffsetByValue[]"):], re.M)]
     assert len(names) == len(values) and names == sorted(names, key=lambda n: n.encode())
-    assert [s for s, _ in by_value] == sorted({s for s, _ in by_value})
     enum = {m[0]: int(m[1], 16) for m in re.findall(r"^FcitxKey_(\w+) = 0x([0-9a-fA-F]+),", src["keysymgen.h"], re.M)}
     compat = [(n, enum[s]) for n, s in re.findall(r'\{"([^"]+)", FcitxKey_(\w+)\}', src["keynametable-compat.h"])]
     assert [n for n, _ in compat] == sorted((n for n, _ in compat), key=lambda n: n.encode())
-    return sym_ucs, names, values, by_value, compat, enum
+    return sym_ucs, names, values, compat, enum
 
 
 # key.cpp:689-736
@@ -123,34 +119,26 @@ def unicode_table(sym_ucs):
     # entries split over two lines in keydata.h (Odoubleacute, ...) count too: 777, not 738
     rows = "".join("        " + " ".join(f"0x{k:04x}, 0x{u:04x}," for k, u in c) + "\n" for c in chunks(sym_ucs, 6))
     return (HEADER % ("1995-1997 Peter Mattis, Spencer Kimball and Josh MacDonald", "keydata.h") +
-            "// keysym_to_unicode_tab: keysym, code point, keysym, code point, ..., sorted by keysym.\n"
+            "// keysym_to_unicode_tab: keysym, code point, ..., sorted by keysym.\n"
             '@Suppress("LargeClass", "MagicNumber")\ninternal object KeySymUnicodeTable {\n'
             f"    val PAIRS = intArrayOf(\n{rows}    )\n}}\n")
 
 
-def name_table(names, values, by_value, compat):
+def name_table(names, values, compat):
     def blob(entries, per_line):
         lines = [" ".join(c) for c in chunks(entries, per_line)]
         return "\n".join(f'        "{l} " +' for l in lines[:-1]) + f'\n        "{lines[-1]}"'
     named = blob([f"{n}={v:x}" for n, v in zip(names, values)], 6)
-    rev = blob([f"{s:x}={names[o]}" for s, o in by_value], 6)
     comp = blob([f"{n}={v:x}" for n, v in compat], 5)
     return (HEADER % ("2015~2025 CSSlayer <wengxt@gmail.com>", "keynametable.h, keynametable-compat.h") + f'''
-/**
- * fcitx's key names as `name=keysym` words (keysyms in hex). Strings, not arrays, so the class
- * initializer stays far below the JVM's 64 KB method limit; parsed on first use.
- */
+/** `name=keysym` words in strings, not arrays, so the class initializer stays below the JVM's 64 KB method limit. */
 @Suppress("LargeClass")
 internal object KeySymNameTable {{
-    /** `keyNameList` + `keyValueByNameOffset`: sorted by name (bytes; all ASCII). */
+    /** `keyNameList` + `keyValueByNameOffset`: sorted by name. */
     val names: Array<String> by lazy {{ words(NAMES).map {{ it.substringBefore('=') }}.toTypedArray() }}
     val nameSyms: IntArray by lazy {{ words(NAMES).map {{ it.substringAfter('=').toInt(16) }}.toIntArray() }}
 
-    /** `keyNameOffsetByValue`: the one name `keySymToString` gives a keysym, sorted by keysym. */
-    val valueSyms: IntArray by lazy {{ words(BY_VALUE).map {{ it.substringBefore('=').toInt(16) }}.toIntArray() }}
-    val valueNames: Array<String> by lazy {{ words(BY_VALUE).map {{ it.substringAfter('=') }}.toTypedArray() }}
-
-    /** keynametable-compat.h `keyNameListCompat`: fcitx 4's names, sorted. */
+    /** `keyNameListCompat`: fcitx 4's names, sorted. */
     val compatNames: Array<String> by lazy {{ words(COMPAT).map {{ it.substringBefore('=') }}.toTypedArray() }}
     val compatSyms: IntArray by lazy {{ words(COMPAT).map {{ it.substringAfter('=').toInt(16) }}.toIntArray() }}
 
@@ -158,9 +146,6 @@ internal object KeySymNameTable {{
 
     private const val NAMES =
 {named}
-
-    private const val BY_VALUE =
-{rev}
 
     private const val COMPAT =
 {comp}
@@ -174,7 +159,7 @@ def main():
     a = ap.parse_args()
     cache = a.cache or tempfile.mkdtemp(prefix="keysyms-")
     os.makedirs(cache, exist_ok=True)
-    sym_ucs, names, values, by_value, compat, enum = parse(fetch(cache))
+    sym_ucs, names, values, compat, enum = parse(fetch(cache))
     table = dict(sym_ucs)
     # keydata.cpp:12-21 stable-sorts the table by ucs; key.cpp:719-731 then binary-searches it with
     # mid = (min + max) / 2, so a code point with several keysyms gets the one the search lands on
@@ -196,7 +181,7 @@ def main():
     with open(os.path.join(KT_DIR, "KeySymUnicodeTable.kt"), "w") as f:
         f.write(unicode_table(sym_ucs))
     with open(os.path.join(KT_DIR, "KeySymNameTable.kt"), "w") as f:
-        f.write(name_table(names, values, by_value, compat))
+        f.write(name_table(names, values, compat))
 
     def tsv(name, header, rows):
         with open(os.path.join(RES, name), "w") as f:
@@ -209,8 +194,6 @@ def main():
         resolved.setdefault(n, v)
     tsv("name-to-sym.tsv", "name, Key::keySymFromString(name)",
         sorted(((n, f"{v:x}") for n, v in resolved.items()), key=lambda r: r[0].encode()))
-    tsv("sym-to-name.tsv", "keysym, Key::keySymToString(keysym, Portable); unlisted keysyms give \"\"",
-        [(f"{s:x}", names[o]) for s, o in by_value])
     rows = []
     for u in range(0x110000 + 0x100):
         got = from_unicode(u, ucs_sorted, enum)
@@ -232,7 +215,7 @@ def main():
             rows.append((f"{s:x}", f"{got:x}"))
     tsv("sym-to-unicode.tsv", "keysym, Key::keySymToUnicode(keysym) for 0..0xffff and the edges of "
         "0x01000000+ where it isn't sym (0x20-0x7e, 0xa0-0xff), sym-0x01000000 (0x01000000-0x0110ffff) or 0", rows)
-    print(f"{len(sym_ucs)} keysym/unicode pairs, {len(names)} names, {len(by_value)} by value, {len(compat)} compat")
+    print(f"{len(sym_ucs)} keysym/unicode pairs, {len(names)} names, {len(compat)} compat")
 
 
 if __name__ == "__main__":

@@ -6,6 +6,8 @@ package org.fcitx.fcitx5.android.engine.session
 
 import org.fcitx.fcitx5.android.engine.data.PinyinData
 import org.fcitx.fcitx5.android.engine.data.PinyinDataBuilder
+import org.fcitx.fcitx5.android.engine.data.pinyinDataOf
+import org.fcitx.fcitx5.android.engine.data.syl
 import org.fcitx.fcitx5.android.engine.learn.Learner
 import org.fcitx.fcitx5.android.engine.learn.row
 import org.fcitx.fcitx5.android.engine.phrase.CustomPhrases
@@ -15,6 +17,10 @@ import org.fcitx.fcitx5.android.engine.pinyin.PinyinSegmenter
 import org.fcitx.fcitx5.android.engine.pinyin.ShuangpinScheme
 import org.fcitx.fcitx5.android.engine.pinyin.ShuangpinSegmenter
 import org.fcitx.fcitx5.android.engine.pinyin.Syllables
+import org.fcitx.fcitx5.android.engine.rerank.MatrixKernel
+import org.fcitx.fcitx5.android.engine.rerank.Reranker
+import org.fcitx.fcitx5.android.engine.rerank.SentencePicker
+import org.fcitx.fcitx5.android.engine.rerank.TinyModel
 import org.fcitx.fcitx5.android.engine.session.Action.Backspace
 import org.fcitx.fcitx5.android.engine.session.Action.CommitRaw
 import org.fcitx.fcitx5.android.engine.session.Action.Key
@@ -66,43 +72,26 @@ class PinyinSessionTest {
         val atOnce = session()
         assertEquals(byKey.type("nihao"), atOnce.typeAll("nihao"))
         assertEquals(byKey.apply(Select(0)), atOnce.apply(Select(0)))
-        // over the words offered after a commit
         assertEquals(byKey.type("ma"), atOnce.typeAll("ma"))
-        // a separator the segmenter does not read: a key at a time
         byKey.apply(Reset)
         atOnce.apply(Reset)
         assertEquals(byKey.type("xi'an"), atOnce.typeAll("xi'an"))
     }
 
     @Test
-    fun keysHandedOverTogetherReadAsTypedOneByOneWithARerankerAndARefiner() {
-        // as Engines builds them, and what each was asked last: the decoder keeps what it read
-        // before, and the two reorder what is shown, its last reading first, then its second
+    fun keysHandedOverTogetherReadAsTypedOneByOneWithAReranker() {
+        // as Engines builds them: the decoder keeps what it read, its last reading first, then its second
         class Weighed {
             var picked = ""
-            val refined = ArrayList<String>()
-            val session = PinyinSession(
-                data, PinyinSegmenter(), pageSize = 20,
-                refiner = { context, readings, scores, _ ->
-                    refined += "$context $readings $scores"
-                    1
-                },
-            ) { context, readings, scores ->
+            val session = PinyinSession(data, PinyinSegmenter(), pageSize = 20) { context, readings, scores ->
                 picked = "$context $readings $scores"
                 readings.lastIndex
             }
         }
         val byKey = Weighed()
         val atOnce = Weighed()
-        val typed = byKey.session.type("nizai")
-        assertTrue(typed.refines)
-        assertEquals(typed, atOnce.session.typeAll("nizai"))
+        assertEquals(byKey.session.type("nizai"), atOnce.session.typeAll("nizai"))
         assertEquals(byKey.picked, atOnce.picked)
-        // the pause: the refiner weighs the input as last read
-        assertEquals(byKey.session.apply(Action.Refine), atOnce.session.apply(Action.Refine))
-        assertEquals(1, atOnce.refined.size)
-        assertEquals(byKey.refined, atOnce.refined)
-        // after a commit, which the reranker reads before the input
         assertEquals(byKey.session.apply(Select(0)), atOnce.session.apply(Select(0)))
         assertEquals(byKey.session.type("ma"), atOnce.session.typeAll("ma"))
         assertEquals(byKey.picked, atOnce.picked)
@@ -125,7 +114,6 @@ class PinyinSessionTest {
         val committed = session.apply(Select(0))
         assertEquals("我", committed.commit)
         assertEquals("", committed.preedit)
-        // what the model saw after 我
         assertTrue(committed.predicting)
         assertEquals(listOf("再"), committed.candidates)
         val next = session.apply(Select(0))
@@ -165,11 +153,9 @@ class PinyinSessionTest {
         session.apply(Reset)
         session.type("wo")
         session.apply(Select(0))
-        // a key ends the prediction; after 我, 再 is the likelier
         val typed = session.type("zai")
         assertFalse(typed.predicting)
         assertEquals("再", typed.candidates.first())
-        // until reset
         session.apply(Reset)
         assertEquals("在", session.type("zai").candidates.first())
     }
@@ -177,7 +163,6 @@ class PinyinSessionTest {
     @Test
     fun theRerankerPutsItsPickFirstAfterWhatWasCommitted() {
         val contexts = ArrayList<String>()
-        // the decoder's last reading, whatever it is
         val session = PinyinSession(data, PinyinSegmenter(), pageSize = 20) { context, readings, scores ->
             assertEquals(readings.size, scores.size)
             contexts += context
@@ -198,7 +183,6 @@ class PinyinSessionTest {
         assertEquals(List(5) { committed }, contexts)
         session.apply(Select(typed.candidates.indexOf("拟")))
         assertEquals(committed + "拟", contexts.last())
-        // gone with a reset
         session.apply(Reset)
         contexts.clear()
         session.type("ni")
@@ -214,11 +198,10 @@ class PinyinSessionTest {
         val session = PinyinSession(data, PinyinSegmenter(), pageSize = 20, user = user, learnTo = learner.learnTo()) { _, readings, _ ->
             chosen?.let { readings.indexOf(it).takeIf { i -> i >= 0 } } ?: readings.lastIndex
         }
-        // the decoder's best, second now: nothing new
         assertEquals("你在", session.type("nizai").candidates[1])
         session.apply(Select(1))
         assertEquals(0, user.size)
-        // the reranker's, put in as shown, twice: a text of none's, the user's word (U-06), used, not corrected to
+        // the reranker's, put in as shown, twice: a text of none's, the user's word, used, not corrected to
         val picked = session.type("nizai").candidates[0]
         chosen = picked
         repeat(2) {
@@ -227,7 +210,7 @@ class PinyinSessionTest {
             session.type("nizai")
         }
         assertEquals(1, user.size)
-        // without the reranker the decoder's first stays first, whatever its words' counts made it: the text used there comes next (U-02)
+        // without the reranker the decoder's first stays first, whatever its words' counts made it: the text used there comes next
         val plain = PinyinSession(data, PinyinSegmenter(), user = user, learnTo = learner.learnTo()).type("nizai").candidates
         assertEquals(picked, plain[1])
     }
@@ -237,7 +220,6 @@ class PinyinSessionTest {
         val session = session()
         session.type("wo")
         session.apply(Select(0))
-        // an arrow the app took: 在 again, as with no context
         session.passedOn()
         assertEquals("在", session.type("zai").candidates.first())
     }
@@ -275,7 +257,6 @@ class PinyinSessionTest {
         session.apply(Select(0))
         session.type("zai")
         session.apply(Select(0))
-        // 在 erased, 我 left: as if the app's text were 我
         session.apply(Action.Backspace)
         val fresh = session().apply { apply(Action.Context("我")) }
         assertEquals(fresh.type("zai").candidates, session.type("zai").candidates)
@@ -337,7 +318,6 @@ class PinyinSessionTest {
         session.apply(Action.Context("他说我"))
         session.type("zai")
         assertEquals("我", contexts.last())
-        // it did move
         session.apply(Reset)
         session.apply(Action.Context("他说你"))
         session.type("zai")
@@ -350,7 +330,6 @@ class PinyinSessionTest {
         session.apply(Action.Context(("我".repeat(70) + "再").takeLast(64)))
         session.type("zai")
         assertEquals("我".repeat(70) + "再", contexts.last())
-        // but not a word of it that happens to be
         session.apply(Action.Context("他说再"))
         session.type("zai")
         assertEquals("他说再", contexts.last())
@@ -380,7 +359,7 @@ class PinyinSessionTest {
         val session = PinyinSession(data, PinyinSegmenter(), user = learner.model, prediction = false, learnTo = learner.learnTo())
         fun pairs() = learner.log.state.pairs.keys.map { it.prev + it.next }
         fun pickZai() = assertEquals("在", session.type("zai").let { session.apply(Pick(it.candidates.indexOf("在"))) }.commit)
-        // ending in a mark or digits: no word before (a space is trimmed, letters are a word: LastWord, U-52)
+        // ending in a mark or digits: no word before (a space is trimmed, letters are a word: LastWord)
         for (text in listOf("我。", "我123")) {
             session.apply(Action.Context(text))
             pickZai()
@@ -390,11 +369,9 @@ class PinyinSessionTest {
         session.apply(Action.Context("他说我", cleared = true))
         pickZai()
         assertEquals(emptyList<String>(), pairs())
-        // what follows goes on from what was picked here
         session.type("jian")
         assertEquals("见", session.apply(Select(0)).commit)
         assertEquals(listOf("在见"), pairs())
-        // what was committed deleted to nothing: nothing before
         session.apply(Reset)
         session.type("wo")
         assertEquals("我", session.apply(Select(0)).commit)
@@ -429,9 +406,52 @@ class PinyinSessionTest {
         session.type("nizai")
         assertTrue(committed.length > 64)
         assertEquals(committed.toString(), contexts.last())
-        // cut where a pair of chars is not split
         val pairs = "\uD840\uDC00".repeat(100)
         assertEquals(pairs.substring(74) + "b", recentTail("a" + pairs + "b"))
+    }
+
+    /** Past what the large model reads whole, a commit reads about what it added, emoji (a pair, one token) and all. */
+    @Test
+    fun aCommitAfterALongContextReadsAboutWhatItAdded() {
+        val tiny = TinyModel(window = 128)
+        var run = 0
+        val kernel = object : MatrixKernel {
+            override fun times(q: ByteBuffer, scales: FloatArray, rows: Int, columns: Int, x: FloatArray, y: FloatArray) =
+                MatrixKernel.JVM.times(q, scales, rows, columns, x, y)
+
+            override fun timesManyQ8(q: ByteBuffer, scales: FloatArray, rows: Int, columns: Int, x: FloatArray, m: Int, y: FloatArray) {
+                // the attention's input, once a layer for each node run
+                if (rows == 3 * tiny.width) run += m
+                super.timesManyQ8(q, scales, rows, columns, x, m, y)
+            }
+        }
+        val reranker = Reranker(tiny.load(kernel = kernel))
+        var read = 0
+        val handed = ArrayList<String>()
+        val picker = object : SentencePicker {
+            override fun pick(context: String, readings: List<String>, scores: List<Float>) = reranker.pick(context, readings, scores)
+
+            override fun prewarm(context: String) {
+                val before = run
+                reranker.prewarm(context)
+                read += run - before
+                handed += context
+            }
+        }
+        val session = PinyinSession(data, PinyinSegmenter(), reranker = picker)
+        // as many emoji as the host's 64 chars hold: 128 chars of them and what follows are fewer tokens than the model reads
+        session.apply(Action.Context("\uD83D\uDE02".repeat(31) + "我"))
+        val syllables = listOf("ni", "hao", "wo", "zai", "ma", "jian")
+        val random = java.util.Random(5)
+        val commits = 120
+        repeat(commits) {
+            session.type(syllables[random.nextInt(syllables.size)])
+            session.apply(Select(0))
+        }
+        // read anew on each commit, as it slides, the emoji-led context would cost some 97 tokens a commit for a while
+        val tokens = read / tiny.layers
+        assertTrue("$tokens tokens over $commits commits", tokens < commits * 5)
+        assertEquals(128, handed.last().codePointCount(0, handed.last().length))
     }
 
     @Test
@@ -453,7 +473,6 @@ class PinyinSessionTest {
         val picked = session.apply(Select(s.candidates.indexOf("拟")))
         assertEquals("", picked.commit)
         assertEquals("拟zai", picked.preedit)
-        // after 拟, 再 is the likelier
         assertEquals("再", picked.candidates.first())
         assertEquals("拟再", session.apply(Select(0)).commit)
     }
@@ -465,7 +484,6 @@ class PinyinSessionTest {
         assertEquals("你hao", session.apply(Select(s.candidates.indexOf("你"))).preedit)
         assertEquals("你ha", session.apply(Backspace).preedit)
         assertEquals("你h", session.apply(Backspace).preedit)
-        // the last key after 你 goes, and 你 with it: ni is read again
         val back = session.apply(Backspace)
         assertEquals("ni", back.preedit)
         assertEquals("你", back.candidates.first())
@@ -474,7 +492,6 @@ class PinyinSessionTest {
         assertEquals("", empty.preedit)
         assertEquals(emptyList<String>(), empty.candidates)
         assertTrue(empty.handled)
-        // nothing typed: the app's backspace
         assertFalse(session.apply(Backspace).handled)
     }
 
@@ -489,11 +506,9 @@ class PinyinSessionTest {
         assertEquals(1, second.page)
         assertTrue(second.hasPreviousPage)
         assertEquals(1, first.candidates.size)
-        // the last page does not turn further
         var s = second
         while (s.hasNextPage) s = session.apply(NextPage)
         assertEquals(s, session.apply(NextPage))
-        // a pick is on the page shown
         val picked = session.apply(Select(0))
         assertEquals(s.candidates.single(), picked.commit)
         session.type("ni")
@@ -502,7 +517,6 @@ class PinyinSessionTest {
         val past = session.apply(Select(1))
         assertEquals("", past.commit)
         assertTrue(past.handled)
-        // with no candidates, space or a digit is the app's
         session.apply(Reset)
         assertFalse(session.apply(Select(0)).handled)
         assertThrows(IllegalArgumentException::class.java) { session(pageSize = 0) }
@@ -517,9 +531,7 @@ class PinyinSessionTest {
         assertTrue(all.size > 1)
         assertEquals(all.drop(1).take(1), session.candidates(1, 1).map { it.text })
         assertTrue(session.candidates(all.size, 5).isEmpty())
-        // the second, though page one shows only the first
         assertEquals(all[1], session.apply(Pick(1)).commit)
-        // nothing there: the pick is ignored while something is typed
         session.type("ni")
         assertTrue(session.apply(Pick(all.size)).handled)
         session.apply(Reset)
@@ -535,7 +547,6 @@ class PinyinSessionTest {
         assertFalse(session.reads('\''))
         session.type("xi")
         assertTrue(session.reads('\''))
-        // 双拼 reads what its scheme gives a part, ; in 微软
         val ms = PinyinSession(data, ShuangpinSegmenter(ShuangpinScheme.MICROSOFT), spell = true)
         assertTrue(ms.reads(';'))
         assertFalse(session.reads(';'))
@@ -543,7 +554,6 @@ class PinyinSessionTest {
 
     @Test
     fun 双拼SemicolonIsAFinalAfterAnInitialAndPunctuationElsewhere() {
-        // 微软 alone of the schemes gives ; a final
         val scheme = ShuangpinScheme.MICROSOFT
         val session = PinyinSession(data, ShuangpinSegmenter(scheme), spell = true)
         // nothing typed: the app's punctuation key
@@ -556,7 +566,6 @@ class PinyinSessionTest {
         assertFalse(after.handled)
         assertEquals(ni.candidates.first(), after.commit)
         assertEquals("", after.preedit)
-        // after an initial: ing, read into the input
         val xing = session.type("x;")
         assertTrue(xing.handled)
         assertEquals("xing", xing.preedit)
@@ -569,8 +578,7 @@ class PinyinSessionTest {
         assertFalse(segmenter.readsAfter("x;", ';'))
     }
 
-    // review M1 (061 简拼 in the middle): lj is lan, whose l alone and j; (jing) would read ; as ing:
-    // typed whole, ; after it is still the app's, 蓝 committed and ；typed; so after wo xian
+    // typed whole, ; after it is still the app's
     @Test
     fun 双拼SemicolonAfterAWholeSyllableIsPunctuationThoughAKeyAloneWouldReadIt() {
         val session = PinyinSession(data, ShuangpinSegmenter(ShuangpinScheme.MICROSOFT), spell = true)
@@ -585,8 +593,7 @@ class PinyinSessionTest {
         assertEquals(woxian.candidates.first(), after.commit)
     }
 
-    // ; as ing where the data has no word of the syllable: x read alone, as 简拼 in the middle, for a
-    // word typed before, ; shown as typed; with none typed, both keys as typed
+    // ; reads as ing only for a word typed before
     @Test
     fun 双拼SemicolonWithNoWordOfItsSyllableIsShownAsTyped() {
         val data = pinyinDataOf(Triple("先", "xian", -3f))
@@ -599,17 +606,6 @@ class PinyinSessionTest {
         assertEquals("x ;", PinyinSession(data, ShuangpinSegmenter(ShuangpinScheme.MICROSOFT), spell = true, user = user).type("x;").preedit)
     }
 
-    // review M2: a syllable typed whole and the next only begun is still being typed (小鹤 ni then h),
-    // though n alone and ih (chang) read it to its end: the refiner waits
-    @Test
-    fun 双拼EndsOnASyllableOnlyAsTypedInWholeSyllables() {
-        val xiaohe = ShuangpinSegmenter(ShuangpinScheme.XIAOHE)
-        assertFalse(endsOnSyllable(xiaohe.segment("nih")))
-        assertTrue(endsOnSyllable(xiaohe.segment("nihc")))
-        assertFalse(endsOnSyllable(xiaohe.segment("ufmuh")))
-        assertTrue(endsOnSyllable(xiaohe.segment("xm")))
-    }
-
     @Test
     fun enterCommitsWhatWasTyped() {
         val session = session()
@@ -618,7 +614,6 @@ class PinyinSessionTest {
         val raw = session.apply(CommitRaw)
         assertEquals("你hao", raw.commit)
         assertEquals("", raw.preedit)
-        // text as typed ends the context: nothing to predict
         assertFalse(raw.predicting)
         assertFalse(session.apply(CommitRaw).handled)
     }
@@ -632,7 +627,6 @@ class PinyinSessionTest {
         assertEquals("先", xian.candidates.first())
         assertEquals("xian", xian.preedit)
         session.apply(Reset)
-        // a separator first is the app's, and ends predictions shown
         assertFalse(session.apply(Key('\'')).handled)
         session.type("wo")
         assertTrue(session.apply(Select(0)).predicting)
@@ -640,7 +634,6 @@ class PinyinSessionTest {
         assertFalse(separator.handled)
         assertFalse(separator.predicting)
         assertEquals(emptyList<String>(), separator.candidates)
-        // input nothing reads: kept as typed
         assertEquals("vvv", session.type("vvv").preedit)
     }
 
@@ -650,7 +643,6 @@ class PinyinSessionTest {
         val s = session.type("nihc")
         assertEquals("你好", s.candidates.first())
         assertEquals("ni hao", s.preedit)
-        // a key still being typed shows as typed
         session.apply(Reset)
         assertEquals("ni h", session.type("nih").preedit)
     }
@@ -672,7 +664,6 @@ class PinyinSessionTest {
         assertFalse(s.handled)
         assertFalse(s.predicting)
         assertTrue(s.candidates.isEmpty())
-        // 我 would have 再 follow it; after the space it is no context
         session.type("wo")
         assertTrue(session.apply(Select(0)).predicting)
         assertFalse(session.apply(Key(' ')).handled)
@@ -684,18 +675,12 @@ class PinyinSessionTest {
         val session = session(pageSize = 20)
         val s = session.type("nizai")
         session.apply(Select(s.candidates.indexOf("拟")))
-        // 再 reads the rest
         assertEquals("拟再", session.apply(Key('.')).commit)
-        // nothing to commit: the key is the app's all the same
         val separator = session.apply(Key('\''))
         assertEquals("", separator.commit)
         assertFalse(separator.handled)
     }
 
-    /**
-     * The decoder's words past the first it gives are read as the list is shown, or turned, that
-     * far: none is left out, and the count is told once they are all read.
-     */
     @Test
     fun wordsPastTheFirstAreReadAsTheListIsShownThatFar() {
         val session = PinyinSession(many(), PinyinSegmenter(), pageSize = 10)
@@ -704,7 +689,6 @@ class PinyinSessionTest {
         assertTrue(shown.hasNextPage)
         assertEquals(chars.drop(90).take(5), session.candidates(90, 5).map { it.text })
         assertEquals(chars, session.candidates(0, 200).map { it.text })
-        // counted now, and the last page turned to
         var page = session.apply(NextPage)
         repeat(8) { page = session.apply(NextPage) }
         assertEquals(100, page.total)
@@ -712,7 +696,6 @@ class PinyinSessionTest {
         assertFalse(page.hasNextPage)
     }
 
-    /** A page turned past the first words reads the decoder's next. */
     @Test
     fun aPageTurnedPastTheFirstWordsReadsTheNext() {
         val session = PinyinSession(many(), PinyinSegmenter(), pageSize = 10)
@@ -722,7 +705,6 @@ class PinyinSessionTest {
         assertEquals(chars.subList(60, 70), page.candidates)
         page = session.apply(NextPage)
         assertEquals(chars.subList(70, 80), page.candidates)
-        // the page shown's first
         assertEquals(chars[70], session.apply(Select(0)).commit)
     }
 
@@ -732,12 +714,10 @@ class PinyinSessionTest {
         val session = PinyinSession(many(), PinyinSegmenter(), pageSize = 10, phraseBook = PhraseBook(CustomPhrases.parse("shi,70=短语")) {})
         session.type("shi")
         val first = session.candidates(0, 80).map { it.text }
-        // order 70: the 70th
         assertEquals("短语", first[69])
         assertEquals(first, session.candidates(0, 200).map { it.text }.take(80))
     }
 
-    /** A word forgotten on a page past the decoder's first words went back to the first page. */
     @Test
     fun aWordForgottenPastTheFirstWordsStaysOnThePageShown() {
         val many = many()
@@ -745,7 +725,6 @@ class PinyinSessionTest {
         val session = PinyinSession(many, PinyinSegmenter(), pageSize = 10, user = learner.model, learnTo = learner.learnTo())
         session.type("shi")
         repeat(7) { session.apply(NextPage) }
-        // never learned, so not offered (PY-33)
         assertFalse(Offer.FORGET in session.offers(72))
         // learned only as the word before another: something to forget, its place not moved
         val word = session.candidates(72, 1).single().text

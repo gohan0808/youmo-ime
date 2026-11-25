@@ -19,8 +19,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** The settings the engine reads of a config file's [text], as the host reads it at start. */
-private fun settingsOf(text: String) = EngineOptions().apply { load(text) }.toSettings()
+/** As the host reads it at start. */
+private fun settingsOf(text: String) = EngineOptions().apply { load(text) }.toSettings(ModelLevel.HIGH)
 
 /** What the golden files don't say outright: the settings the engine reads, the default rule, pages. */
 class EngineOptionsTest {
@@ -28,17 +28,19 @@ class EngineOptionsTest {
     @Test
     fun `the settings are what the engine reads`() {
         val options = EngineOptions().apply {
-            load("PageSize=5\nModelLevel=Low\n[Fuzzy]\nL_N=True\nNG_GN=False\n[Wubi]\nOrderPolicy=Freq\nHint=False\n")
+            load("PageSize=5\nModelLevel=Low\nSpacePicksPrediction=True\n[Fuzzy]\nL_N=True\nNG_GN=False\n[Wubi]\nOrderPolicy=Freq\nHint=False\nOfferWords=False\n")
         }
-        val settings = options.toSettings()
+        val settings = options.toSettings(ModelLevel.HIGH)
         assertEquals(5, settings.pageSize)
         assertEquals(ModelLevel.LOW, settings.modelLevel)
         assertEquals(setOf(Fuzzy.L_N), settings.fuzzy)
         assertFalse(settings.typos)
-        assertEquals(TableSettings(autoSelect = true, hint = false, orderByUse = true, keyLabels = KeyLabels.NONE), settings.tables["Wubi"])
-        // every table's settings are pushed, defaults too (native-last:app/src/main/cpp/androidengine/androidengine.cpp:473-491)
+        assertTrue(settings.spacePicksPrediction)
+        assertFalse(settingsOf("").spacePicksPrediction)
+        assertEquals(TableSettings(autoSelect = true, hint = false, orderByUse = true, keyLabels = KeyLabels.NONE, offerWords = false), settings.tables["Wubi"])
+        // every table's settings are pushed, defaults too
         assertEquals(InputMethodCatalog.TABLES.values.map { it.group }.toSet(), settings.tables.keys)
-        assertEquals(TableSettings(true, false, false, KeyLabels.NAMES), settings.tables["Cangjie"])
+        assertEquals(TableSettings(true, false, false, KeyLabels.NAMES, offerWords = true), settings.tables["Cangjie"])
         // a table with no roots has nothing of them to set
         assertNull(settings.tables["Erbi"]?.keyLabels)
         assertEquals(true, settingsOf("[Wubi]\nOrderPolicy=Fast\n").tables["Wubi"]?.orderByUse)
@@ -53,9 +55,9 @@ class EngineOptionsTest {
         assertEquals(defaults, settingsOf("ShuangpinProfile=Custom\nPageSize=99\nPrediction=1\n=x\n[Fuzzy]\nL_N=yes\n"))
         assertEquals(ShuangpinScheme.MICROSOFT, settingsOf("ShuangpinProfile=MS\n").scheme)
         for (level in ModelLevel.entries) assertEquals(defaults.copy(modelLevel = level), settingsOf("ModelLevel=${level.key}\n"))
-        assertEquals(ModelLevel.HIGH, settingsOf("ModelLevel=Max\n").modelLevel)
+        assertEquals(ModelChoice.AUTO.key, EngineOptions().apply { load("ModelLevel=Max\n") }[EngineSettings.MODEL_LEVEL])
         // the switch before the levels is not carried over: no one used it but us
-        assertEquals(ModelLevel.HIGH, settingsOf("SentenceModel=False\n").modelLevel)
+        assertEquals(ModelChoice.AUTO.key, EngineOptions().apply { load("SentenceModel=False\n") }[EngineSettings.MODEL_LEVEL])
         // read for the keyboard: 九键英文 spells a letter at a time where English suggests nothing
         assertFalse(settingsOf("EnglishSuggest=False\n").englishSuggest)
         assertTrue(settingsOf("EnglishSuggest=maybe\n").englishSuggest)
@@ -66,23 +68,56 @@ class EngineOptionsTest {
 
     @Test
     fun `a default not written follows a change of default`() {
-        // design §2.1: a default is written commented, so the file says nothing of it
+        // a default is written commented, so the file says nothing of it
         val text = EngineOptions().apply { load("ModelLevel=Medium\n") }.text()
         assertTrue("# PageSize=7" in text.lines())
         assertEquals(listOf("ModelLevel=Medium"), text.lines().filter { it.isNotEmpty() && !it.startsWith("#") })
         assertTrue(IniFile.read(text).find("PageSize") == null)
     }
 
+    // the old default, high, was written commented: untouched and chosen high alike go to 自动; low and medium stay
+    @Test
+    fun `the level is the device's unless one was chosen`() {
+        fun read(text: String) = EngineOptions().apply { load(text) }.toSettings(ModelLevel.MEDIUM).modelLevel
+        assertRows(
+            listOf(
+                "" to ModelLevel.MEDIUM,
+                "# ModelLevel=High\n" to ModelLevel.MEDIUM,
+                "ModelLevel=Medium\n" to ModelLevel.MEDIUM,
+                "ModelLevel=Low\n" to ModelLevel.LOW,
+                "ModelLevel=High\n" to ModelLevel.HIGH,
+                "ModelLevel=Foo\n" to ModelLevel.MEDIUM,
+                "ModelLevel=Auto\n" to ModelLevel.MEDIUM,
+            ),
+            { it.first },
+        ) { (text, level) -> assertEquals(level, read(text)) }
+        assertEquals(ModelLevel.LOW, EngineOptions().toSettings(ModelLevel.LOW).modelLevel)
+        assertEquals(ModelLevel.HIGH, EngineOptions().apply { load("ModelLevel=High\n") }.toSettings(ModelLevel.LOW).modelLevel)
+        assertEquals(ModelChoice.AUTO.key, EngineOptions().apply { load("# ModelLevel=High\n") }[EngineSettings.MODEL_LEVEL])
+    }
+
+    // so 0.6.2 reads its own default, high, after a downgrade
+    @Test
+    fun `auto is saved commented, a chosen level written`() {
+        val auto = EngineOptions().apply { load("ModelLevel=Auto\n") }.text().lines()
+        assertTrue(auto.toString(), "# ModelLevel=Auto" in auto)
+        assertFalse(auto.toString(), auto.any { it.startsWith("ModelLevel=") })
+        assertTrue("ModelLevel=High" in EngineOptions().apply { load("ModelLevel=High\n") }.text().lines())
+        assertEquals(ModelChoice.HIGH, ModelChoice.of("High"))
+        assertEquals(ModelChoice.AUTO, ModelChoice.of("high"))
+        assertEquals(ModelChoice.AUTO, ModelChoice.entries.first())
+    }
+
     @Test
     fun `a bad value falls back to the default, not to the nearest`() {
-        // configuration.cpp:117-123: unmarshall fails → reset()
+        // Configuration: an unmarshall failure resets
         val options = EngineOptions().apply { load("PageSize=11\n") }
         assertEquals("7", options["PageSize"])
     }
 
     @Test
     fun `a table's group missing takes the table's defaults, one there a fresh group's`() {
-        // option.h:435-438: a full load starts a sub-configuration fresh; reset() is engineTable(hint)
+        // a full load starts a sub-configuration fresh; reset() is engineTable(hint)
         assertEquals("False", EngineOptions().apply { load("") }["Cangjie/Hint"])
         assertEquals("True", EngineOptions().apply { load("[Cangjie]\nAutoSelect=False\n") }["Cangjie/Hint"])
     }
@@ -126,21 +161,33 @@ class EngineOptionsTest {
 
     @Test
     fun candidateReadingIsOffTillSetAndAnUnknownStyleIsOff() {
-        assertEquals(ReadingStyle.OFF, EngineOptions().toSettings().candidateReading)
-        assertEquals(ReadingStyle.ZHUYIN, EngineOptions().apply { load("CandidateReading=Zhuyin\n") }.toSettings().candidateReading)
+        assertEquals(ReadingStyle.OFF, EngineOptions().toSettings(ModelLevel.HIGH).candidateReading)
+        assertEquals(ReadingStyle.ZHUYIN, EngineOptions().apply { load("CandidateReading=Zhuyin\n") }.toSettings(ModelLevel.HIGH).candidateReading)
         assertEquals("Off", EngineOptions().apply { load("CandidateReading=Ruby\n") }["CandidateReading"])
     }
 
     // 首页至少几个单字: 2 till set (a 0.6.0 file has no line), 0 to 5 as stored, anything else 2
     @Test
     fun strokeSinglesAreTwoTillSetAndAValueOutOfRangeIsTwo() {
-        assertEquals(2, EngineOptions().toSettings().strokeSingles)
-        assertEquals(0, EngineOptions().apply { load("StrokeSingles=0\n") }.toSettings().strokeSingles)
-        assertEquals(5, EngineOptions().apply { load("StrokeSingles=5\n") }.toSettings().strokeSingles)
+        assertEquals(2, EngineOptions().toSettings(ModelLevel.HIGH).strokeSingles)
+        assertEquals(0, EngineOptions().apply { load("StrokeSingles=0\n") }.toSettings(ModelLevel.HIGH).strokeSingles)
+        assertEquals(5, EngineOptions().apply { load("StrokeSingles=5\n") }.toSettings(ModelLevel.HIGH).strokeSingles)
         val bad = listOf("9" to "above 5", "x" to "not a number", "-1" to "below 0", "" to "empty")
         assertRows(bad, { (value, why) -> "StrokeSingles=$value, $why: 2" }) { (value, _) ->
-            assertEquals(2, EngineOptions().apply { load("StrokeSingles=$value\n") }.toSettings().strokeSingles)
+            assertEquals(2, EngineOptions().apply { load("StrokeSingles=$value\n") }.toSettings(ModelLevel.HIGH).strokeSingles)
         }
+    }
+
+    // an older config has no key: the code stays pinyin
+    @Test
+    fun shuangpinKeysShownIsOffTillSetAndOnTheShuangpinPage() {
+        assertEquals(false, EngineOptions().toSettings(ModelLevel.HIGH).shuangpinKeysShown)
+        assertEquals(true, EngineOptions().apply { load("ShuangpinKeysShown=True\n") }.toSettings(ModelLevel.HIGH).shuangpinKeysShown)
+        assertEquals(false, EngineOptions().apply { load("ShuangpinKeysShown=x\n") }.toSettings(ModelLevel.HIGH).shuangpinKeysShown)
+        val options = EngineOptions()
+        assertTrue(options.setPage(InputMethodCatalog.SHUANGPIN, ConfigTree.of(mapOf(EngineSettings.SHUANGPIN_KEYS_SHOWN to "True"))))
+        assertEquals(true, options.toSettings(ModelLevel.HIGH).shuangpinKeysShown)
+        assertEquals("True", options.page(InputMethodCatalog.SHUANGPIN)!!.leaves()[EngineSettings.SHUANGPIN_KEYS_SHOWN])
     }
 
 }

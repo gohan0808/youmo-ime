@@ -6,6 +6,7 @@ package org.fcitx.fcitx5.android.engine.learn
 
 import org.fcitx.fcitx5.android.engine.assertRows
 import org.fcitx.fcitx5.android.engine.pinyin.NineKeyLetters
+import org.fcitx.fcitx5.android.engine.pinyin.ZhuyinKeys
 import org.fcitx.fcitx5.android.engine.runtime.EngineSettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -47,8 +48,7 @@ class KindsTest {
         assertNull(Kinds.keysTag("spk:Ziranma"))
     }
 
-    // what a learned code's keys are shown by (LearningOps' report, the learned list): a qk: kind filed as its keyboard is, a
-    // layout's own too (060-render-p3 T9b), an spk: kind by the grouped keyboards alone; the built-in two as they were
+    // a qk: kind is shown as its keyboard, an spk: kind by the grouped keyboards alone
     @Test
     fun keysOfIsTheKeyboardEachGroupedKindWasTypedOn() {
         assertEquals(NineKeyLetters.G14, Kinds.keysOf(Kinds.keys(NineKeyLetters.G14.tag())))
@@ -63,9 +63,31 @@ class KindsTest {
         assertNull(Kinds.keysOf(Kinds.shuangpinKeys("MS", own.tag())))
         // 双拼's nine keys' groups under qk: a layout's own (NineKeyLetters.filedAs); no keyboard at all: none, the keys shown as stored
         assertNotEquals(nine, Kinds.keysOf(Kinds.keys(nine.tag())))
-        assertNull(Kinds.keysOf(Kinds.keys("q,q")))
+        assertNull(Kinds.keysOf(Kinds.keys("q,1")))
+        // a keyboard lacking letters (q on two keys, the rest on none) is one all the same
+        assertEquals("q,q", Kinds.keysOf(Kinds.keys("q,q"))?.tag())
         assertNull(Kinds.keysOf(Kinds.FULL))
         assertNull(Kinds.keysOf(Kinds.nineKeys(NineKeyLetters.STANDARD.tag())))
+    }
+
+    // what a pin's keys and the learning report show: zhuyin's symbols and marks, a grouped keyboard's letters, else as stored
+    @Test
+    fun shownKeysReadZhuyinAndGroupedCodes() {
+        assertEquals("ㄋㄧˇ", Kinds.shownKeys(Code(Kinds.ZHUYIN_DACHEN, "${ZhuyinKeys.symbolCode('ㄋ')}${ZhuyinKeys.symbolCode('ㄧ')}${ZhuyinKeys.toneCode(3)}")))
+        assertEquals("ㄅㄉㄚ ˙", Kinds.shownKeys(Code(Kinds.ZHUYIN_NINE, "${ZhuyinKeys.groupCode(0)}${ZhuyinKeys.toneCode(5)}")))
+        assertEquals("bn ui", Kinds.shownKeys(Code(Kinds.keys(NineKeyLetters.G14.tag()), "${NineKeyLetters.G14.key('b')}${NineKeyLetters.G14.key('u')}")))
+        assertEquals("nihao", Kinds.shownKeys(Code(Kinds.FULL, "nihao")))
+    }
+
+    // a zhuyin code with a tone is one written before 0.6.3: no other kind's keys are tones
+    @Test
+    fun readNoMoreIsAZhuyinCodeWithATone() {
+        val ni = "${ZhuyinKeys.symbolCode('ㄋ')}${ZhuyinKeys.symbolCode('ㄧ')}"
+        assertTrue(Kinds.readNoMore(Code(Kinds.ZHUYIN_DACHEN, ni + ZhuyinKeys.toneCode(3))))
+        assertTrue(Kinds.readNoMore(Code(Kinds.ZHUYIN_NINE, "${ZhuyinKeys.groupCode(0)}${ZhuyinKeys.toneCode(5)}")))
+        assertFalse(Kinds.readNoMore(Code(Kinds.ZHUYIN_DACHEN, ni)))
+        assertFalse(Kinds.readNoMore(Code(Kinds.keys(NineKeyLetters.G14.tag()), "${ZhuyinKeys.toneCode(3)}")))
+        assertFalse(Kinds.readNoMore(Code(Kinds.FULL, "ni")))
     }
 
     @Test
@@ -97,7 +119,6 @@ class KindsTest {
         val xiaohe = Kinds.takeLayout(Kinds.shuangpinKeys("Xiaohe", g18.tag()), g18.tag())
         assertEquals("Ziranma:" + g18.tag(), ziranma)
         assertNotEquals(ziranma, xiaohe)
-        // the nine keys' and the 14 keys' as before: their tag
         val standard = NineKeyLetters.STANDARD.tag()
         assertEquals(standard, Kinds.takeLayout(Kinds.nineKeys(standard), standard))
         assertEquals(NineKeyLetters.G14.tag(), Kinds.takeLayout(Kinds.keys(NineKeyLetters.G14.tag()), NineKeyLetters.G14.tag()))

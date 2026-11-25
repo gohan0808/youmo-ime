@@ -103,6 +103,7 @@ object Pages {
         Page("behavior", "模拟应用行为") { behavior() },
         Page("webview", "WebView 本地网页") { webview() },
         Page("switch", "切换场景") { switching() },
+        Page("form", "表单：跨框保持数字键盘") { form() },
     )
 
     private fun PageBuilder.types() {
@@ -156,6 +157,18 @@ object Pages {
         field("max10", "最多 10 个字（maxLength=10）") { filters = arrayOf(InputFilter.LengthFilter(MAX_LENGTH)) }
     }
 
+    // the first four step on with →|, as a form's fields do, a number field among them
+    private fun PageBuilder.form() {
+        val next = EditorInfo.IME_ACTION_NEXT or EditorInfo.IME_FLAG_NAVIGATE_NEXT
+        field("form_text", "请录入数字", ime = next)
+        field("form_text2", "普通文本", ime = next)
+        field("form_amount", "金额（小数）", NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL, next)
+        field("form_text3", "普通文本", ime = next)
+        field("form_default", "没设类型的 EditText（多行文本）", TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE)
+        field("form_email", "邮箱", TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS)
+        field("form_note", "备注（多行）", TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE)
+    }
+
     private const val MAX_LENGTH = 10
     private const val DEFAULT_INTERVAL_S = 3
 
@@ -165,8 +178,7 @@ object Pages {
         field("chat_clear", "聊天：发送后 text.clear()，不重启输入", ime = EditorInfo.IME_ACTION_SEND) {
             onAction = { text.clear(); true }
         }
-        // setText makes the framework restart the input itself: at once up to Android 10, deferred from
-        // API 30 (Editor.scheduleRestartInputForSetText), through invalidateInput from API 34 (no new connection)
+        // setText makes the framework restart input: at once up to Android 10, deferred from 30, invalidateInput from 34
         field("chat_settext", "聊天：发送后 setText(\"\")（框架自己让输入法重来：10 直接重启，30 起延后，34 起 invalidateInput）", ime = EditorInfo.IME_ACTION_SEND) {
             onAction = { setText(""); true }
         }
@@ -308,12 +320,13 @@ object Pages {
             }
             loadUrl("file:///android_asset/web.html")
         }
-        // the page left: its renderer and scripts gone with it, not logging into the next page's log
-        // (detached first: a WebView destroyed while still in the window is warned against)
+        // the page left: the WebView detached and destroyed, not logging into the next page
         onLeave += {
             (web.parent as? ViewGroup)?.removeView(web)
             web.destroy()
         }
+        // above the page, so it is on screen whichever field is focused; a button takes no focus from the page
+        button("restartInput（网页）") { imm.restartInput(web); log.event("webview", "app", JSONObject().put("detail", "restartInput")) }
         add(web)
     }
 

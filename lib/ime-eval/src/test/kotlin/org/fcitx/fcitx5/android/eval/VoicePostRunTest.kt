@@ -5,7 +5,18 @@
 package org.fcitx.fcitx5.android.eval
 
 import org.fcitx.fcitx5.android.assertRows
+import org.fcitx.fcitx5.android.engine.InputMethodCatalog
+import org.fcitx.fcitx5.android.engine.data.PinyinDataBuilder
+import org.fcitx.fcitx5.android.engine.data.ReadingSource
+import org.fcitx.fcitx5.android.engine.data.syl
+import org.fcitx.fcitx5.android.engine.pinyin.Syllables
+import org.fcitx.fcitx5.android.engine.platform.Blobs
+import org.fcitx.fcitx5.android.engine.runtime.Engines
+import org.fcitx.fcitx5.android.engine.runtime.UserWord
 import org.fcitx.fcitx5.android.eval.VoicePostRun.Mark
+import org.fcitx.fcitx5.android.input.voice.VoiceChoice
+import org.fcitx.fcitx5.android.input.voice.VoiceHomophones
+import org.fcitx.fcitx5.android.input.voice.VoicePost
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -13,6 +24,12 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.io.FileNotFoundException
+import java.nio.ByteBuffer
+import java.util.concurrent.Executor
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.coroutines.startCoroutine
 
 class VoicePostRunTest {
 
@@ -24,6 +41,60 @@ class VoicePostRunTest {
         val t = VoicePostRun.tokens("我买了3.5斤 Apple，好吗？ok.")
         assertEquals(listOf("我", "买", "了", "3.5", "斤", "apple", "好", "吗", "ok"), t.words)
         assertEquals(listOf(null, null, null, null, null, Mark.COMMA, null, Mark.QUESTION, Mark.PERIOD), t.after)
+    }
+
+    // as the app's VoiceChoice.Talk: a stretch kept is the next one's before, one of spaces too (its context none)
+    @Test
+    fun theUsersWordsArePutInEachStretchAfterTheOneKeptBeforeItAsTheAppDoes() {
+        val data = PinyinDataBuilder()
+            .unigram("<unk>", -7f, 0f)
+            .unigram("推导", -5f, 0f).entry("推导", syl("tui", "dao"))
+            .unigram("这个", -3f, 0f).entry("这个", syl("zhe", "ge"))
+            // 攻势 far less likely than 公式 alone, far likelier after 这个
+            .unigram("公式", -4.7f, 0f).entry("公式", syl("gong", "shi"))
+            .unigram("攻势", -9f, 0f).entry("攻势", syl("gong", "shi"))
+            .bigram("这个", "攻势", -0.5f, 0f)
+            .apply {
+                for ((c, syllable, tone) in listOf(Triple('公', "gong", 1), Triple('攻', "gong", 1), Triple('式', "shi", 4), Triple('势', "shi", 4))) {
+                    charTone(c.code, Syllables.id(syllable), tone)
+                    charReading(ReadingSource.MANDARIN, c.code, Syllables.id(syllable), tone)
+                }
+            }
+            .build()
+            .toByteArray()
+        val blobs = Blobs { path -> if (path == InputMethodCatalog.PINYIN_DATA) ByteBuffer.wrap(data) else throw FileNotFoundException(path) }
+        Engines(blobs, null, warmUps = Executor { it.run() }).use { engines ->
+            val gongshi = engines.voiceHomophones(listOf(UserWord("攻势", "gong shi", UserWord.Kind.ADDED)))
+            val words = VoicePostRun.Words(engines, gongshi)
+            fun picked(vararg raw: String) = words.picked(raw.map { VoicePost.Stretch(it) }).map { it.raw }
+            // the same through the app's own Talk, each stretch chosen then kept: the copy of its rule cannot drift
+            fun talked(vararg raw: String): List<String> {
+                val language = object : VoiceChoice.Language {
+                    override suspend fun boundaries(texts: List<String>) = emptyMap<String, IntArray>()
+                    override suspend fun logProbs(texts: List<String>): FloatArray? = null
+                    override suspend fun pick(homophones: VoiceHomophones, text: String, before: String, blocked: List<String>) =
+                        engines.voicePick(homophones, text, before, blocked)
+                }
+                val talk = VoiceChoice.Talk(gongshi, emptyList(), language, launch = {}, show = {})
+                return raw.map { r -> now { talk.chosen(r) }.also(talk::kept) }
+            }
+            assertRows(
+                "after 推导这个: taken" to { assertEquals(listOf("推导这个", "攻势"), picked("推导这个", "公式")) },
+                "after a stretch of a space: alone, left" to { assertEquals(listOf("推导这个", " ", "公式"), picked("推导这个", " ", "公式")) },
+                "next to it, as the app's Talk" to { assertEquals(talked("推导这个", "公式"), picked("推导这个", "公式")) },
+                "after a stretch of a space, as the app's Talk" to {
+                    assertEquals(talked("推导这个", " ", "公式"), picked("推导这个", " ", "公式"))
+                },
+                "after an empty stretch, as the app's Talk" to { assertEquals(talked("推导这个", "", "公式"), picked("推导这个", "", "公式")) },
+            )
+        }
+    }
+
+    // a suspending call that never suspends, run on this thread
+    private fun <T> now(block: suspend () -> T): T {
+        var out: Result<T>? = null
+        block.startCoroutine(Continuation(EmptyCoroutineContext) { out = it })
+        return checkNotNull(out) { "suspended" }.getOrThrow()
     }
 
     @Test
@@ -51,8 +122,7 @@ class VoicePostRunTest {
 
     @Test
     fun theReferencesNumbersAreComparedAsWritten() {
-        // numbers are the polish tagger's call, not this scorer's: a reference written in Han
-        // numerals against a typed 2026 is wrong; the same form on both sides is not
+        // numbers are the tagger's call: Han numerals against 2026 is wrong, the same form on both sides is not
         val s = VoicePostRun.Score()
         VoicePostRun.score("二零二六年", "2026年", s)
         assertEquals(4, s.wordErrors) // 2026 for one numeral, three numerals missing, 年 matched
@@ -111,8 +181,6 @@ class VoicePostRunTest {
         assertEquals(listOf("0.00%", "0.00%"), out.lines()[1].split('\t').subList(3, 5))
     }
 
-    // a clip with no written reference in a set with them: read as none (the set's ref, written false), left out
-    // of the written scores and counted as unwritten
     @Test
     fun aClipWithoutAWrittenReferenceInASetWithThemIsLeftOutAndCounted() = assertRows(
         "the key missing" to { leftOutAndCounted("seg-u.jsonl", "") },
@@ -174,14 +242,12 @@ class VoicePostRunTest {
         assertEquals("今天个人很好。" to "tagged: guard=false untagged=0 unfound=0 long=0", texts(false))
     }
 
-    // what says whether a tagged run's scores can be trusted: windows found where the stream is, and
-    // the clips that could not be replayed as the app's counted, not scored wrong without a word
+    // a tagged run's trust: windows found where the stream is, and clips not replayable counted, not scored wrong
     @Test
     fun taggedWindowsAreFoundAlongTheClipAndTheOnesNotReplayedCounted() {
         val tagger = tmp.newFile("polish-tagger.json")
         tagger.writeText("""{"ops": ["keep", "del"], "after": ["", "，", "。"], "num": ["none"]}""")
-        // 80 characters none of which repeats, so a window is found in one place only: two stretches, and
-        // windows [0, 40) then [16, 80) (WINDOW 64), the one deleted (75) only in the second
+        // 80 characters none of which repeats, so a window is found in one place only
         val han = (0 until 80).map { Char(0x5000 + it) }.joinToString("")
         fun labels(f: (Int) -> Int) = (0 until 80).joinToString(", ", "[", "]") { "${f(it)}" }
         val file = tmp.newFile("seg-w.jsonl")
@@ -217,7 +283,7 @@ class VoicePostRunTest {
         assertTrue(e.message!!, e.message!!.contains("short.wav"))
     }
 
-    // R25r5 F8020: a file not there (a path mistyped) ended the run with a stack trace, not a failed run naming it
+    // a file not there (a path mistyped) is a failed run naming it, not a stack trace
     @Test
     fun aFileNotThereIsRefusedNamingIt() = assertRows(
         "a set's clips: read outside the parsing, an IOException not caught" to {

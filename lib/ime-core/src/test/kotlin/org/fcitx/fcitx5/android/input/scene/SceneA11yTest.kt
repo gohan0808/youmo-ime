@@ -9,6 +9,7 @@ import org.fcitx.fcitx5.android.scene.KeyState
 import org.fcitx.fcitx5.android.scene.Parsed
 import org.fcitx.fcitx5.android.scene.Scene
 import org.fcitx.fcitx5.android.scene.engine.Env
+import org.fcitx.fcitx5.android.scene.engine.Input
 import org.fcitx.fcitx5.android.scene.engine.SceneBuilder
 import org.fcitx.fcitx5.android.scene.engine.Shift
 import org.junit.Assert.assertEquals
@@ -104,13 +105,29 @@ class SceneA11yTest {
     fun theLockSaidAsWhatATapDoes() {
         assertEquals("锁定", board("symbols.xml", SceneData.portrait).said("lock"))
         assertEquals("解锁", board("symbols.xml", SceneData.portrait.copy(states = mapOf("lock" to setOf(KeyState.Locked)))).said("lock"))
-        // R26 F8188: a toggle whose words are no resource's name (a layout's own text) is said as written, no state added
+        // a toggle whose words are no resource's name is said as written, no state added
         val lock = board("symbols.xml", SceneData.portrait.copy(states = mapOf("lock" to setOf(KeyState.Locked)))).keys.first { it.id == "lock" }
         val plain = KeyNode(
             lock.id, lock.copy, lock.kind, lock.role, lock.shape, lock.bounds, lock.hit, lock.anchor, lock.up, lock.states, lock.faces,
             "锁", lock.actions,
         )
         assertEquals("锁", SceneA11y.of(plain, said::get).description)
+    }
+
+    // the number pad's 返回, held to lock: still said 返回, its long click worded as the lock's tap, locked its state
+    @Test
+    fun theNumberPads返回SaysItsHoldAndItsLock() {
+        val words = said + (SceneA11y.LOCKED to "已锁定")
+        fun back(locked: Boolean): KeySpeech {
+            val env = SceneData.portrait.copy(input = Input(pad = "full"), states = if (locked) mapOf("lock" to setOf(KeyState.Locked)) else emptyMap())
+            return SceneA11y.of(board("number.xml", env).keys.first { it.id == "back" }, words::get)
+        }
+        assertEquals(listOf("锁定", null), back(false).let { listOf(it.longClick, it.state) })
+        assertEquals(listOf("解锁", "已锁定"), back(true).let { listOf(it.longClick, it.state) })
+        assertEquals("still said 返回, locked or not", listOf("返回", "返回"), listOf(back(false).description, back(true).description))
+        // a board with no words for the lock: the plain long click
+        assertNull(SceneA11y.of(board("number.xml", SceneData.portrait.copy(input = Input(pad = "full"))).keys.first { it.id == "back" }) { null }.longClick)
+        assertNull(scene().speech("space").longClick)
     }
 
     @Test
